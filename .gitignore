@@ -1,0 +1,48 @@
+# macOS files
+.DS_Store
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+.env/
+.virtualenv/
+.pytest_cache/
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# VSCode settings
+.vscode/
+
+# PyInstaller
+*.spec
+dist/
+build/
+
+# Log files
+*.log
+
+# Other
+coverage.xml
+htmlcov/
+*.cover
+*.sqlite3
+
