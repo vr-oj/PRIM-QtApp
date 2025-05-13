@@ -11,11 +11,13 @@ class VideoRecorder:
         fourcc_code = cv2.VideoWriter_fourcc(*fourcc)
         self.writer = cv2.VideoWriter(filename, fourcc_code, fps, frame_size)
         self.is_recording = True
+        self.frame_count = 0
 
     def write_frame(self, frame):
         if self.is_recording:
             # frame must be BGR numpy array
             self.writer.write(frame)
+            self.frame_count += 1
 
     def stop(self):
         self.is_recording = False
@@ -47,6 +49,10 @@ class TrialRecorder:
         csv_fn   = f"{basepath}_{timestamp}.csv"
         self.video = VideoRecorder(video_fn, fps=fps, frame_size=frame_size)
         self.csv   = CSVRecorder(csv_fn)
+
+
+    def video_frame_count(self):
+        return self.video.frame_count
 
     def write(self, frame, t, p):
         # frame: BGR image; t,p floats

@@ -1,10 +1,9 @@
-import cv2
-import math
+import cv2, math
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtGui import QImage, QPainter, QFont
 
 class VideoThread(QThread):
-    frame_ready = pyqtSignal(QImage)
+    frame_ready = pyqtSignal(QImage, object)
 
     def __init__(self, camera_index=0):
         super().__init__()
@@ -31,6 +30,7 @@ class VideoThread(QThread):
         while self.running:
             if self.cap:
                 ret, frame = self.cap.read()
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) if ret else None
                 if not ret:
                     # emit the test image if grab fails
                     img = self.test_img
@@ -44,7 +44,7 @@ class VideoThread(QThread):
                 img = self.test_img
                 self.msleep(100)
 
-            self.frame_ready.emit(img)
+            self.frame_ready.emit(img, frame)
 
     def stop(self):
         self.running = False
