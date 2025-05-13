@@ -1,38 +1,21 @@
-import sys
-import cv2
-
+import sys, cv2
 from PyQt5.QtWidgets import (
-    QApplication,
-    QMainWindow,
-    QWidget,
-    QLabel,
-    QHBoxLayout,
-    QVBoxLayout,
-    QToolBar,
-    QAction,
-    QComboBox,
-    QFileDialog,
-    QDockWidget,
-    QTextEdit,
-    QLineEdit,
-    QPushButton,
-    QStatusBar,
-    QDialog,
-    QFormLayout,
-    QDialogButtonBox,
-    QSpinBox
+    QApplication, QMainWindow, QWidget, QLabel,
+    QHBoxLayout, QVBoxLayout, QToolBar, QAction,
+    QComboBox, QFileDialog, QDockWidget,
+    QTextEdit, QLineEdit, QPushButton,
+    QStatusBar, QDialog, QFormLayout,
+    QDialogButtonBox, QSpinBox
 )
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt, QTimer
-
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
 from threads.video_thread import VideoThread
 from threads.serial_thread import SerialThread
 from recording import TrialRecorder
-from utils import list_serial_ports, timestamped_filename
-
+from utils import list_serial_ports, timestamped_filename, list_cameras
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -154,8 +137,23 @@ class MainWindow(QMainWindow):
         self._timer.timeout.connect(self._update_status)
         self._timer.start(1000)
 
+        from utils import list_cameras
+
+        # Camera selector dropdown
+        self.cam_combo = QComboBox()
+        available = list_cameras(max_idx=4)   # scan indices 0–3
+        for idx in available:
+            self.cam_combo.addItem(f"Camera {idx}", idx)
+        if not available:
+            self.cam_combo.addItem("No cameras found", None)
+        tb.addWidget(self.cam_combo)
+
+
     def _start_video_thread(self):
-        self.video_thread = VideoThread(camera_index=0)
+        idx = self.cam_combo.currentData()
+        if idx is None:
+            idx = 0  # fallback
+        self.video_thread = VideoThread(camera_index=idx)
         self.video_thread.frame_ready.connect(self._on_frame)
         self.video_thread.start()
         self.latest_frame = None
