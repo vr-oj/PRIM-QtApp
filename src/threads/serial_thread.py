@@ -43,6 +43,8 @@ class SerialThread(QThread):
 
                 # Emit to plot
                 self.data_ready.emit(frame, t, p)
+                print(f"[SerialThread] EMIT data_ready → ({frame}, {t:.3f}, {p:.1f})")
+
 
             else:
                 # simulated sine‐wave data at ~10 Hz
