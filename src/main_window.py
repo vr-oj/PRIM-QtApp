@@ -143,7 +143,19 @@ class MainWindow(QMainWindow):
         self.console_dock.setFixedHeight(150)
 
         # ─── Toolbar ────────────────────────────────────────────────
-        tb = QToolBar("Main Toolbar"); self.addToolBar(tb)
+        tb = QToolBar("Main Toolbar")
+        self.addToolBar(tb)
+
+        # — define absolute paths to each icon —
+        icon_dir       = os.path.join(self._base, "icons")
+        plug_path      = os.path.join(icon_dir, "plug.svg")
+        sync_path      = os.path.join(icon_dir, "sync.svg")
+        record_path    = os.path.join(icon_dir, "record.svg")
+        stop_path      = os.path.join(icon_dir, "stop.svg")
+        pump_on_path   = os.path.join(icon_dir, "pump-on.svg")
+        pump_off_path  = os.path.join(icon_dir, "pump-off.svg")
+        file_plus_path = os.path.join(icon_dir, "file-plus.svg")
+        
         tb.setIconSize(QSize(28, 28)); tb.setToolButtonStyle(Qt.ToolButtonIconOnly)
         tb.setFont(QFont("Segoe UI", 10))
         # Serial port dropdown
@@ -153,34 +165,50 @@ class MainWindow(QMainWindow):
             self.port_combo.addItem(f"{port} ({desc})", port)
         tb.addWidget(self.port_combo)
         # Actions
-        plug_icon = os.path.join(self._base, "icons", "plug.svg")
-        self.actConnect = QAction(QIcon(plug_icon), "", self)
+        self.actConnect   = QAction(QIcon(plug_path),      "", self)
         self.actConnect.setToolTip("Connect (Ctrl+K)"); self.actConnect.setShortcut("Ctrl+K")
         tb.addAction(self.actConnect)
-        plug_icon = os.path.join(self._base, "icons", "sync.svg")
-        self.actConnect = QAction(QIcon(plug_icon), "", self)
-        self.actInit.setToolTip("Re‑Sync (Ctrl+I)"); self.actInit.setShortcut("Ctrl+I"); self.actInit.setEnabled(False)
+
+        self.actInit      = QAction(QIcon(sync_path),      "", self)
+        self.actInit.setToolTip("Re‑Sync (Ctrl+I)")
+        self.actInit.setShortcut("Ctrl+I")
+        self.actInit.setEnabled(False)
         tb.addAction(self.actInit)
-        plug_icon = os.path.join(self._base, "icons", "record.svg")
-        self.actConnect = QAction(QIcon(plug_icon), "", self)
-        self.actStart.setToolTip("Start Trial (Ctrl+R)"); self.actStart.setShortcut("Ctrl+R"); self.actStart.setEnabled(False)
+
+        self.actStart     = QAction(QIcon(record_path),    "", self)
+        self.actStart.setToolTip("Start Trial (Ctrl+R)")
+        self.actStart.setShortcut("Ctrl+R")
+        self.actStart.setEnabled(False)
         tb.addAction(self.actStart)
-        plug_icon = os.path.join(self._base, "icons", "stop.svg")
-        self.actConnect = QAction(QIcon(plug_icon), "", self)
-        self.actStop.setToolTip("Stop Trial (Ctrl+T)"); self.actStop.setShortcut("Ctrl+T"); self.actStop.setEnabled(False)
+
+        self.actStop      = QAction(QIcon(stop_path),      "", self)
+        self.actStop.setToolTip("Stop Trial (Ctrl+T)")
+        self.actStop.setShortcut("Ctrl+T")
+        self.actStop.setEnabled(False)
         tb.addAction(self.actStop)
+
         tb.addSeparator()
-        plug_icon = os.path.join(self._base, "icons", "pump-on.svg")
-        self.actConnect = QAction(QIcon(plug_icon), "", self)
-        self.actPumpOn.setToolTip("Pump On (Ctrl+P)"); self.actPumpOn.setShortcut("Ctrl+P"); tb.addAction(self.actPumpOn)
-        seplug_icon = os.path.join(self._base, "icons", "pump=off.svg")
-        self.actConnect = QAction(QIcon(plug_icon), "", self)
-        self.actPumpOff.setToolTip("Pump Off (Ctrl+O)"); self.actPumpOff.setShortcut("Ctrl+O"); tb.addAction(self.actPumpOff)
+
+        self.actPumpOn   = QAction(QIcon(pump_on_path),    "", self)
+        self.actPumpOn.setToolTip("Pump On (Ctrl+P)")
+        self.actPumpOn.setShortcut("Ctrl+P")
+        tb.addAction(self.actPumpOn)
+
+        self.actPumpOff  = QAction(QIcon(pump_off_path),   "", self)
+        self.actPumpOff.setToolTip("Pump Off (Ctrl+O)")
+        self.actPumpOff.setShortcut("Ctrl+O")
+        tb.addAction(self.actPumpOff)
+
         tb.addSeparator()
-        self.sync_icon = QLabel("Sync: ❓"); tb.addWidget(self.sync_icon)
-        plug_icon = os.path.join(self._base, "icons", "file-plus.svg")
-        self.actConnect = QAction(QIcon(plug_icon), "", self)
-        self.actNewSession.setToolTip("New Session (Ctrl+N)"); self.actNewSession.setShortcut("Ctrl+N"); tb.addAction(self.actNewSession)
+
+        self.sync_icon = QLabel("Sync: ❓")
+        tb.addWidget(self.sync_icon)
+
+        self.actNewSession = QAction(QIcon(file_plus_path), "", self)
+        self.actNewSession.setToolTip("New Session (Ctrl+N)")
+        self.actNewSession.setShortcut("Ctrl+N")
+        tb.addAction(self.actNewSession)
+        
         # Camera selector
         self.cam_combo = QComboBox()
         for idx in list_cameras(4): self.cam_combo.addItem(f"Camera {idx}", idx)
