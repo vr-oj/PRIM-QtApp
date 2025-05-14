@@ -32,44 +32,41 @@ class SerialThread(QThread):
             self.ser = None
 
     def run(self):
-        # now we enter the loop
+        # ensure the thread flag is set
         self.running = True
         try:
+            # main loop
             while self.running:
-            if self.ser:
-                raw = self.ser.readline()
-                if not raw:
-                    continue
-                line = raw.decode('utf-8', errors='ignore').strip()
-                log.debug(f"RAW: {line}")
+                if self.ser:
+                    raw = self.ser.readline()
+                    if not raw:
+                        continue
+                    line = raw.decode('utf-8', errors='ignore').strip()
+                    log.debug(f"RAW: {line}")
 
-                # split and strip whitespace
-                parts = [fld.strip() for fld in line.split(',')]
-                if len(parts) < 3:
-                    continue
+                    parts = [fld.strip() for fld in line.split(',')]
+                    if len(parts) < 3:
+                        continue
 
-                try:
-                    # parts[0] = time, parts[1] = frame, parts[2] = pressure
-                    t     = float(parts[0])
-                    frame = int(parts[1])
-                    p     = float(parts[2])
-                except Exception as e:
-                    log.error(f"Parse error: {e}")
-                    continue
+                    try:
+                        t     = float(parts[0])
+                        frame = int(parts[1])
+                        p     = float(parts[2])
+                    except Exception as e:
+                        log.error(f"Parse error: {e}")
+                        continue
 
-                # emit in the order your slot expects (frame, t, p)
-                self.data_ready.emit(frame, t, p)
-                log.debug(f"EMIT → frame={frame}, t={t:.3f}, p={p:.1f}")
-
-            else:
-                # simulated sine‑wave data at ~10 Hz
-                t = time.time() - self.start_time
-                p = 50 + 10 * math.sin(t * math.pi)  # 0.5 Hz sine
-                f = self.fake_t
-                self.fake_t += 1
-                log.debug(f"SIM: frame={f}, t={t:.3f}, p={p:.1f}")
-                self.data_ready.emit(f, t, p)
-                self.msleep(100)
+                    self.data_ready.emit(frame, t, p)
+                    log.debug(f"EMIT → frame={frame}, t={t:.3f}, p={p:.1f}")
+                else:
+                    # simulated sine‑wave data at ~10 Hz
+                    t = time.time() - self.start_time
+                    p = 50 + 10 * math.sin(t * math.pi)
+                    f = self.fake_t
+                    self.fake_t += 1
+                    log.debug(f"SIM: frame={f}, t={t:.3f}, p={p:.1f}")
+                    self.data_ready.emit(f, t, p)
+                    self.msleep(100)
         except Exception as e:
             log.exception(f"Unexpected error in run(): {e}")
         finally:
@@ -79,7 +76,8 @@ class SerialThread(QThread):
                     self.ser.close()
                     log.debug("Serial port closed in run()")
                 except Exception:
-                    log.exception("Error closing serial port")
+                    log.exception("Error closing serial port in run()")
+
 
     def stop(self):
         log.debug("stop() called")
