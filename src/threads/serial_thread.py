@@ -1,3 +1,6 @@
+import os
+print(f"[SerialThread] LOADING from {os.path.abspath(__file__)}")
+
 import csv, math, time, serial
 from PyQt5.QtCore import QThread, pyqtSignal
 
