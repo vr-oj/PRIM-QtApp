@@ -36,23 +36,26 @@ class SerialThread(QThread):
                 if not raw:
                     continue
                 line = raw.decode('utf-8', errors='ignore').strip()
-                print(f"[SerialThread] RAW: {line}")  # debug
+                print(f"[SerialThread] RAW: {line}")
                 print("  → about to parse/emit")
 
-                parts = line.split(',')
+                # split and strip whitespace
+                parts = [fld.strip() for fld in line.split(',')]
                 if len(parts) < 3:
                     continue
+
                 try:
-                    frame = int(parts[0])
-                    t     = float(parts[1])
+                    # parts[0] = time, parts[1] = frame, parts[2] = pressure
+                    t     = float(parts[0])
+                    frame = int(parts[1])
                     p     = float(parts[2])
                 except Exception as e:
                     print(f"[SerialThread] PARSE ERROR: {e}")
                     continue
 
-                # emit & debug
+                # emit in the order your slot expects (frame, t, p)
                 self.data_ready.emit(frame, t, p)
-                print(f"[SerialThread] EMIT data_ready → ({frame}, {t:.3f}, {p:.1f})")
+                print(f"[SerialThread] EMIT data_ready → (frame={frame}, t={t:.3f}, p={p:.1f})")
 
             else:
                 # simulated sine‑wave data at ~10 Hz
