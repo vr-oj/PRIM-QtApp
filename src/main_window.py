@@ -45,10 +45,10 @@ class SquareVideoLabel(QLabel):
     def _update_scaled(self):
         if not self._orig:
             return
-        # square of side = min(width,height)
-        side = min(self.width(), self.height())
+        # letter‑box into the full widget rect, preserving camera ratio
+        w, h = self.width(), self.height()
         scaled = self._orig.scaled(
-            side, side,
+            w, h,
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation
         )
@@ -456,6 +456,9 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    w   = MainWindow()
-    w.show()
-    sys.exit(app.exec_())
+    try:
+        w = MainWindow()
+        w.show()
+        sys.exit(app.exec_())
+    except Exception as e:
+        import traceback; traceback.print_exc()
