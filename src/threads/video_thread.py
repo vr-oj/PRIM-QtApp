@@ -116,18 +116,15 @@ class VideoThread(QThread):
                     try:
                         ret, frame = self.cap.read()
                     except cv2.error:
-                        log.exception("OpenCV read() error, falling back to test image")
+                        log.exception("OpenCV read() error – falling back to test image")
                         ret, frame = False, None
                     except Exception:
-                        log.exception("Unexpected error in cap.read(), falling back to test image")
+                        log.exception("Unexpected error in cap.read() – falling back to test image")
                         ret, frame = False, None
 
-
-                # if capture failed, display the test image
                 if not ret or frame is None:
                     img = self.test_img or self._make_test_image(640, 480, "No Video")
                 else:
-                    # convert to RGB QImage
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     h, w, _ = frame.shape
                     img = QImage(frame.data, w, h, QImage.Format_RGB888)
@@ -137,12 +134,13 @@ class VideoThread(QThread):
             log.exception("Unexpected error in VideoThread.run()")
         finally:
             self.running = False
-        if getattr(self, 'cap', None):
-            try:
-                self.cap.release()
-                log.debug(f"Camera {self.camera_index} released")
-            except Exception:
-                log.exception("Error releasing camera in run()")
+            if getattr(self, 'cap', None):
+                try:
+                    self.cap.release()
+                    log.debug(f"Camera {self.camera_index} released")
+                except Exception:
+                    log.exception("Error releasing camera in run()")
+
 
     def stop(self):
         log.debug("stop() called for VideoThread")

@@ -251,7 +251,11 @@ class MainWindow(QMainWindow):
     def _on_frame(self, img: QImage, frame_bgr):
         self.latest_frame = frame_bgr
         pix = QPixmap.fromImage(img)
-        self.video_label.setPixmap(pix)
+        self.video_label.setPixmap(
+            pix.scaled(self.video_label.size(),
+                    Qt.KeepAspectRatioByExpanding,  # ← this will fill and crop
+                    Qt.SmoothTransformation)
+        )
 
     def _toggle_serial(self):
         if not self._serial_thread:
