@@ -16,13 +16,15 @@ from PyQt5.QtWidgets import (
     QFormLayout, QDialogButtonBox, QSpinBox, QDoubleSpinBox,
     QSizePolicy, QCheckBox
 )
+from PyQt5.QtMultimedia    import QCamera, QCameraInfo, QVideoProbe, QVideoFrame
+from PyQt5.QtMultimediaWidgets import QCameraViewfinder
 from PyQt5.QtGui import QImage, QPixmap, QIcon, QFont
-from PyQt5.QtCore import Qt, QTimer, QSize
+from PyQt5.QtCore import Qt, QTimer, QSize, pyqtSignal
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-from threads.video_thread import VideoThread
+from threads.qtcamera_widget import QtCameraWidget
 from threads.serial_thread import SerialThread
 from recording import TrialRecorder, VideoRecorder
 from utils import list_serial_ports, timestamped_filename, list_cameras
@@ -95,17 +97,6 @@ class MainWindow(QMainWindow):
             log.exception("Error during _build_ui()")
             raise
 
-        self._start_video_thread()
-        try:
-            self._start_video_thread()
-        except Exception as e:
-            from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.critical(self,
-                "Failed to start camera",
-                f"VideoThread init failed:\n{e}")
-            raise
-        self.showMaximized()
-
     def _build_ui(self):
         # ─── Menu Bar ─────────────────────────────────────────────────
         mb = self.menuBar()
@@ -128,14 +119,14 @@ class MainWindow(QMainWindow):
         # ─── Central Splitter ───────────────────────────────────────
         central = QWidget()
         self.setCentralWidget(central)
-        self.video_label = SquareVideoLabel()
         self.splitter = QSplitter(Qt.Horizontal)
-        self.splitter.addWidget(self.video_label)
+        self.qt_camera = QtCameraWidget(self)
+        self.qt_camera.frame_ready.connect(self._on_frame)
+        self.splitter.addWidget(self.qt_camera)
         self.splitter.addWidget(self.canvas)
         layout = QHBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self.splitter)
 
         # ─── Console Dock ──────────────────────────────────────────
         self.console_dock = QDockWidget("Console", self)
@@ -242,20 +233,10 @@ class MainWindow(QMainWindow):
         self.splitter.setSizes([total//2, total-total//2])
         self.showEvent = QMainWindow.showEvent
 
-    def _start_video_thread(self):
-        idx = self.cam_combo.currentData() or 0
-        self.video_thread = VideoThread(camera_index=idx)
-        self.video_thread.frame_ready.connect(self._on_frame)
-        self.video_thread.start()
-
-    def _on_frame(self, img: QImage, frame_bgr):
-        self.latest_frame = frame_bgr
+    def _on_frame(self, img: QImage, _):
         pix = QPixmap.fromImage(img)
-        self.video_label.setPixmap(
-            pix.scaled(self.video_label.size(),
-                    Qt.KeepAspectRatioByExpanding,  # ← this will fill and crop
-                    Qt.SmoothTransformation)
-        )
+        self.video_label.setPixmap(pix)   # or letterbox via your SquareVideoLabel
+
 
     def _toggle_serial(self):
         if not self._serial_thread:
@@ -388,10 +369,8 @@ class MainWindow(QMainWindow):
         self.status.showMessage(" | ".join(parts))
 
     def closeEvent(self, event):
-        if self._serial_thread: self._serial_thread.stop()
-        if hasattr(self, 'video_thread'): self.video_thread.stop()
+        self.qt_camera.camera.stop()
         super().closeEvent(event)
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
