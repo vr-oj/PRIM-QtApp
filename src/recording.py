@@ -35,10 +35,11 @@ class CSVRecorder:
         self.is_recording=False; self.file.close()
 
 class TrialRecorder:
-    def __init__(self, basepath, fps, frame_size):
+    def __init__(self, basepath, fps, frame_size, ext='mp4'):
         ts = time.strftime("%Y%m%d-%H%M%S")
-        self.video = VideoRecorder(f"{basepath}_{ts}.mp4", fps=fps, frame_size=frame_size)
-        self.csv   = CSVRecorder(f"{basepath}_{ts}.csv")
+        self.basepath = f"{basepath}_{ts}"
+        self.video    = VideoRecorder(f"{self.basepath}.{ext}", ...)
+        self.csv      = CSVRecorder(f"{self.basepath}.csv")
 
     def write(self, frame, t, p):
         self.video.write_frame(frame); self.csv.write(t, p)

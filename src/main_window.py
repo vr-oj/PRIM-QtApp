@@ -208,7 +208,7 @@ class MainWindow(QMainWindow):
         self.actNewSession.setToolTip("New Session (Ctrl+N)")
         self.actNewSession.setShortcut("Ctrl+N")
         tb.addAction(self.actNewSession)
-        
+
         # Camera selector
         self.cam_combo = QComboBox()
         for idx in list_cameras(4): self.cam_combo.addItem(f"Camera {idx}", idx)
@@ -267,8 +267,8 @@ class MainWindow(QMainWindow):
     def _start_trial(self):
         basepath, _ = QFileDialog.getSaveFileName(self, "Save Trial As…","","Base name (no extension)")
         if not basepath: return
-        filename = basepath + ".avi"
-        self.trial_recorder = VideoRecorder(filename=filename, fourcc='XVID', fps=30, frame_size=(640,480))
+        self.trial_recorder = TrialRecorder(basepath, fps=30, frame_size=(640,480))
+
         self.actStart.setEnabled(False); self.actStop.setEnabled(True)
 
     def _stop_trial(self):
