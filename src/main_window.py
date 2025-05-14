@@ -17,13 +17,14 @@ from matplotlib.figure import Figure
 
 from threads.video_thread import VideoThread
 from threads.serial_thread import SerialThread
-from recording import TrialRecorder
+from recording import TrialRecorder, VideoRecorder
 from utils import list_serial_ports, timestamped_filename, list_cameras
-from recording import VideoRecorder
+
+
 class SquareVideoLabel(QLabel):
     """
-    Paints a black background, holds onto the full pixmap,
-    and on every resize letter‑boxes it into a square.
+    Letterboxes any incoming QPixmap into the full widget rectangle,
+    preserving aspect ratio and showing black bars where needed.
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -31,10 +32,9 @@ class SquareVideoLabel(QLabel):
         self.setStyleSheet("background-color: black;")
         self.setAlignment(Qt.AlignCenter)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.setMinimumSize(200,200)
+        self.setMinimumSize(200, 200)
 
     def setPixmap(self, pix: QPixmap):
-        # store the master copy
         self._orig = pix
         self._update_scaled()
 
@@ -45,14 +45,13 @@ class SquareVideoLabel(QLabel):
     def _update_scaled(self):
         if not self._orig:
             return
-        # letter‑box into the full widget rect, preserving camera ratio
-        w, h = self.width(), self.height()
         scaled = self._orig.scaled(
-            w, h,
+            self.width(), self.height(),
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation
         )
         super().setPixmap(scaled)
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -60,29 +59,28 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("PRIM Live View")
 
         # plotting buffers
-        self.frames    = []
-        self.times     = []
+        self.frames = []
+        self.times = []
         self.pressures = []
-        self._t0       = None
+        self._t0 = None
 
         # plot axis control
         self.plot_auto_x = True
         self.plot_auto_y = False
-        self.plot_xlim   = (0, None)
-        self.plot_ylim   = (0, 30)
+        self.plot_xlim = (0, None)
+        self.plot_ylim = (0, 30)
 
         # threads & state
         self._serial_thread = None
         self.trial_recorder = None
-        self.latest_frame   = None
+        self.latest_frame = None
 
         self._build_ui()
         self._start_video_thread()
         self.showMaximized()
 
-
     def _build_ui(self):
-        # ─── Menu Bar ────────────────────────────────────────────────────
+        # ─── Menu Bar ─────────────────────────────────────────────────
         mb = self.menuBar()
         cam_menu = mb.addMenu("Camera")
         cam_settings = QAction("Settings…", self)
@@ -93,28 +91,26 @@ class MainWindow(QMainWindow):
         plot_settings.triggered.connect(self._show_plot_settings)
         plot_menu.addAction(plot_settings)
 
-        # ─── Plot Canvas ─────────────────────────────────────────────────
-        self.fig  = Figure(figsize=(5,4))
-        self.ax   = self.fig.add_subplot(111)
+        # ─── Plot Canvas ─────────────────────────────────────────────
+        self.fig = Figure(figsize=(5, 4))
+        self.ax = self.fig.add_subplot(111)
         self.line, = self.ax.plot([], [], '-')
         self.canvas = FigureCanvas(self.fig)
         self.canvas.setMinimumWidth(200)
 
-        # ─── Central Splitter ────────────────────────────────────────────
+        # ─── Central Splitter ───────────────────────────────────────
         central = QWidget()
         self.setCentralWidget(central)
         self.video_label = SquareVideoLabel()
-
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.addWidget(self.video_label)
         self.splitter.addWidget(self.canvas)
+        layout = QHBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.splitter)
 
-        lay = QHBoxLayout(central)
-        lay.setContentsMargins(0,0,0,0)
-        lay.setSpacing(0)
-        lay.addWidget(self.splitter)
-
-        # ─── Console Dock ────────────────────────────────────────────────
+        # ─── Console Dock ──────────────────────────────────────────
         self.console_dock = QDockWidget("Console", self)
         self.console_dock.setAllowedAreas(Qt.BottomDockWidgetArea)
         cw = QWidget(); cl = QVBoxLayout(cw)
@@ -127,98 +123,62 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.BottomDockWidgetArea, self.console_dock)
         self.console_dock.setFixedHeight(150)
 
-        # ─── Toolbar ─────────────────────────────────────────────────────
+        # ─── Toolbar ────────────────────────────────────────────────
         tb = QToolBar("Main Toolbar"); self.addToolBar(tb)
-        tb.setIconSize(QSize(28,28))
-        tb.setToolButtonStyle(Qt.ToolButtonIconOnly)
-        tb.setFont(QFont("Segoe UI",10))
-
+        tb.setIconSize(QSize(28, 28)); tb.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        tb.setFont(QFont("Segoe UI", 10))
         # Serial port dropdown
         self.port_combo = QComboBox()
         self.port_combo.addItem("🔧 Simulated Data", None)
         for port, desc in list_serial_ports():
             self.port_combo.addItem(f"{port} ({desc})", port)
         tb.addWidget(self.port_combo)
-
-        # Connect / Init / Start / Stop
+        # Actions
         self.actConnect = QAction(QIcon("icons/plug.svg"), "", self)
         self.actConnect.setToolTip("Connect (Ctrl+K)"); self.actConnect.setShortcut("Ctrl+K")
         tb.addAction(self.actConnect)
-        self.actInit    = QAction(QIcon("icons/sync.svg"), "", self)
-        self.actInit.setToolTip("Re‑Sync (Ctrl+I)"); self.actInit.setShortcut("Ctrl+I")
-        self.actInit.setEnabled(False)
+        self.actInit = QAction(QIcon("icons/sync.svg"), "", self)
+        self.actInit.setToolTip("Re‑Sync (Ctrl+I)"); self.actInit.setShortcut("Ctrl+I"); self.actInit.setEnabled(False)
         tb.addAction(self.actInit)
-        self.actStart   = QAction(QIcon("icons/record.svg"), "", self)
-        self.actStart.setToolTip("Start Trial (Ctrl+R)"); self.actStart.setShortcut("Ctrl+R")
-        self.actStart.setEnabled(False)
+        self.actStart = QAction(QIcon("icons/record.svg"), "", self)
+        self.actStart.setToolTip("Start Trial (Ctrl+R)"); self.actStart.setShortcut("Ctrl+R"); self.actStart.setEnabled(False)
         tb.addAction(self.actStart)
-        self.actStop    = QAction(QIcon("icons/stop.svg"), "", self)
-        self.actStop.setToolTip("Stop Trial (Ctrl+T)"); self.actStop.setShortcut("Ctrl+T")
-        self.actStop.setEnabled(False)
+        self.actStop = QAction(QIcon("icons/stop.svg"), "", self)
+        self.actStop.setToolTip("Stop Trial (Ctrl+T)"); self.actStop.setShortcut("Ctrl+T"); self.actStop.setEnabled(False)
         tb.addAction(self.actStop)
-
         tb.addSeparator()
-
-        # Pump On / Off
-        self.actPumpOn  = QAction(QIcon("icons/pump-on.svg"), "", self)
-        self.actPumpOn.setToolTip("Pump On (Ctrl+P)"); self.actPumpOn.setShortcut("Ctrl+P")
-        tb.addAction(self.actPumpOn)
+        self.actPumpOn = QAction(QIcon("icons/pump-on.svg"), "", self)
+        self.actPumpOn.setToolTip("Pump On (Ctrl+P)"); self.actPumpOn.setShortcut("Ctrl+P"); tb.addAction(self.actPumpOn)
         self.actPumpOff = QAction(QIcon("icons/pump-off.svg"), "", self)
-        self.actPumpOff.setToolTip("Pump Off (Ctrl+O)");self.actPumpOff.setShortcut("Ctrl+O")
-        tb.addAction(self.actPumpOff)
-
+        self.actPumpOff.setToolTip("Pump Off (Ctrl+O)"); self.actPumpOff.setShortcut("Ctrl+O"); tb.addAction(self.actPumpOff)
         tb.addSeparator()
-
-        # Sync indicator
-        self.sync_icon  = QLabel("Sync: ❓")
-        tb.addWidget(self.sync_icon)
-
-        # New Session
+        self.sync_icon = QLabel("Sync: ❓"); tb.addWidget(self.sync_icon)
         self.actNewSession = QAction(QIcon("icons/file-plus.svg"), "", self)
-        self.actNewSession.setToolTip("New Session (Ctrl+N)")
-        self.actNewSession.setShortcut("Ctrl+N")
-        tb.addAction(self.actNewSession)
-
+        self.actNewSession.setToolTip("New Session (Ctrl+N)"); self.actNewSession.setShortcut("Ctrl+N"); tb.addAction(self.actNewSession)
         # Camera selector
         self.cam_combo = QComboBox()
-        for i in list_cameras(4):
-            self.cam_combo.addItem(f"Camera {i}", i)
-        if self.cam_combo.count()==0:
-            self.cam_combo.addItem("No cameras found", None)
+        for idx in list_cameras(4): self.cam_combo.addItem(f"Camera {idx}", idx)
+        if self.cam_combo.count()==0: self.cam_combo.addItem("No cameras found", None)
         tb.addWidget(self.cam_combo)
 
-        # ─── Status bar & timer ───────────────────────────────────────────
-        self.status = QStatusBar()
-        self.setStatusBar(self.status)
-        self._elapsed = 0
-        self._timer   = QTimer(self)
-        self._timer.timeout.connect(self._update_status)
-        self._timer.start(1000)
+        # ─── Status bar & timer ─────────────────────────────────────
+        self.status = QStatusBar(); self.setStatusBar(self.status)
+        self._elapsed = 0; self._timer = QTimer(self); self._timer.timeout.connect(self._update_status); self._timer.start(1000)
 
-        # ─── Signals ──────────────────────────────────────────────────────
+        # ─── Signals – hookup ───────────────────────────────────────
         self.actConnect.triggered.connect(self._toggle_serial)
-        self.actInit   .triggered.connect(self._send_init)
-        self.actStart  .triggered.connect(self._start_trial)
-        self.actStop   .triggered.connect(self._stop_trial)
-        self.actPumpOn .triggered.connect(lambda: self._send_serial_cmd(b"PUMP_ON\n"))
-        self.actPumpOff.triggered.connect(lambda: self._send_serial_cmd(b"PUMP_OFF\n"))
+        self.actInit.triggered.connect(self._send_init)
+        self.actStart.triggered.connect(self._start_trial)
+        self.actStop.triggered.connect(self._stop_trial)
+        self.actPumpOn.triggered.connect(lambda: self._send_serial_cmd(b"PUMP_ON"))
+        self.actPumpOff.triggered.connect(lambda: self._send_serial_cmd(b"PUMP_OFF"))
         self.actNewSession.triggered.connect(self._show_metadata_dialog)
-
-    def _show_camera_settings(self):
-        # TODO: pop up your camera settings dialog
-        pass
-
-    def _show_plot_settings(self):
-        # TODO: pop up your axis control dialog
-        pass
 
     def showEvent(self, event):
         super().showEvent(event)
         total = self.centralWidget().width()
         self.splitter.setSizes([total//2, total-total//2])
-        # only once
         self.showEvent = QMainWindow.showEvent
-
 
     def _start_video_thread(self):
         idx = self.cam_combo.currentData() or 0
@@ -226,246 +186,149 @@ class MainWindow(QMainWindow):
         self.video_thread.frame_ready.connect(self._on_frame)
         self.video_thread.start()
 
-
     def _on_frame(self, img: QImage, frame_bgr):
-        # stash raw frame for recording
         self.latest_frame = frame_bgr
-
-        # convert QImage -> QPixmap once, let SquareVideoLabel do the rest
         pix = QPixmap.fromImage(img)
         self.video_label.setPixmap(pix)
-
-
 
     def _toggle_serial(self):
         if not self._serial_thread:
             port = self.port_combo.currentData()
-            if not port:
-                self._append_console("⚠️ No port selected!")
-                return
-
+            if not port: self._append_console("⚠️ No port selected!"); return
             self._serial_thread = SerialThread(port=port, baud=115200)
             self._serial_thread.data_ready.connect(self._update_plot)
             self._serial_thread.start()
             self._append_console(f"🔗 Connected to {port}")
             self.actConnect.setText("Disconnect")
-            self.actInit   .setEnabled(True)
-            self.actStart  .setEnabled(True)
+            self.actInit.setEnabled(True); self.actStart.setEnabled(True)
         else:
-            self._serial_thread.stop()
-            self._serial_thread = None
-            self.actConnect.setText("Connect")
-            self.actInit   .setEnabled(False)
-            self.actStart  .setEnabled(False)
-
+            self._serial_thread.stop(); self._serial_thread=None
+            self.actConnect.setText("Connect"); self.actInit.setEnabled(False); self.actStart.setEnabled(False)
 
     def _send_init(self):
-        if self._serial_thread and getattr(self._serial_thread,'ser',None):
-            self._serial_thread.ser.write(b"CAM_TRIG\n")
-            self.sync_icon.setText("Sync: ❓")
-            self._append_console("→ CAM_TRIG")
+        if self._serial_thread and getattr(self._serial_thread, 'ser', None):
+            self._serial_thread.ser.write(b"CAM_TRIG")
+            self.sync_icon.setText("Sync: ❓"); self._append_console("→ CAM_TRIG")
 
     def _start_trial(self):
-        # 1) Ask user for a base filename (no extension)
-        basepath, _ = QFileDialog.getSaveFileName(
-            self, 
-            "Save Trial As…", 
-            "", 
-            "Base name (no extension)"
-        )
-        if not basepath:
-            return
-
-        # 2) Build an AVI writer instead of MP4
+        basepath, _ = QFileDialog.getSaveFileName(self, "Save Trial As…","","Base name (no extension)")
+        if not basepath: return
         filename = basepath + ".avi"
-        recorder = VideoRecorder(
-            filename=filename,
-            fourcc='XVID',
-            fps=30,
-            frame_size=(640, 480)
-        )
-        self.trial_recorder = recorder
-
-        # 3) Toggle UI buttons
-        self.actStart.setEnabled(False)
-        self.actStop .setEnabled(True)
+        self.trial_recorder = VideoRecorder(filename=filename, fourcc='XVID', fps=30, frame_size=(640,480))
+        self.actStart.setEnabled(False); self.actStop.setEnabled(True)
 
     def _stop_trial(self):
-        if self.trial_recorder:
-            self.trial_recorder.stop()
-            self.trial_recorder = None
-        self.actStart.setEnabled(True)
-        self.actStop .setEnabled(False)
-
+        if self.trial_recorder: self.trial_recorder.stop(); self.trial_recorder=None
+        self.actStart.setEnabled(True); self.actStop.setEnabled(False)
 
     def _send_serial_cmd(self, cmd: bytes):
-        if self._serial_thread and getattr(self._serial_thread,'ser',None):
-            self._serial_thread.ser.write(cmd)
-            self._append_console(f"→ {cmd.decode().strip()}")
-
+        if self._serial_thread and getattr(self._serial_thread, 'ser', None):
+            self._serial_thread.ser.write(cmd); self._append_console(f"→ {cmd.decode().strip()}")
 
     def _on_console_send(self):
-        txt = self.console_input.text().strip()
-        if not txt:
-            return
-        self._send_serial_cmd(txt.encode()+b"\n")
-        self.console_input.clear()
-
+        txt = self.console_input.text().strip();
+        if txt: self._send_serial_cmd(txt.encode()+b"\n"); self.console_input.clear()
 
     def _append_console(self, line: str):
         self.console_output.append(line)
 
-
     def _update_plot(self, frame: int, t: float, p: float):
-        if self._t0 is None:
-            self._t0 = t
+        if self._t0 is None: self._t0 = t
         t_rel = t - self._t0
-
-        self.frames.append(frame)
-        self.times .append(t_rel)
-        self.pressures.append(p)
-
+        self.frames.append(frame); self.times.append(t_rel); self.pressures.append(p)
         self.line.set_data(self.times, self.pressures)
-
-        # X‑axis
         if self.plot_auto_x:
-            self.ax.set_xlim(0, max(self.times)+1)
+            self.ax.set_xlim(0, max(self.times) + 1)
         else:
             self.ax.set_xlim(*self.plot_xlim)
-
-        # Y‑axis
         if self.plot_auto_y:
-            low,high = min(self.pressures), max(self.pressures)
-            self.ax.set_ylim(low-1, high+1)
+            low, hi = min(self.pressures), max(self.pressures)
+            self.ax.set_ylim(low-1, hi+1)
         else:
             self.ax.set_ylim(*self.plot_ylim)
-
-        self.canvas.draw()
-        self._append_console(f"{frame}, {t_rel:.2f}, {p:.2f}")
-
-        # sync check
+        self.canvas.draw(); self._append_console(f"{frame}, {t_rel:.2f}, {p:.2f}")
         if self.trial_recorder:
-            exp = self.trial_recorder.video_frame_count
-            self.sync_icon.setText(
-                "Sync: 🔴" if abs(exp-frame) > 1 else "Sync: 🟢"
-            )
-
+            exp = self.trial_recorder.frame_count
+            self.sync_icon.setText("Sync: 🔴" if abs(exp-frame)>1 else "Sync: 🟢")
 
     def _show_camera_settings(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Camera Settings")
+        dlg = QDialog(self); dlg.setWindowTitle("Camera Settings")
         form = QFormLayout(dlg)
-
         w_spin = QSpinBox(); w_spin.setRange(100,4096)
         h_spin = QSpinBox(); h_spin.setRange(100,4096)
         b_spin = QDoubleSpinBox(); b_spin.setRange(0.0,1.0); b_spin.setSingleStep(0.01)
         c_spin = QDoubleSpinBox(); c_spin.setRange(0.0,1.0); c_spin.setSingleStep(0.01)
         g_spin = QDoubleSpinBox(); g_spin.setRange(0.0,1.0); g_spin.setSingleStep(0.01)
-
         cap = getattr(self.video_thread, 'cap', None)
         if cap:
             w_spin.setValue(int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)))
             h_spin.setValue(int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-
-        form.addRow("Width:",      w_spin)
-        form.addRow("Height:",     h_spin)
-        form.addRow("Brightness:", b_spin)
-        form.addRow("Contrast:",   c_spin)
-        form.addRow("Gain:",       g_spin)
-
+        form.addRow("Width:", w_spin); form.addRow("Height:", h_spin)
+        form.addRow("Brightness:", b_spin); form.addRow("Contrast:", c_spin); form.addRow("Gain:", g_spin)
         btns = QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
+        btns.accepted.connect(dlg.accept); btns.rejected.connect(dlg.reject)
         form.addRow(btns)
-
-        if dlg.exec_() == QDialog.Accepted and cap:
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  w_spin.value())
+        if dlg.exec_()==QDialog.Accepted and cap:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, w_spin.value())
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h_spin.value())
-            cap.set(cv2.CAP_PROP_BRIGHTNESS,  b_spin.value())
-            cap.set(cv2.CAP_PROP_CONTRAST,    c_spin.value())
-            cap.set(cv2.CAP_PROP_GAIN,        g_spin.value())
-
+            cap.set(cv2.CAP_PROP_BRIGHTNESS, b_spin.value())
+            cap.set(cv2.CAP_PROP_CONTRAST, c_spin.value())
+            cap.set(cv2.CAP_PROP_GAIN, g_spin.value())
 
     def _show_plot_settings(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Plot Axis Settings")
+        dlg = QDialog(self); dlg.setWindowTitle("Plot Axis Settings")
         form = QFormLayout(dlg)
-
         ax_auto = QCheckBox(); ax_auto.setChecked(self.plot_auto_x)
         ay_auto = QCheckBox(); ay_auto.setChecked(self.plot_auto_y)
         xmin = QDoubleSpinBox(); xmax = QDoubleSpinBox()
         ymin = QDoubleSpinBox(); ymax = QDoubleSpinBox()
-
         xmin.setValue(0); xmax.setValue(self.plot_xlim[1] or 10)
         ymin.setValue(self.plot_ylim[0]); ymax.setValue(self.plot_ylim[1])
-
         form.addRow("Auto X‑axis:", ax_auto)
-        form.addRow("X‑min:",      xmin); form.addRow("X‑max:", xmax)
+        form.addRow("X‑min:", xmin); form.addRow("X‑max:", xmax)
         form.addRow("Auto Y‑axis:", ay_auto)
-        form.addRow("Y‑min:",      ymin); form.addRow("Y‑max:", ymax)
-
+        form.addRow("Y‑min:", ymin); form.addRow("Y‑max:", ymax)
         btns = QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
+        btns.accepted.connect(dlg.accept); btns.rejected.connect(dlg.reject)
         form.addRow(btns)
-
-        if dlg.exec_() == QDialog.Accepted:
+        if dlg.exec_()==QDialog.Accepted:
             self.plot_auto_x = ax_auto.isChecked()
             self.plot_auto_y = ay_auto.isChecked()
             self.plot_xlim   = (xmin.value(), xmax.value())
             self.plot_ylim   = (ymin.value(), ymax.value())
 
-
     def _show_metadata_dialog(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("New Session Metadata")
+        dlg = QDialog(self); dlg.setWindowTitle("New Session Metadata")
         form = QFormLayout(dlg)
-        self.meta_name = QLineEdit()
-        self.meta_drug = QLineEdit()
+        self.meta_name = QLineEdit(); self.meta_drug = QLineEdit()
         self.meta_conc = QSpinBox(); self.meta_conc.setSuffix(" µM")
-        self.meta_type = QComboBox(); self.meta_type.addItems(
-            ["Control","TTX","Capsaicin"]
-        )
-        form.addRow("Trial Name:",     self.meta_name)
-        form.addRow("Drug:",           self.meta_drug)
-        form.addRow("Concentration:",  self.meta_conc)
-        form.addRow("Type:",           self.meta_type)
-
+        self.meta_type = QComboBox(); self.meta_type.addItems(["Control","TTX","Capsaicin"])
+        form.addRow("Trial Name:", self.meta_name)
+        form.addRow("Drug:", self.meta_drug)
+        form.addRow("Concentration:", self.meta_conc)
+        form.addRow("Type:", self.meta_type)
         btns = QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
+        btns.accepted.connect(dlg.accept); btns.rejected.connect(dlg.reject)
         form.addRow(btns)
-
-        if dlg.exec_() == QDialog.Accepted:
-            self.status.showMessage(
-                f"Metadata set: {self.meta_name.text()}", 3000
-            )
-
+        if dlg.exec_()==QDialog.Accepted:
+            self.status.showMessage(f"Metadata set: {self.meta_name.text()}", 3000)
 
     def _update_status(self):
         self._elapsed += 1
         parts = []
-        if self.trial_recorder:
-            parts.append(f"Trial: {self.trial_recorder.basepath}")
+        if self.trial_recorder: parts.append(f"Trial: {self.trial_recorder.basepath}")
         parts.append(f"Elapsed: {self._elapsed}s")
         parts.append(self.sync_icon.text())
         self.status.showMessage(" | ".join(parts))
 
-
     def closeEvent(self, event):
-        if self._serial_thread:
-            self._serial_thread.stop()
-        if hasattr(self, 'video_thread'):
-            self.video_thread.stop()
+        if self._serial_thread: self._serial_thread.stop()
+        if hasattr(self, 'video_thread'): self.video_thread.stop()
         super().closeEvent(event)
-
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    try:
-        w = MainWindow()
-        w.show()
-        sys.exit(app.exec_())
-    except Exception as e:
-        import traceback; traceback.print_exc()
+    w = MainWindow()
+    w.show()
+    sys.exit(app.exec_())
