@@ -95,7 +95,15 @@ class MainWindow(QMainWindow):
             log.exception("Error during _build_ui()")
             raise
 
-        # self._start_video_thread()
+        self._start_video_thread()
+        try:
+            self._start_video_thread()
+        except Exception as e:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(self,
+                "Failed to start camera",
+                f"VideoThread init failed:\n{e}")
+            raise
         self.showMaximized()
 
     def _build_ui(self):
