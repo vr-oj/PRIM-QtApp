@@ -214,18 +214,26 @@ class MainWindow(QMainWindow):
 
     def _toggle_serial(self):
         if not self._serial_thread:
-            # Grab the port (None for simulated data)
             port = self.port_combo.currentData()
+            if not port:
+                self._append_console("⚠️  No port selected!")
+                return
 
-            # Start the serial thread in either real or simulated mode
+            # Launch the thread
             self._serial_thread = SerialThread(port=port, baud=115200)
-            self._serial_thread.data_ready.connect(self._update_plot) # signature now is _update_plot(frame, t, p)
             self._serial_thread.start()
 
-            # Update the UI
+            # Log it!
+            self._append_console(f"🔗 Connected to {port} @115200 baud")
+
+            # enable buttons
             self.actConnect.setText("Disconnect")
-            self.actInit.setEnabled(True)
-            self.actStart.setEnabled(True)
+            self.actInit   .setEnabled(True)
+            self.actStart  .setEnabled(True)
+
+            # Hook up raw‐line debugging (next step)
+            # self._serial_thread.raw_line.connect(self._append_console)
+
         else:
             # Tear down the existing thread
             self._serial_thread.stop()
