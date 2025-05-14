@@ -306,6 +306,8 @@ class MainWindow(QMainWindow):
         self.console_output.append(line)
 
     def _update_plot(self, frame:int, t: float, p: float):
+        # DEBUG LINE: print to terminal whenever we get called
+        print(f"[_update_plot] frame={frame}, t={t:.3f}, p={p:.1f}")
         # 1) store the new data
         self.frames.append(frame)
         self.times.append(t)
