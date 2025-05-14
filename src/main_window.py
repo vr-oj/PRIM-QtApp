@@ -221,10 +221,11 @@ class MainWindow(QMainWindow):
 
             # Launch the thread
             self._serial_thread = SerialThread(port=port, baud=115200)
-            self._serial_thread.raw_line.connect(self._append_console)
+
+            # Hook up only the data_ready signal (no more raw_line)
             self._serial_thread.data_ready.connect(self._update_plot)
+
             self._serial_thread.start()
-            # Log it!
             self._append_console(f"🔗 Connected to {port} @115200 baud")
 
             # enable buttons
@@ -232,17 +233,13 @@ class MainWindow(QMainWindow):
             self.actInit   .setEnabled(True)
             self.actStart  .setEnabled(True)
 
-            # Hook up raw‐line debugging (next step)
-            
-
         else:
             # Tear down the existing thread
             self._serial_thread.stop()
             self._serial_thread = None
             self.actConnect.setText("Connect")
-            self.actInit.setEnabled(False)
-            self.actStart.setEnabled(False)
-
+            self.actInit   .setEnabled(False)
+            self.actStart  .setEnabled(False)
 
     def _send_init(self):
         # Always log a resync, but only write if .ser is available
