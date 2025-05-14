@@ -115,9 +115,13 @@ class VideoThread(QThread):
                 if self.cap:
                     try:
                         ret, frame = self.cap.read()
-                    except cv2.error as e:
+                    except cv2.error:
                         log.exception("OpenCV read() error, falling back to test image")
                         ret, frame = False, None
+                    except Exception:
+                        log.exception("Unexpected error in cap.read(), falling back to test image")
+                        ret, frame = False, None
+
 
                 # if capture failed, display the test image
                 if not ret or frame is None:
