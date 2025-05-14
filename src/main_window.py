@@ -95,7 +95,7 @@ class MainWindow(QMainWindow):
             log.exception("Error during _build_ui()")
             raise
 
-        self._start_video_thread()
+        # self._start_video_thread()
         self.showMaximized()
 
     def _build_ui(self):
