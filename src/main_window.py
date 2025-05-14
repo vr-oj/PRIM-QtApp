@@ -204,6 +204,13 @@ class MainWindow(QMainWindow):
         self.actPumpOff.triggered.connect(lambda: self._send_serial_cmd(b"PUMP_OFF\n"))
         self.actNewSession.triggered.connect(self._show_metadata_dialog)
 
+    def _show_camera_settings(self):
+        # TODO: pop up your camera settings dialog
+        pass
+
+    def _show_plot_settings(self):
+        # TODO: pop up your axis control dialog
+        pass
 
     def showEvent(self, event):
         super().showEvent(event)

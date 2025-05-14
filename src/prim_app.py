@@ -5,12 +5,12 @@ from main_window import MainWindow
 def main():
     app = QApplication(sys.argv)
 
-    # ▶️ load your dark stylesheet
+    # Load dark style
     try:
-        with open("style.qss") as f:
+        with open("style.qss", "r") as f:
             app.setStyleSheet(f.read())
-    except Exception as e:
-        print("⚠️  Could not load style.qss:", e)
+    except Exception:
+        pass
 
     w = MainWindow()
     w.show()
