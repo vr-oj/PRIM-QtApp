@@ -1,14 +1,15 @@
 import sys, cv2
+
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel,
-    QHBoxLayout, QVBoxLayout, QToolBar, QAction,
-    QComboBox, QFileDialog, QDockWidget,
-    QTextEdit, QLineEdit, QPushButton,
-    QStatusBar, QDialog, QFormLayout,
-    QDialogButtonBox, QSpinBox
+    QSplitter, QHBoxLayout, QVBoxLayout, QToolBar, QAction,
+    QComboBox, QFileDialog, QDockWidget, QTextEdit,
+    QLineEdit, QPushButton, QStatusBar, QDialog,
+    QFormLayout, QDialogButtonBox, QSpinBox, QSizePolicy
 )
-from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QImage, QPixmap, QIcon, QFont
+from PyQt5.QtCore import Qt, QTimer, QSize
+
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
@@ -22,132 +23,171 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("PRIM Live View")
 
-        self.times = []        # will hold all incoming timestamps
-        self.pressures = []    # will hold all incoming pressure values
+        # Buffers for plotting
+        self.frames    = []    # will hold incoming frameCounts
+        self.times     = []    # will hold incoming timestamps
+        self.pressures = []    # will hold incoming pressure values
 
-        self._serial_thread = None
-        self._video_thread = None
-        self._video_writer = None
-        self._csv_file = None
-        self.trial_recorder = None
+        self._serial_thread  = None
+        self._video_thread   = None
+        self._video_writer   = None
+        self._csv_file       = None
+        self.trial_recorder  = None
 
         self._build_ui()
         self._start_video_thread()
-
+        self.showMaximized()
 
     def _build_ui(self):
-        # Central widget: video + plot
-        central = QWidget()
-        self.video_label = QLabel()
-        self.video_label.setFixedSize(640, 480)
-
+        # ——— Matplotlib figure & canvas ———————————————————————————
         self.fig = Figure(figsize=(5, 4))
-        self.ax = self.fig.add_subplot(111)
+        self.ax  = self.fig.add_subplot(111)
         self.line, = self.ax.plot([], [], '-')
         self.canvas = FigureCanvas(self.fig)
+        self.canvas.setMinimumWidth(200)   # same min‑width as video_label
 
-        hl = QHBoxLayout()
-        hl.addWidget(self.video_label)
-        hl.addWidget(self.canvas)
-        central.setLayout(hl)
+        # ─── Central widget & splitter setup ────────────────────────────────
+        central = QWidget()
         self.setCentralWidget(central)
 
-        # Console dock
+        # Video display
+        self.video_label = QLabel()
+        self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.video_label.setAlignment(Qt.AlignCenter)
+        self.video_label.setMinimumWidth(200)   # never collapse below this
+
+        # Plot canvas
+        self.canvas = FigureCanvas(self.fig)
+        self.canvas.setMinimumWidth(200)        # never collapse below this
+
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.addWidget(self.video_label)
+        self.splitter.addWidget(self.canvas)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 1)
+
+        layout = QHBoxLayout(central)
+        layout.setContentsMargins(0,0,0,0)
+        layout.setSpacing(0)
+        layout.addWidget(self.splitter)
+
+        # ─── Console dock (bottom) ────────────────────────────────────────
         self.console_dock = QDockWidget("Console", self)
         self.console_dock.setAllowedAreas(Qt.BottomDockWidgetArea)
-        self.console_widget = QWidget()
-        v = QVBoxLayout(self.console_widget)
+        console_widget = QWidget()
+        console_layout = QVBoxLayout(console_widget)
         self.console_output = QTextEdit()
         self.console_output.setReadOnly(True)
-        h = QHBoxLayout()
+        input_layout = QHBoxLayout()
         self.console_input = QLineEdit()
         btn_send = QPushButton("Send")
         btn_send.clicked.connect(self._on_console_send)
-        h.addWidget(self.console_input)
-        h.addWidget(btn_send)
-        v.addWidget(self.console_output)
-        v.addLayout(h)
-        self.console_dock.setWidget(self.console_widget)
+        input_layout.addWidget(self.console_input)
+        input_layout.addWidget(btn_send)
+        console_layout.addWidget(self.console_output)
+        console_layout.addLayout(input_layout)
+        self.console_dock.setWidget(console_widget)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.console_dock)
         self.console_dock.setFixedHeight(150)
 
-        # Toolbar
+        # ─── Toolbar with icon‐only buttons ────────────────────────────────
         tb = QToolBar("Main Toolbar")
         self.addToolBar(tb)
+        tb.setIconSize(QSize(28, 28))
+        tb.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        tb.setFont(QFont("Segoe UI", 10))
 
-        # 1) Create the port dropdown
+        # Serial port dropdown
         self.port_combo = QComboBox()
-
-        # 2) Add a simulated‑data option
         self.port_combo.addItem("🔧 Simulated Data", None)
-
-        # 3) Populate with real serial ports
         for port, desc in list_serial_ports():
             self.port_combo.addItem(f"{port} ({desc})", port)
-
-        # 4) Add the dropdown to the toolbar
         tb.addWidget(self.port_combo)
 
-        # Connect / Disconnect
-        self.actConnect = QAction("Connect", self)
-        self.actConnect.triggered.connect(self._toggle_serial)
+        # Connect / Init / Start / Stop
+        self.actConnect = QAction(QIcon("icons/plug.svg"), "", self)
+        self.actConnect.setToolTip("Connect to PRIM box (Ctrl+K)")
+        self.actConnect.setShortcut("Ctrl+K")
         tb.addAction(self.actConnect)
 
-        # Init (CamTrig pulse)
-        self.actInit = QAction("Init", self)
+        self.actInit = QAction(QIcon("icons/sync.svg"), "", self)
         self.actInit.setEnabled(False)
-        self.actInit.triggered.connect(self._send_init)
+        self.actInit.setToolTip("Re‑Sync camera & Arduino (Ctrl+I)")
+        self.actInit.setShortcut("Ctrl+I")
         tb.addAction(self.actInit)
 
-        # Start Trial
-        self.actStart = QAction("Start Trial", self)
+        self.actStart = QAction(QIcon("icons/record.svg"), "", self)
         self.actStart.setEnabled(False)
-        self.actStart.triggered.connect(self._start_trial)
+        self.actStart.setToolTip("Start Trial (Ctrl+R)")
+        self.actStart.setShortcut("Ctrl+R")
         tb.addAction(self.actStart)
 
-        # Stop Trial
-        self.actStop = QAction("Stop Trial", self)
+        self.actStop = QAction(QIcon("icons/stop.svg"), "", self)
         self.actStop.setEnabled(False)
-        self.actStop.triggered.connect(self._stop_trial)
+        self.actStop.setToolTip("Stop Trial (Ctrl+T)")
+        self.actStop.setShortcut("Ctrl+T")
         tb.addAction(self.actStop)
 
-        # Pump controls
-        self.actPumpOn = QAction("Pump On", self)
-        self.actPumpOn.triggered.connect(lambda: self._send_serial_cmd(b"PUMP_ON\n"))
+        tb.addSeparator()
+
+        # Pump On / Off
+        self.actPumpOn = QAction(QIcon("icons/pump-on.svg"), "", self)
+        self.actPumpOn.setToolTip("Pump On (Ctrl+P)")
+        self.actPumpOn.setShortcut("Ctrl+P")
         tb.addAction(self.actPumpOn)
 
-        self.actPumpOff = QAction("Pump Off", self)
-        self.actPumpOff.triggered.connect(lambda: self._send_serial_cmd(b"PUMP_OFF\n"))
+        self.actPumpOff = QAction(QIcon("icons/pump-off.svg"), "", self)
+        self.actPumpOff.setToolTip("Pump Off (Ctrl+O)")
+        self.actPumpOff.setShortcut("Ctrl+O")
         tb.addAction(self.actPumpOff)
 
-        # Sync indicator (start stale, will update later)
+        tb.addSeparator()
+
+        # Sync indicator
         self.sync_icon = QLabel("Sync: ❓")
         tb.addWidget(self.sync_icon)
 
-        # New Trial metadata
-        self.actNewTrial = QAction("New Trial", self)
-        self.actNewTrial.triggered.connect(self._show_metadata_dialog)
-        tb.addAction(self.actNewTrial)
-
-        self.status = QStatusBar()
-        self.setStatusBar(self.status)
-        # Update with a timer every second
-        self._elapsed = 0
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._update_status)
-        self._timer.start(1000)
-
-        from utils import list_cameras
+        # New Session
+        self.actNewSession = QAction(QIcon("icons/file-plus.svg"), "", self)
+        self.actNewSession.setToolTip("New Session Metadata (Ctrl+N)")
+        self.actNewSession.setShortcut("Ctrl+N")
+        tb.addAction(self.actNewSession)
 
         # Camera selector dropdown
         self.cam_combo = QComboBox()
-        available = list_cameras(max_idx=4)   # scan indices 0–3
+        available = list_cameras(max_idx=4)
         for idx in available:
             self.cam_combo.addItem(f"Camera {idx}", idx)
         if not available:
             self.cam_combo.addItem("No cameras found", None)
         tb.addWidget(self.cam_combo)
 
+        # ─── Status bar & timer ────────────────────────────────────────────
+        self.status = QStatusBar()
+        self.setStatusBar(self.status)
+        self._elapsed = 0
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._update_status)
+        self._timer.start(1000)
+
+        # ─── Connect actions to methods ────────────────────────────────────
+        self.actConnect.triggered.connect(self._toggle_serial)
+        self.actInit   .triggered.connect(self._send_init)
+        self.actStart  .triggered.connect(self._start_trial)
+        self.actStop   .triggered.connect(self._stop_trial)
+        self.actPumpOn .triggered.connect(lambda: self._send_serial_cmd(b"PUMP_ON\n"))
+        self.actPumpOff.triggered.connect(lambda: self._send_serial_cmd(b"PUMP_OFF\n"))
+        self.actNewSession.triggered.connect(self._show_metadata_dialog)
+
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Center the splitter on first show
+        total = self.centralWidget().width()
+        # split half/half
+        self.splitter.setSizes([total//2, total - total//2])
+        # remove this handler so it only runs once
+        self.showEvent = QMainWindow.showEvent
 
     def _start_video_thread(self):
         idx = self.cam_combo.currentData()
@@ -160,7 +200,14 @@ class MainWindow(QMainWindow):
 
     def _on_frame(self, img: QImage, frame_bgr):
         # 1. display
-        self.video_label.setPixmap(QPixmap.fromImage(img))
+        pix = QPixmap.fromImage(img)
+        self.video_label.setPixmap(
+            pix.scaled(
+                self.video_label.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+        )
         # 2. stash raw frame for recording
         self.latest_frame = frame_bgr
 
@@ -189,8 +236,17 @@ class MainWindow(QMainWindow):
 
 
     def _send_init(self):
-        if self._serial_thread and self._serial_thread.ser:
-            self._serial_thread.ser.write(b"CAM_TRIG\n")
+        # Always log a resync, but only write if .ser is available
+        if self._serial_thread:
+            if getattr(self._serial_thread, "ser", None):
+                try:
+                    self._serial_thread.ser.write(b"CAM_TRIG\n")
+                except Exception as e:
+                    self._append_console(f"⚠️ Init write failed: {e}")
+            # reset our drift indicator and log
+            self.sync_icon.setText("Sync: ❓")
+            self._append_console("→ CAM_TRIG (resync)")
+
 
     def _start_trial(self):
         # 1. Ask user for a base filename
@@ -240,7 +296,7 @@ class MainWindow(QMainWindow):
     def _append_console(self, line: str):
         self.console_output.append(line)
 
-    def _update_plot(self, t: float, p: float):
+    def _update_plot(self, frame:int, t: float, p: float):
         # 1) store the new data
         self.frames.append(frame)
         self.times.append(t)
