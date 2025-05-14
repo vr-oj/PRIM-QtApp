@@ -2,6 +2,7 @@ import csv, math, time, serial
 from PyQt5.QtCore import QThread, pyqtSignal
 
 class SerialThread(QThread):
+    raw_line = pyqtSignal(str)
     data_ready = pyqtSignal(int, float, float)
 
     def __init__(self, port=None, baud=115200, test_csv=None):
@@ -19,6 +20,9 @@ class SerialThread(QThread):
             if self.ser:
                 line = self.ser.readline().decode().strip()
                 if not line: continue
+                
+                self.raw_line.emit(line)
+
                 parts = line.split(',')
                 try:
                     f = int(parts[0]); t = float(parts[1]); p = float(parts[2])

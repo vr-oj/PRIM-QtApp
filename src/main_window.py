@@ -221,8 +221,9 @@ class MainWindow(QMainWindow):
 
             # Launch the thread
             self._serial_thread = SerialThread(port=port, baud=115200)
+            self._serial_thread.raw_line.connect(self._append_console)
+            self._serial_thread.data_ready.connect(self._update_plot)
             self._serial_thread.start()
-
             # Log it!
             self._append_console(f"🔗 Connected to {port} @115200 baud")
 
@@ -232,7 +233,7 @@ class MainWindow(QMainWindow):
             self.actStart  .setEnabled(True)
 
             # Hook up raw‐line debugging (next step)
-            # self._serial_thread.raw_line.connect(self._append_console)
+            
 
         else:
             # Tear down the existing thread
