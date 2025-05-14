@@ -1,9 +1,9 @@
-import os
-print(f"[SerialThread] LOADING from {os.path.abspath(__file__)}")
-print(f"[SerialThread] __init__ called, port = {port}")
-
 import csv, math, time, serial
 from PyQt5.QtCore import QThread, pyqtSignal
+import os
+
+# top‐level load confirmation
+print(f"[SerialThread] LOADING from {os.path.abspath(__file__)}")
 
 class SerialThread(QThread):
     # emits (frameCount, time_s, pressure)
@@ -14,6 +14,9 @@ class SerialThread(QThread):
         self.running    = True
         self.fake_t     = 0
         self.test_csv   = test_csv
+
+        # debug inside __init__ only
+        print(f"[SerialThread] __init__ called, port = {port}")
 
         if port:
             try:
@@ -34,6 +37,7 @@ class SerialThread(QThread):
                     continue
                 line = raw.decode('utf-8', errors='ignore').strip()
                 print(f"[SerialThread] RAW: {line}")  # debug
+                print("  → about to parse/emit")
 
                 parts = line.split(',')
                 if len(parts) < 3:
@@ -42,16 +46,16 @@ class SerialThread(QThread):
                     frame = int(parts[0])
                     t     = float(parts[1])
                     p     = float(parts[2])
-                except ValueError:
+                except Exception as e:
+                    print(f"[SerialThread] PARSE ERROR: {e}")
                     continue
 
-                # Emit to plot
+                # emit & debug
                 self.data_ready.emit(frame, t, p)
                 print(f"[SerialThread] EMIT data_ready → ({frame}, {t:.3f}, {p:.1f})")
 
-
             else:
-                # simulated sine‐wave data at ~10 Hz
+                # simulated sine‑wave data at ~10 Hz
                 t = time.time() - self.start_time
                 p = 50 + 10 * math.sin(t * 2 * math.pi * 0.5)
                 f = self.fake_t
