@@ -204,17 +204,19 @@ class MainWindow(QMainWindow):
 
 
     def resizeEvent(self, event):
+        # whenever the window (or splitter) moves,
+        # re‑scale to the new label size
         super().resizeEvent(event)
-        # on resize, re‑letterbox the stored pixmap
-        if self._last_pixmap:
-            self._update_video_label()
+        self._update_video_label()
 
 
     def _update_video_label(self):
+        """Scale the last pixmap to *fit* the QLabel in both dims."""
+        if not self._last_pixmap:
+            return
         scaled = self._last_pixmap.scaled(
-            self.video_label.width(),
-            self.video_label.height(),
-            Qt.KeepAspectRatio,
+            self.video_label.size(),      # target rect
+            Qt.KeepAspectRatio,           # preserve entire image
             Qt.SmoothTransformation
         )
         self.video_label.setPixmap(scaled)
