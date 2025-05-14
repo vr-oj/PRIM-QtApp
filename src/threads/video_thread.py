@@ -99,7 +99,6 @@ class VideoThread(QThread):
 
         self.running = True
 
-
     def _make_test_image(self, w,h,text):
         img = QImage(w,h,QImage.Format_RGB32)
         img.fill(Qt.darkGray)
@@ -109,34 +108,37 @@ class VideoThread(QThread):
 
     def run(self):
         log.debug("VideoThread started")
-        self.running = True
         try:
             while self.running:
-                if self.cap:
-                    ret, frame = self.cap.read()
-                    if not ret or frame is None:
-                        img, frame = self.test_img, None
-                    else:
-                        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        h,w,ch = rgb.shape
-                        stride = ch * w
-                        img = QImage(rgb.data, w, h, stride, QImage.Format_RGB888)
-                else:
-                    img, frame = self.test_img, None
-                    self.msleep(100)
+                ret, frame = False, None
 
-                # emit every loop
+                if self.cap:
+                    try:
+                        ret, frame = self.cap.read()
+                    except cv2.error as e:
+                        log.exception("OpenCV read() error, falling back to test image")
+                        ret, frame = False, None
+
+                # if capture failed, display the test image
+                if not ret or frame is None:
+                    img = self.test_img or self._make_test_image(640, 480, "No Video")
+                else:
+                    # convert to RGB QImage
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    h, w, _ = frame.shape
+                    img = QImage(frame.data, w, h, QImage.Format_RGB888)
+
                 self.frame_ready.emit(img, frame)
         except Exception:
             log.exception("Unexpected error in VideoThread.run()")
         finally:
             self.running = False
-            if getattr(self, 'cap', None):
-                try:
-                    self.cap.release()
-                    log.debug(f"Camera {self.camera_index} released")
-                except Exception:
-                    log.exception("Error releasing camera in run()")
+        if getattr(self, 'cap', None):
+            try:
+                self.cap.release()
+                log.debug(f"Camera {self.camera_index} released")
+            except Exception:
+                log.exception("Error releasing camera in run()")
 
     def stop(self):
         log.debug("stop() called for VideoThread")
