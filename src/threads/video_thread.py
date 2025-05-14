@@ -5,8 +5,10 @@ from PyQt5.QtGui  import QImage, QPainter, QFont
 class VideoThread(QThread):
     frame_ready = pyqtSignal(QImage, object)
 
-    def __init__(self, camera_index=0):
+    def __init__(self, preferred=None):
         super().__init__()
+        self.running = False
+        self.test_img = None
 
         # 1) Choose preferred backend per OS
         if sys.platform == "darwin":

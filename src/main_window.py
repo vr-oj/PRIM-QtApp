@@ -1,5 +1,12 @@
-import sys, cv2
+import sys, cv2, os, logging, traceback
 import math, time
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s"
+)
+log = logging.getLogger(__name__)
+
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel,
@@ -55,8 +62,15 @@ class SquareVideoLabel(QLabel):
 
 class MainWindow(QMainWindow):
     def __init__(self):
-        super().__init__()
-        self.setWindowTitle("PRIM Live View")
+        try:
+            super().__init__()
+            self.setWindowTitle("PRIM Live View")
+            self._base = os.path.dirname(__file__)
+
+        except Exception:
+            log.exception("Failed to initialize MainWindow")
+            # re‑raise so our prim_app.py catch can exit cleanly
+            raise
 
         # plotting buffers
         self.frames = []
@@ -75,7 +89,12 @@ class MainWindow(QMainWindow):
         self.trial_recorder = None
         self.latest_frame = None
 
-        self._build_ui()
+        try:
+            self._build_ui()
+        except Exception:
+            log.exception("Error during _build_ui()")
+            raise
+
         self._start_video_thread()
         self.showMaximized()
 
@@ -134,26 +153,33 @@ class MainWindow(QMainWindow):
             self.port_combo.addItem(f"{port} ({desc})", port)
         tb.addWidget(self.port_combo)
         # Actions
-        self.actConnect = QAction(QIcon("icons/plug.svg"), "", self)
+        plug_icon = os.path.join(self._base, "icons", "plug.svg")
+        self.actConnect = QAction(QIcon(plug_icon), "", self)
         self.actConnect.setToolTip("Connect (Ctrl+K)"); self.actConnect.setShortcut("Ctrl+K")
         tb.addAction(self.actConnect)
-        self.actInit = QAction(QIcon("icons/sync.svg"), "", self)
+        plug_icon = os.path.join(self._base, "icons", "sync.svg")
+        self.actConnect = QAction(QIcon(plug_icon), "", self)
         self.actInit.setToolTip("Re‑Sync (Ctrl+I)"); self.actInit.setShortcut("Ctrl+I"); self.actInit.setEnabled(False)
         tb.addAction(self.actInit)
-        self.actStart = QAction(QIcon("icons/record.svg"), "", self)
+        plug_icon = os.path.join(self._base, "icons", "record.svg")
+        self.actConnect = QAction(QIcon(plug_icon), "", self)
         self.actStart.setToolTip("Start Trial (Ctrl+R)"); self.actStart.setShortcut("Ctrl+R"); self.actStart.setEnabled(False)
         tb.addAction(self.actStart)
-        self.actStop = QAction(QIcon("icons/stop.svg"), "", self)
+        plug_icon = os.path.join(self._base, "icons", "stop.svg")
+        self.actConnect = QAction(QIcon(plug_icon), "", self)
         self.actStop.setToolTip("Stop Trial (Ctrl+T)"); self.actStop.setShortcut("Ctrl+T"); self.actStop.setEnabled(False)
         tb.addAction(self.actStop)
         tb.addSeparator()
-        self.actPumpOn = QAction(QIcon("icons/pump-on.svg"), "", self)
+        plug_icon = os.path.join(self._base, "icons", "pump-on.svg")
+        self.actConnect = QAction(QIcon(plug_icon), "", self)
         self.actPumpOn.setToolTip("Pump On (Ctrl+P)"); self.actPumpOn.setShortcut("Ctrl+P"); tb.addAction(self.actPumpOn)
-        self.actPumpOff = QAction(QIcon("icons/pump-off.svg"), "", self)
+        seplug_icon = os.path.join(self._base, "icons", "pump=off.svg")
+        self.actConnect = QAction(QIcon(plug_icon), "", self)
         self.actPumpOff.setToolTip("Pump Off (Ctrl+O)"); self.actPumpOff.setShortcut("Ctrl+O"); tb.addAction(self.actPumpOff)
         tb.addSeparator()
         self.sync_icon = QLabel("Sync: ❓"); tb.addWidget(self.sync_icon)
-        self.actNewSession = QAction(QIcon("icons/file-plus.svg"), "", self)
+        plug_icon = os.path.join(self._base, "icons", "file-plus.svg")
+        self.actConnect = QAction(QIcon(plug_icon), "", self)
         self.actNewSession.setToolTip("New Session (Ctrl+N)"); self.actNewSession.setShortcut("Ctrl+N"); tb.addAction(self.actNewSession)
         # Camera selector
         self.cam_combo = QComboBox()
