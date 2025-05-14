@@ -19,30 +19,22 @@ from threads.video_thread import VideoThread
 from threads.serial_thread import SerialThread
 from recording import TrialRecorder
 from utils import list_serial_ports, timestamped_filename, list_cameras
-
-
+from recording import VideoRecorder
 class SquareVideoLabel(QLabel):
     """
-    A QLabel that:
-      • paints a black background,
-      • keeps a master pixmap around,
-      • letter‑boxes that pixmap to a square region inside itself,
-      • and re‑scales on every resize.
+    Paints a black background, holds onto the full pixmap,
+    and on every resize letter‑boxes it into a square.
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # center the image
-        self.setAlignment(Qt.AlignCenter)
-        # black background for letter‑box bars
-        self.setStyleSheet("background-color: black;")
-        # hold the last full‑size pixmap
         self._orig = None
-        # suggest a minimum square size
-        self.setMinimumSize(200, 200)
+        self.setStyleSheet("background-color: black;")
+        self.setAlignment(Qt.AlignCenter)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMinimumSize(200,200)
 
     def setPixmap(self, pix: QPixmap):
-        # store the master
+        # store the master copy
         self._orig = pix
         self._update_scaled()
 
@@ -53,7 +45,7 @@ class SquareVideoLabel(QLabel):
     def _update_scaled(self):
         if not self._orig:
             return
-        # letter‑box into a square of size = min(width, height)
+        # square of side = min(width,height)
         side = min(self.width(), self.height())
         scaled = self._orig.scaled(
             side, side,
@@ -61,7 +53,6 @@ class SquareVideoLabel(QLabel):
             Qt.SmoothTransformation
         )
         super().setPixmap(scaled)
-
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -112,14 +103,11 @@ class MainWindow(QMainWindow):
         # ─── Central Splitter ────────────────────────────────────────────
         central = QWidget()
         self.setCentralWidget(central)
-
-        # **use our SquareVideoLabel here**
         self.video_label = SquareVideoLabel()
+
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.addWidget(self.video_label)
         self.splitter.addWidget(self.canvas)
-        self.splitter.setStretchFactor(0,1)
-        self.splitter.setStretchFactor(1,1)
 
         lay = QHBoxLayout(central)
         lay.setContentsMargins(0,0,0,0)
@@ -233,12 +221,13 @@ class MainWindow(QMainWindow):
 
 
     def _on_frame(self, img: QImage, frame_bgr):
-        # stash raw for recording
+        # stash raw frame for recording
         self.latest_frame = frame_bgr
 
-        # convert to pixmap & hand to our square label
-        pm = QPixmap.fromImage(img)
-        self.video_label.setPixmap(pm)
+        # convert QImage -> QPixmap once, let SquareVideoLabel do the rest
+        pix = QPixmap.fromImage(img)
+        self.video_label.setPixmap(pix)
+
 
 
     def _toggle_serial(self):
@@ -269,30 +258,30 @@ class MainWindow(QMainWindow):
             self.sync_icon.setText("Sync: ❓")
             self._append_console("→ CAM_TRIG")
 
-
     def _start_trial(self):
+        # 1) Ask user for a base filename (no extension)
         basepath, _ = QFileDialog.getSaveFileName(
-            self, "Save Trial As…", "", "Base name (no extension)"
+            self, 
+            "Save Trial As…", 
+            "", 
+            "Base name (no extension)"
         )
         if not basepath:
             return
 
-        # reset
-        self.frames.clear()
-        self.times.clear()
-        self.pressures.clear()
-        self._t0 = None
-        self.ax.cla()
-        self.line, = self.ax.plot([],[], '-')
-
-        self.trial_recorder = TrialRecorder(
-            basepath=basepath,
+        # 2) Build an AVI writer instead of MP4
+        filename = basepath + ".avi"
+        recorder = VideoRecorder(
+            filename=filename,
+            fourcc='XVID',
             fps=30,
-            frame_size=(640,480)
+            frame_size=(640, 480)
         )
+        self.trial_recorder = recorder
+
+        # 3) Toggle UI buttons
         self.actStart.setEnabled(False)
         self.actStop .setEnabled(True)
-
 
     def _stop_trial(self):
         if self.trial_recorder:

@@ -1,10 +1,17 @@
 import cv2, csv, os, time
 
 class VideoRecorder:
-    def __init__(self, filename, fourcc='mp4v', fps=30, frame_size=(640,480)):
+    def __init__(self, filename, fourcc='XVID', fps=30, frame_size=(640,480)):
         os.makedirs(os.path.dirname(filename) or '.', exist_ok=True)
-        self.writer = cv2.VideoWriter(filename, cv2.VideoWriter_fourcc(*fourcc), fps, frame_size)
-        self.frame_count = 0; self.is_recording = True
+        # e.g. filename ends in .avi, and we use XVID as the codec
+        self.writer = cv2.VideoWriter(
+            filename,
+            cv2.VideoWriter_fourcc(*fourcc),
+            fps,
+            frame_size
+        )
+        self.frame_count = 0
+        self.is_recording = True
 
     def write_frame(self, frame):
         if self.is_recording:
