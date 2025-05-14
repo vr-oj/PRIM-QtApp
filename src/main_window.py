@@ -119,14 +119,23 @@ class MainWindow(QMainWindow):
         # ─── Central Splitter ───────────────────────────────────────
         central = QWidget()
         self.setCentralWidget(central)
+
+        # 1) instantiate the splitter
         self.splitter = QSplitter(Qt.Horizontal)
+
+        # 2) add the camera widget
         self.qt_camera = QtCameraWidget(self)
         self.qt_camera.frame_ready.connect(self._on_frame)
         self.splitter.addWidget(self.qt_camera)
+
+        # 3) add your matplotlib canvas
         self.splitter.addWidget(self.canvas)
+
+        # 4) and finally put the splitter into the layout
         layout = QHBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        layout.addWidget(self.splitter)
 
         # ─── Console Dock ──────────────────────────────────────────
         self.console_dock = QDockWidget("Console", self)

@@ -1,5 +1,11 @@
 from PyQt5.QtWidgets       import QWidget, QVBoxLayout
-from PyQt5.QtMultimedia    import QCamera, QCameraInfo, QVideoProbe, QVideoFrame
+from PyQt5.QtMultimedia    import (
+    QCamera,
+    QCameraInfo,
+    QVideoProbe,
+    QVideoFrame,
+    QAbstractVideoBuffer,
+)
 from PyQt5.QtMultimediaWidgets import QCameraViewfinder
 from PyQt5.QtCore          import pyqtSignal, Qt
 from PyQt5.QtGui           import QImage
@@ -35,7 +41,8 @@ class QtCameraWidget(QWidget):
         if not frame.isValid():
             return
 
-        frame.map(QVideoFrame.ReadOnly)
+        # map the underlying buffer in read‑only mode
+        frame.map(QAbstractVideoBuffer.ReadOnly)
 
         img = QImage(
             frame.bits(),
