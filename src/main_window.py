@@ -354,7 +354,8 @@ class TopControlPanel(QWidget):
         layout.setSpacing(15)
 
         self.camera_controls = CameraControlPanel(self)
-        layout.addWidget(self.camera_controls, 1)
+        self.camera_controls.setMaximumWidth(350)        # don’t let it get wider than 350px
+        layout.addWidget(self.camera_controls, 0)        # stretch‑factor 0 → only its preferred width
 
         prim_box = QGroupBox("PRIM Device Status")
         prim_form = QFormLayout(prim_box); prim_form.setSpacing(8)
@@ -649,8 +650,8 @@ class MainWindow(QMainWindow):
         # ─── Top tools ribbon ───────────────────────────────
         self.top_ctrl = TopControlPanel(self)
         # Make the ribbon a fixed‑height strip
-        self.top_ctrl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        self.top_ctrl.setMinimumHeight(120)   # adjust as you like
+        self.top_ctrl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.top_ctrl.setFixedHeight(100)   # adjust as you like
         v_layout.addWidget(self.top_ctrl)
 
         # Connect top_ctrl signals
