@@ -459,6 +459,24 @@ class MainWindow(QMainWindow):
         except ValueError:
             log.error(f"Invalid resolution string: {resolution_str}")
 
+    # ────────────────────────────────────────────────────────────────
+    # Slot: handle each new frame from the camera widget
+    def _on_frame_ready(self, qimage, bgr_frame_obj):
+        """
+        qimage: the QImage shown in the viewfinder
+        bgr_frame_obj: a NumPy BGR array (or None if not provided)
+        """
+        # If we’re recording, write the raw BGR frame to disk
+        if self._is_recording and bgr_frame_obj is not None:
+            try:
+                self.trial_recorder.write_video_frame(bgr_frame_obj)
+            except Exception as e:
+                log.error(f"Error writing video frame: {e}", exc_info=True)
+                # stop recording to avoid infinite errors
+                self._stop_pc_recording()
+                sb = self.statusBar()
+                if sb:
+                    sb.showMessage("ERROR: Video recording failed.", 5000)
 
     # — Application menu
     def _build_menu(self):
