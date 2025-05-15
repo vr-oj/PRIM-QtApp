@@ -18,7 +18,8 @@ class QtCameraWidget(QWidget):
 
     def __init__(self, camera_id=-1, parent=None):
         super().__init__(parent)
-        self.camera_id = camera_id
+        # if nobody told us which to use, grab the first one:
+        self.camera_id = camera_id if camera_id >= 0 else 0
         self.camera: QCamera | None = None # Type hint
         self.probe: QVideoProbe | None = None
         self.viewfinder: QCameraViewfinder | None = None
@@ -32,12 +33,10 @@ class QtCameraWidget(QWidget):
         layout.addWidget(self.viewfinder)
         self.viewfinder.setMinimumSize(320, 240)
         self.setMinimumSize(320, 240)
-
-        if self.camera_id != -1:
-            self._setup_camera_device()
-        else:
-            self._show_error_message("No camera selected (Hint: Pick from top panel).")
-
+        
+        # always try to spin up the camera:
+        self._setup_camera_device()
+        
     def _setup_camera_device(self):
         self.stop_camera_resources()
         available_cameras = QCameraInfo.availableCameras()
