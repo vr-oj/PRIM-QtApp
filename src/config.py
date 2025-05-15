@@ -13,8 +13,8 @@ DEFAULT_SERIAL_BAUD_RATE = 115200
 SERIAL_COMMAND_TERMINATOR = b"\n"  # Arduino uses Serial.println()
 
 # Application Information
-APP_VERSION = "1.0.0-passive"
-APP_NAME = "PRIM Passive Logger"
+APP_VERSION = "1.0"
+APP_NAME = "PRIMalyzer"
 ABOUT_TEXT = f"""
 <strong>{APP_NAME} v{APP_VERSION}</strong>
 <p>Passive Data Logger and Viewer for the PRIM system.</p>
@@ -29,7 +29,7 @@ LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR
 # Plotting
 PLOT_MAX_POINTS = 1000  # Max data points to keep on the live plot for performance
 PLOT_DEFAULT_Y_MIN = 0
-PLOT_DEFAULT_Y_MAX = 100  # Adjust based on typical pressure range in mmHg
+PLOT_DEFAULT_Y_MAX = 30  # Adjust based on typical pressure range in mmHg
 
 # Camera settings (can be expanded)
 AVAILABLE_RESOLUTIONS = [  # Example, should be dynamically populated

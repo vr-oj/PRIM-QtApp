@@ -91,8 +91,6 @@ class CameraControlPanel(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("Camera", parent)
-        # QSS Suggestion: Set padding/margins for QGroupBox#CameraControlPanel to smaller values in style.qss
-
         # Main layout for the camera panel
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(5, 5, 5, 5)  # Reduced margins
@@ -155,9 +153,6 @@ class CameraControlPanel(QGroupBox):
 
         # -- ROI Controls Tab --
         roi_controls_widget = QWidget()
-        # self.roi_group = QGroupBox("Region of Interest (ROI)") # Keep as QGroupBox for visual grouping
-        # self.roi_group.setObjectName("RegionOfInterestGroup") # For QSS styling
-        # QSS Suggestion: QGroupBox#RegionOfInterestGroup { margin-top: 5px; padding: 3px; }
 
         roi_layout = QFormLayout(roi_controls_widget)  # Pass roi_controls_widget
         roi_layout.setSpacing(6)
@@ -449,7 +444,6 @@ class PlotControlPanel(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("Plot Controls", parent)
-        # QSS Suggestion: Set padding/margins for QGroupBox#PlotControlPanel to smaller values
         layout = QFormLayout(self)
         layout.setSpacing(6)  # Reduced spacing
         layout.setContentsMargins(5, 5, 5, 5)  # Reduced margins
@@ -545,7 +539,6 @@ class TopControlPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # QSS Suggestion: Set padding/margins for QWidget#TopControlPanel to smaller values
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 2, 5, 2)  # Reduced top/bottom margins
         layout.setSpacing(10)  # Reduced spacing
@@ -555,7 +548,6 @@ class TopControlPanel(QWidget):
         layout.addWidget(self.camera_controls, 1)  # Allow some stretch
 
         prim_box = QGroupBox("PRIM Device Status")
-        # QSS Suggestion: Set padding/margins for QGroupBox#PRIMDeviceStatus to smaller values
         prim_form = QFormLayout(prim_box)
         prim_form.setSpacing(6)
         prim_form.setContentsMargins(5, 5, 5, 5)
@@ -643,7 +635,6 @@ class TopControlPanel(QWidget):
 
     def update_connection_status(self, text, connected):
         self.conn_lbl.setText(text)
-        # QSS Suggestion: Define .connected and .disconnected classes for QLabel in style.qss
         # self.conn_lbl.setProperty("connectionStatus", "connected" if connected else "disconnected")
         # self.conn_lbl.style().unpolish(self.conn_lbl); self.conn_lbl.style().polish(self.conn_lbl)
         color = (
@@ -666,7 +657,6 @@ class PressurePlotWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        # QSS Suggestion: style PressurePlotWidget { border: 1px solid #yourBorderColor; }
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -985,10 +975,8 @@ class MainWindow(QMainWindow):
     # Slot for camera properties from QtCameraWidget already handled by connecting to top_ctrl
 
     def _build_console(self):
-        self.dock_console = QDockWidget("Console Log", self)  # Renamed for clarity
-        self.dock_console.setObjectName("ConsoleLogDock")  # For QSS
-        # QSS Suggestion: QDockWidget#ConsoleLogDock { font-size: 9pt; }
-        # QSS Suggestion: QDockWidget#ConsoleLogDock QTextEdit { background-color: #yourConsoleBg; color: #yourConsoleFg; }
+        self.dock_console = QDockWidget("Console Log", self)
+        self.dock_console.setObjectName("ConsoleLogDock")
         self.dock_console.setAllowedAreas(
             Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea
         )
@@ -1008,7 +996,6 @@ class MainWindow(QMainWindow):
 
     def _build_central_widget_layout(self):  # Renamed
         central_widget = QWidget()
-        # QSS Suggestion: QWidget#CentralWidget { background-color: #someSubtleBg; }
         central_widget.setObjectName("CentralWidget")
 
         outer_layout = QVBoxLayout(central_widget)
@@ -1022,12 +1009,10 @@ class MainWindow(QMainWindow):
             QSizePolicy.Expanding, QSizePolicy.Fixed
         )  # Fixed height
         # self.top_ctrl.setMinimumHeight(100) # Adjust as needed, or let content define it
-        # QSS Suggestion: #TopControlPanel { border-bottom: 1px solid #separator_color; }
         outer_layout.addWidget(self.top_ctrl)
 
         self.main_content_splitter = QSplitter(Qt.Horizontal)
         self.main_content_splitter.setChildrenCollapsible(False)
-        # QSS Suggestion: QSplitter::handle { background-color: #yourHandleColor; width: 3px; }
         self.main_content_splitter.setStyleSheet(
             "QSplitter::handle{background-color:#D8DEE9;}"
         )  # Example color
@@ -1108,8 +1093,6 @@ class MainWindow(QMainWindow):
 
     def _build_menu(self):
         mb = self.menuBar()
-        # QSS Suggestion: QMenuBar { font-size: 9pt; } QMenu { font-size: 9pt; }
-
         file_menu = mb.addMenu("&File")
         exp_data = QAction(
             QIcon(os.path.join(self.icon_dir, "csv.svg")), "Export Plot &Data…", self
@@ -1187,9 +1170,7 @@ class MainWindow(QMainWindow):
 
     def _build_toolbar(self):
         tb = QToolBar("Main Controls")
-        tb.setObjectName("MainToolBar")  # For QSS
-        # QSS Suggestion: QToolBar#MainToolBar { spacing: 5px; }
-        # QSS Suggestion: QToolBar#MainToolBar QToolButton { font-size: 9pt; padding: 3px; }
+        tb.setObjectName("MainToolBar")
         tb.setIconSize(QSize(20, 20))  # Slightly smaller icons
         tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.addToolBar(Qt.TopToolBarArea, tb)
@@ -1204,7 +1185,6 @@ class MainWindow(QMainWindow):
         self.port_combo = QComboBox()
         self.port_combo.setToolTip("Select Serial Port")
         self.port_combo.setMinimumWidth(180)  # Adjust as needed
-        # QSS Suggestion: QComboBox { font-size: 9pt; }
         self.port_combo.addItem("🔌 Simulated Data", None)  # Use an icon/emoji
         try:
             ports = list_serial_ports()
@@ -1242,7 +1222,6 @@ class MainWindow(QMainWindow):
     def _build_statusbar(self):
         sb = self.statusBar() or QStatusBar(self)
         self.setStatusBar(sb)  # Ensure status bar exists
-        # QSS Suggestion: QStatusBar { font-size: 9pt; }
         self.app_time_lbl = QLabel("App Time: 00:00:00")
         sb.addPermanentWidget(self.app_time_lbl)
 
@@ -1417,7 +1396,6 @@ class MainWindow(QMainWindow):
         dlg = QDialog(self)
         dlg.setWindowTitle("Start New PC Recording Trial")
         form = QFormLayout(dlg)
-        # QSS Suggestion for QDialog, QLineEdit, QTextEdit to match theme if needed
         self.trial_name_edit = QLineEdit(
             f"Trial_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')}"
         )
