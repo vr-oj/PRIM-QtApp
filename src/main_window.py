@@ -12,18 +12,20 @@ from PyQt5.QtWidgets import (
     QSizePolicy, QCheckBox, QGroupBox, QSlider, QStyleFactory
 )
 from PyQt5 import QtCore
-from PyQt5.QtCore import Qt, QTimer, QSize, pyqtSignal, QDateTime, QCoreApplication, QUrl # Added QUrl
-from PyQt5.QtGui import QIcon, QFont, QImage, QPixmap, QPalette, QColor, QTextCursor, QKeySequence, QDesktopServices # Added QDesktopServices, QColor
-from PyQt5.QtMultimedia import QCameraInfo # **** ADDED THIS LINE ****
+from PyQt5.QtCore import Qt, QTimer, QSize, pyqtSignal, QDateTime, QCoreApplication, QUrl
+from PyQt5.QtGui import QIcon, QFont, QImage, QPixmap, QPalette, QColor, QTextCursor, QKeySequence, QDesktopServices
+from PyQt5.QtMultimedia import QCameraInfo # For CameraControlPanel
 
 from threads.qtcamera_widget import QtCameraWidget
 from threads.serial_thread import SerialThread
 from recording import TrialRecorder
-from utils import list_serial_ports # list_cameras from utils might be OpenCV based. QCameraInfo is for QtMultimedia.
+# utils.list_cameras uses OpenCV, QCameraInfo is for Qt Multimedia cameras.
+# We will primarily use QCameraInfo for selecting cameras for QtCameraWidget.
+from utils import list_serial_ports # list_cameras can be kept for other purposes if needed
 
 from config import (
     DEFAULT_VIDEO_CODEC, DEFAULT_VIDEO_EXTENSION, DEFAULT_FPS, DEFAULT_FRAME_SIZE,
-    DEFAULT_CAMERA_INDEX,
+    DEFAULT_CAMERA_INDEX, # AVAILABLE_RESOLUTIONS is now dynamic via QtCameraWidget
     APP_NAME, APP_VERSION, ABOUT_TEXT, LOG_LEVEL,
     PLOT_MAX_POINTS, PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX
 )
@@ -31,15 +33,13 @@ from config import (
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
-# import numpy as np # Uncomment if using qimage_to_bgr_numpy
-# import cv2         # Uncomment if using qimage_to_bgr_numpy
+# import numpy as np # Uncomment if/when using qimage_to_bgr_numpy
+# import cv2         # Uncomment if/when using qimage_to_bgr_numpy
 
 numeric_log_level_main = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
 logging.basicConfig(level=numeric_log_level_main,
                     format='%(asctime)s - %(levelname)s [%(name)s:%(lineno)d] %(threadName)s - %(message)s')
 log = logging.getLogger(__name__)
-
-# def qimage_to_bgr_numpy(qimage: QImage) -> np.ndarray | None: ... (keep if needed)
 
 class CameraControlPanel(QGroupBox):
     camera_selected = pyqtSignal(int)
@@ -49,12 +49,14 @@ class CameraControlPanel(QGroupBox):
         super().__init__("Camera", parent)
         cam_layout = QFormLayout(self); cam_layout.setSpacing(8)
         self.cam_selector = QComboBox(); self.cam_selector.setToolTip("Select available camera")
-        self.populate_camera_selector()
+        self.populate_camera_selector() # Call method to populate
         self.cam_selector.currentIndexChanged.connect(self._on_camera_selected_changed)
         cam_layout.addRow("Device:", self.cam_selector)
-        self.res_selector = QComboBox(); self.res_selector.setToolTip("Select camera resolution")
+        
+        self.res_selector = QComboBox(); self.res_selector.setToolTip("Select camera resolution") # Defined here
         self.res_selector.currentIndexChanged.connect(self._on_resolution_selected_changed)
         cam_layout.addRow("Resolution:", self.res_selector); self.res_selector.setEnabled(False)
+        
         self.exposure_slider = QSlider(QtCore.Qt.Horizontal); self.exposure_slider.setEnabled(False); cam_layout.addRow("Exposure:", self.exposure_slider)
         self.gain_slider = QSlider(QtCore.Qt.Horizontal); self.gain_slider.setEnabled(False); cam_layout.addRow("Gain:", self.gain_slider)
         self.brightness_slider = QSlider(QtCore.Qt.Horizontal); self.brightness_slider.setEnabled(False); cam_layout.addRow("Brightness:", self.brightness_slider)
@@ -65,38 +67,51 @@ class CameraControlPanel(QGroupBox):
             cameras_info = QCameraInfo.availableCameras() # Uses the new import
             if cameras_info:
                 for i, cam_info in enumerate(cameras_info):
-                    self.cam_selector.addItem(cam_info.description() or f"Camera {i}", i)
-                config_default_idx = DEFAULT_CAMERA_INDEX
-                if 0 <= config_default_idx < self.cam_selector.count(): self.cam_selector.setCurrentIndex(config_default_idx)
-                elif self.cam_selector.count() > 0: self.cam_selector.setCurrentIndex(0)
-                if self.cam_selector.currentIndex() != -1: self._on_camera_selected_changed(self.cam_selector.currentIndex())
-            else: self.cam_selector.addItem("No cameras found", -1); self.cam_selector.setEnabled(False)
+                    self.cam_selector.addItem(cam_info.description() or f"Camera {i}", i) # Store index as data
+                
+                # Attempt to set to configured default camera index
+                # Note: DEFAULT_CAMERA_INDEX is an integer index.
+                if 0 <= DEFAULT_CAMERA_INDEX < self.cam_selector.count():
+                    self.cam_selector.setCurrentIndex(DEFAULT_CAMERA_INDEX)
+                elif self.cam_selector.count() > 0: # Fallback to first camera
+                    self.cam_selector.setCurrentIndex(0)
+                
+                # Emit signal for initial selection if a camera is actually selected
+                if self.cam_selector.currentIndex() != -1: # Check if a valid item is selected
+                     self._on_camera_selected_changed(self.cam_selector.currentIndex()) # Trigger initial load
+
+            else:
+                self.cam_selector.addItem("No Qt cameras found", -1); self.cam_selector.setEnabled(False)
         except Exception as e:
-            log.error(f"Error listing cameras (QtCameraInfo): {e}", exc_info=True) # More info on error
+            log.error(f"Error listing Qt cameras: {e}", exc_info=True)
             self.cam_selector.addItem("Error listing cameras", -1); self.cam_selector.setEnabled(False)
 
-    def _on_camera_selected_changed(self, index): # Keep as is
-        camera_id = self.cam_selector.itemData(index)
+    def _on_camera_selected_changed(self, index):
+        camera_id = self.cam_selector.itemData(index) # itemData is the index 'i'
         if camera_id is not None and camera_id != -1:
             self.camera_selected.emit(camera_id)
-            self.res_selector.clear(); self.res_selector.setEnabled(False)
-    def _on_resolution_selected_changed(self, index): # Keep as is
+            if hasattr(self, 'res_selector'): # Check if res_selector exists
+                self.res_selector.clear()
+                self.res_selector.setEnabled(False)
+
+    def _on_resolution_selected_changed(self, index):
         res_str = self.res_selector.itemData(index)
         if res_str: self.resolution_selected.emit(res_str)
-    def update_resolutions(self, res_list: list): # Keep as is
-        current_res_data = self.res_selector.currentData() # Store data, not text
+
+    def update_resolutions(self, res_list: list):
+        if not hasattr(self, 'res_selector'): return
+        current_res_data = self.res_selector.currentData()
         self.res_selector.clear()
         if res_list:
-            for res_str_item in res_list: self.res_selector.addItem(res_str_item, res_str_item) # itemData is also res_str
+            for res_str_item in res_list: self.res_selector.addItem(res_str_item, res_str_item)
             self.res_selector.setEnabled(True)
             if current_res_data and self.res_selector.findData(current_res_data) != -1:
                 self.res_selector.setCurrentIndex(self.res_selector.findData(current_res_data))
-            elif DEFAULT_FRAME_SIZE:
+            elif DEFAULT_FRAME_SIZE: # Fallback to config default if previous selection not in new list
                  default_res_str_item = f"{DEFAULT_FRAME_SIZE[0]}x{DEFAULT_FRAME_SIZE[1]}"
                  idx = self.res_selector.findText(default_res_str_item)
                  if idx != -1: self.res_selector.setCurrentIndex(idx)
         else: self.res_selector.addItem("N/A", None); self.res_selector.setEnabled(False)
-
 
 class PlotControlPanel(QGroupBox): # Extracted
     # Signals for plot customization
