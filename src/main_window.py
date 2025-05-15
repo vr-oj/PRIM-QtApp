@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QFormLayout, QDialogButtonBox, QSpinBox, QDoubleSpinBox,
     QSizePolicy, QCheckBox, QGroupBox, QSlider, QStyleFactory
 )
-from PyQt5.QtCore    import Qt, QTimer, QSize, pyqtSignal, QDateTime, QUrl
+from PyQt5.QtCore    import Qt, QTimer, QSize, pyqtSignal, QDateTime, QUrl, pyqtSlot
 from PyQt5.QtGui     import (
     QIcon, QImage, QPixmap, QPalette, QColor,
     QTextCursor, QKeySequence, QDesktopServices
