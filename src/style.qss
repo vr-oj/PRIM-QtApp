@@ -1,107 +1,257 @@
-/* ─── Spartan Green Palette ────────────────────────────────────────────────── */
+/* style.qss */
+
+/* ─── Spartan Green Palette (Hardcoded) ─────────────────────────────────── */
 /* Base greens */
-@spartan-dark:      #18453B;
-@spartan-mid:       #40634A;
-@spartan-light:     #2E674E;
+/* @spartan-dark:      #18453B; */
+/* @spartan-mid:       #40634A; */
+/* @spartan-light:     #2E674E; */
 
 /* Gold accent */
-@spartan-gold:      #D6C832;
+/* @spartan-gold:      #D6C832; */
 
 /* Neutrals & text */
-@neutral-light:     #F9F9F9;
-@neutral-mid:       #7A8C8F;
-@neutral-dark:      #2E3B3A;
-@text-light:        #ECEFF4;
-@text-dark:         #333333;
+/* @neutral-light:     #F9F9F9; */
+/* @neutral-mid:       #7A8C8F; */
+/* @neutral-dark:      #2E3B3A; */
+/* @text-light:        #ECEFF4; */
+/* @text-dark:         #333333; */
 
-/* ─── Main Window & Panels ──────────────────────────────────────────────── */
+/* ─── Main Window & General Widgets ──────────────────────────────────────── */
 QMainWindow {
-  background: @spartan-light;
+    background-color: #2E674E; /* spartan-light */
 }
+
+QWidget { /* General default for unstyled widgets if needed */
+    color: #ECEFF4; /* text-light */
+    /* background-color: #40634A; /* spartan-mid - be careful with global background */
+}
+
 QToolBar, QStatusBar, QDockWidget {
-  background: @spartan-dark;
-  color: @text-light;
+    background-color: #18453B; /* spartan-dark */
+    color: #ECEFF4; /* text-light */
+    border: none; /* Clean look for toolbars and docks */
 }
+
 QStatusBar {
-  border-top: 1px solid @spartan-mid;
+    border-top: 1px solid #40634A; /* spartan-mid */
+}
+
+QStatusBar::item {
+    border: none; /* Ensure no borders on status bar items */
+}
+
+QDockWidget::title {
+    background-color: #40634A; /* spartan-mid */
+    padding: 4px;
+    border-radius: 3px;
+    text-align: left; /* center, left, right */
 }
 
 /* ─── Menus ──────────────────────────────────────────────────────────────── */
 QMenuBar {
-  background: @spartan-mid;
-  color: @text-light;
+    background-color: #18453B; /* spartan-dark, was spartan-mid */
+    color: #ECEFF4; /* text-light */
+}
+QMenuBar::item {
+    background-color: transparent;
+    padding: 4px 8px;
 }
 QMenuBar::item:selected {
-  background: @spartan-gold;
-  color: @spartan-dark;
+    background-color: #D6C832; /* spartan-gold */
+    color: #18453B; /* spartan-dark */
 }
+QMenuBar::item:pressed {
+    background-color: #40634A; /* spartan-mid */
+}
+
 QMenu {
-  background: @spartan-mid;
-  color: @text-light;
+    background-color: #40634A; /* spartan-mid */
+    color: #ECEFF4; /* text-light */
+    border: 1px solid #18453B; /* spartan-dark */
+}
+QMenu::item {
+    padding: 4px 20px;
 }
 QMenu::item:selected {
-  background: @spartan-gold;
-  color: @spartan-dark;
+    background-color: #D6C832; /* spartan-gold */
+    color: #18453B; /* spartan-dark */
+}
+QMenu::separator {
+    height: 1px;
+    background-color: #18453B; /* spartan-dark */
+    margin-left: 5px;
+    margin-right: 5px;
 }
 
 /* ─── Text & Inputs ─────────────────────────────────────────────────────── */
-QLabel, QLineEdit, QTextEdit {
-  color: @text-light;
-  background: @spartan-mid;
-  selection-background-color: @spartan-gold;
-  selection-color: @spartan-dark;
+QLabel {
+    color: #ECEFF4; /* text-light */
+    background-color: transparent; /* Labels shouldn't usually have a background unless intended */
+    padding: 2px;
 }
-QLineEdit, QTextEdit {
-  border: 1px solid @spartan-dark;
-  border-radius: 4px;
-  padding: 2px 4px;
+
+QLineEdit, QTextEdit, QSpinBox, QDoubleSpinBox {
+    color: #ECEFF4; /* text-light */
+    background-color: #40634A; /* spartan-mid */
+    selection-background-color: #D6C832; /* spartan-gold */
+    selection-color: #18453B; /* spartan-dark */
+    border: 1px solid #18453B; /* spartan-dark */
+    border-radius: 4px;
+    padding: 4px; /* Increased padding */
 }
+
+QTextEdit {
+    background-color: #2E3B3A; /* neutral-dark, for console-like appearance */
+    color: #F9F9F9; /* neutral-light */
+    font-family: "Monospace", "Courier New", Courier, monospace;
+}
+
 
 /* ─── Buttons ───────────────────────────────────────────────────────────── */
 QPushButton {
-  background: @spartan-mid;
-  color: @text-light;
-  border: 1px solid @spartan-dark;
-  border-radius: 4px;
-  padding: 4px 8px;
+    background-color: #40634A; /* spartan-mid */
+    color: #ECEFF4; /* text-light */
+    border: 1px solid #18453B; /* spartan-dark */
+    border-radius: 4px;
+    padding: 5px 10px; /* Slightly more padding */
+    min-width: 60px; /* Ensure buttons have some minimum width */
 }
 QPushButton:hover {
-  background: @spartan-gold;
-  color: @spartan-dark;
+    background-color: #2E674E; /* spartan-light (darker than gold for better contrast with gold text if we switched) */
+    border: 1px solid #D6C832; /* spartan-gold */
+    color: #ECEFF4;
 }
+QPushButton:pressed {
+    background-color: #18453B; /* spartan-dark */
+    color: #D6C832; /* spartan-gold */
+}
+QPushButton:disabled {
+    background-color: #7A8C8F; /* neutral-mid */
+    color: #2E3B3A; /* neutral-dark */
+    border-color: #2E3B3A;
+}
+
 
 /* ─── Group Boxes ───────────────────────────────────────────────────────── */
 QGroupBox {
-  background-color: @neutral-light;
-  border: 1px solid @spartan-dark;
-  border-radius: 6px;
-  margin-top: 1.2em;
-  padding: 8px;
+    background-color: transparent; /* Let parent background show, or set explicitly */
+    border: 1px solid #40634A; /* spartan-mid */
+    border-radius: 6px;
+    margin-top: 1em; /* Space for title */
+    padding: 10px;
+    padding-top: 15px; /* Extra padding at top to avoid overlap with title */
 }
 QGroupBox::title {
-  subcontrol-origin: margin;
-  subcontrol-position: top left;
-  padding: 0 6px;
-  color: @spartan-dark;
-  background-color: @neutral-light;
-  font-weight: bold;
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0px 5px; /* Horizontal padding for title */
+    margin-left: 10px; /* Indent title slightly */
+    color: #ECEFF4; /* text-light */
+    background-color: #2E674E; /* spartan-light (matches window bg) */
+    font-weight: bold;
+    border-radius: 3px;
 }
 
 /* ─── Sliders ───────────────────────────────────────────────────────────── */
 QSlider::groove:horizontal {
-  height: 6px;
-  background: @neutral-mid;
-  border-radius: 3px;
+    height: 8px; /* Slightly thicker */
+    background: #2E3B3A; /* neutral-dark */
+    border-radius: 4px;
 }
 QSlider::handle:horizontal {
-  width: 14px;
-  background: @spartan-dark;
-  margin: -4px 0;
-  border-radius: 7px;
+    width: 16px; /* Slightly wider */
+    background: #D6C832; /* spartan-gold */
+    margin: -4px 0; /* Adjust to center vertically */
+    border-radius: 8px;
+    border: 1px solid #18453B; /* spartan-dark */
+}
+QSlider::add-page:horizontal {
+    background: #7A8C8F; /* neutral-mid */
+    border-radius: 4px;
+}
+QSlider::sub-page:horizontal {
+    background: #D6C832; /* spartan-gold */
+    border-radius: 4px;
+}
+
+/* ─── ComboBox ──────────────────────────────────────────────────────────── */
+QComboBox {
+    color: #ECEFF4;
+    background-color: #40634A;
+    border: 1px solid #18453B;
+    border-radius: 4px;
+    padding: 4px;
+    min-width: 6em;
+}
+QComboBox:hover {
+    border: 1px solid #D6C832;
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 20px;
+    border-left-width: 1px;
+    border-left-color: #18453B;
+    border-left-style: solid;
+    border-top-right-radius: 3px;
+    border-bottom-right-radius: 3px;
+    background-color: #40634A;
+}
+QComboBox::down-arrow {
+    image: url(icons/down_arrow.svg); /* You'll need to create/find a suitable SVG icon */
+    width: 10px;
+    height: 10px;
+}
+QComboBox QAbstractItemView { /* The dropdown list */
+    color: #ECEFF4;
+    background-color: #18453B; /* spartan-dark */
+    border: 1px solid #D6C832; /* spartan-gold */
+    selection-background-color: #D6C832;
+    selection-color: #18453B;
+    padding: 2px;
+}
+
+/* ─── CheckBox ──────────────────────────────────────────────────────────── */
+QCheckBox {
+    spacing: 5px;
+    color: #ECEFF4;
+}
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+}
+QCheckBox::indicator:unchecked {
+    background-color: #40634A; /* spartan-mid */
+    border: 1px solid #18453B;
+}
+QCheckBox::indicator:unchecked:hover {
+    border: 1px solid #D6C832;
+}
+QCheckBox::indicator:checked {
+    background-color: #D6C832; /* spartan-gold */
+    border: 1px solid #18453B;
+    image: url(icons/checkmark.svg); /* You'll need a checkmark icon */
 }
 
 /* ─── Splitter Handle ───────────────────────────────────────────────────── */
 QSplitter::handle {
-  background-color: @spartan-dark;
-  width: 4px;
+    background-color: #18453B; /* spartan-dark */
+    width: 5px; /* Slightly thicker for easier grabbing */
+    height: 5px; /* For vertical splitter too */
 }
+QSplitter::handle:horizontal {
+    width: 5px;
+}
+QSplitter::handle:vertical {
+    height: 5px;
+}
+QSplitter::handle:hover {
+    background-color: #40634A; /* spartan-mid */
+}
+QSplitter::handle:pressed {
+    background-color: #D6C832; /* spartan-gold */
+}
+
+/* Matplotlib canvas - often needs to be handled carefully or left to default */
+/* FigureCanvas QWidget { background-color: white; } */ /* If you want the plot background white */
