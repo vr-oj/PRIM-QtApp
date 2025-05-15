@@ -6,7 +6,7 @@ from PyQt5.QtGui        import QImage, QPixmap
 class QtCameraWidget(QWidget):
     frame_ready = pyqtSignal(QImage, object)
 
-    def __init__(self, parent=None):
+    def __init__(self, camera_id: int = -1, parent=None):
         super().__init__(parent)
         self.label = QLabel(self)
         self.label.setAlignment(Qt.AlignCenter)
