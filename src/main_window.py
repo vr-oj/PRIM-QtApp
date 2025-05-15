@@ -245,7 +245,7 @@ class CameraControlPanel(QGroupBox):
         if grp:
             grp.setEnabled(max_w > 0 and max_h > 0)
         else:
-            self.logger.warning("ROI groupbox not found; skipping ROI enable/disable")
+            log.warning("ROI groupbox not found; skipping ROI enable/disable")
 
     def _on_camera_selected_changed(self, index):
         cam_id = self.cam_selector.itemData(index)
@@ -643,7 +643,11 @@ class MainWindow(QMainWindow):
         cw = QWidget(); v_layout = QVBoxLayout(cw)
         v_layout.setContentsMargins(5,5,5,5); v_layout.setSpacing(5)
 
+        # ─── Top tools ribbon ───────────────────────────────
         self.top_ctrl = TopControlPanel(self)
+        # Make the ribbon a fixed‑height strip
+        self.top_ctrl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.top_ctrl.setFixedHeight(180)   # adjust as you like
         v_layout.addWidget(self.top_ctrl)
 
         # Connect top_ctrl signals
@@ -651,24 +655,31 @@ class MainWindow(QMainWindow):
         self.top_ctrl.resolution_selected.connect(self._on_camera_resolution_selected)
         self.top_ctrl.export_plot_image_requested.connect(lambda: self.plot_w.export_as_image())
 
-        self.splitter = QSplitter(Qt.Horizontal)
-        self.splitter.setStyleSheet("QSplitter::handle{background-color:#18453B;}")
+        # ─── Main area: camera & plot ───────────────────────
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.setStyleSheet("QSplitter::handle{background-color:#18453B;}")
 
-        # Camera area
-        cam_container = QWidget(); cam_lay = QVBoxLayout(cam_container)
+        # (a) Camera pane
+        cam_container = QWidget()
+        cam_lay = QVBoxLayout(cam_container)
         cam_lay.setContentsMargins(0,0,0,0)
         self.qt_cam = QtCameraWidget(parent=self)
         self.qt_cam.frame_ready.connect(self._on_frame_ready)
         self.qt_cam.camera_error.connect(self._on_camera_error)
         self.qt_cam.camera_resolutions_updated.connect(self.top_ctrl.update_camera_resolutions)
         cam_lay.addWidget(self.qt_cam)
-        self.splitter.addWidget(cam_container)
+        splitter.addWidget(cam_container)
 
-        # Plot area
+        # (b) Plot pane
         self.plot_w = PressurePlotWidget()
-        self.splitter.addWidget(self.plot_w)
+        splitter.addWidget(self.plot_w)
 
-        # Wire plot-control buttons
+        # Give the plot a little more real estate by default
+        splitter.setStretchFactor(0, 2)  # camera
+        splitter.setStretchFactor(1, 3)  # plot
+
+        # Wire plot‑control buttons
         self.top_ctrl.plot_controls.reset_btn.clicked.connect(
             lambda: self.plot_w.reset_zoom(
                 self.top_ctrl.plot_controls.auto_x_cb.isChecked(),
@@ -678,7 +689,8 @@ class MainWindow(QMainWindow):
         self.top_ctrl.plot_controls.x_axis_limits_changed.connect(self.plot_w.set_manual_x_limits)
         self.top_ctrl.plot_controls.y_axis_limits_changed.connect(self.plot_w.set_manual_y_limits)
 
-        v_layout.addWidget(self.splitter, 1)
+        # Add splitter as the main content (stretch=1)
+        v_layout.addWidget(splitter, 1)
         self.setCentralWidget(cw)
 
         # Populate cameras and then resolutions
