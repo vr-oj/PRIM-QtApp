@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore    import Qt, QTimer, QSize, pyqtSignal, QDateTime, QUrl, pyqtSlot
 from PyQt5.QtGui     import (
     QIcon, QImage, QPixmap, QPalette, QColor,
-    QTextCursor, QKeySequence, QDesktopServices
+    QTextCursor, QKeySequence, QDesktopServices, QFont
 )
 from PyQt5.QtMultimedia import QCameraInfo
 
