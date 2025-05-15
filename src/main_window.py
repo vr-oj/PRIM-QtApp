@@ -477,7 +477,13 @@ class MainWindow(QMainWindow):
                 sb = self.statusBar()
                 if sb:
                     sb.showMessage("ERROR: Video recording failed.", 5000)
-
+    
+    def _on_camera_error(self, error_message: str, error_code: int):
+        # Add your camera error handling logic here
+        # For example, log the error and display a message to the user
+        log.error(f"Camera Error: {error_message} (Code: {error_code})")
+        QMessageBox.warning(self, "Camera Error", f"{error_message} (Error Code: {error_code})")
+        
     # — Application menu
     def _build_menu(self):
         mb = self.menuBar()
