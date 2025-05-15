@@ -1,6 +1,6 @@
 # src/threads/qtcamera_widget.py
 import cv2
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy
 from PyQt5.QtCore import QTimer, pyqtSignal, Qt, QSize
 from PyQt5.QtGui import QImage, QPixmap
 import logging
@@ -31,8 +31,13 @@ class QtCameraWidget(QWidget):
     def __init__(self, camera_id: int = -1, camera_description: str = "", parent=None):
         super().__init__(parent)
         self.label = QLabel(self)
+        # center the image in the widget
         self.label.setAlignment(Qt.AlignCenter)
         self.label.setText("Camera feed will appear here.")
+        # allow the pixmap to scale down/up while preserving aspect ratio
+        self.label.setScaledContents(False)
+        self.label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+ 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.label)
@@ -248,7 +253,19 @@ class QtCameraWidget(QWidget):
 
             bytes_per_line = ch * w
             qimg = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
-            self.label.setPixmap(QPixmap.fromImage(qimg))
+
+            # —– new pixmap + scaling logic —–
+            pix = QPixmap.fromImage(qimg)
+            # store the full‑resolution pixmap so we can re‑scale on resize
+            self.label._last_pixmap = pix
+            # scale to fit current label size, keep aspect ratio
+            self.label.setPixmap(
+                pix.scaled(
+                    self.label.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+            )
             self.frame_ready.emit(qimg.copy(), bgr_frame_for_recording)
         else:
             pass
@@ -396,6 +413,18 @@ class QtCameraWidget(QWidget):
         
         log.debug(f"Queried camera properties payload: {properties_payload}")
         self.camera_properties_updated.emit(properties_payload)
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        # if we have a last pixmap, re‑scale it
+        if hasattr(self.label, "_last_pixmap"):
+            scaled = self.label._last_pixmap.scaled(
+                self.label.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.label.setPixmap(scaled)
+
 
     def closeEvent(self, event):
         log.info("QtCameraWidget closeEvent called.")

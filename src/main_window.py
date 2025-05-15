@@ -104,6 +104,8 @@ class CameraControlPanel(QGroupBox):
         roi_layout.addRow("ROI Y:", self.roi_y_spin)
         roi_layout.addRow("ROI Width (0=full):", self.roi_w_spin)
         roi_layout.addRow("ROI Height (0=full):", self.roi_h_spin)
+        self.roi_group = QGroupBox("Region of Interest (ROI)")
+        self.roi_group.setObjectName("Region of Interest (ROI)")
         roi_layout.addRow(self.reset_roi_btn)
         layout.addRow(roi_gb)
         
@@ -239,7 +241,11 @@ class CameraControlPanel(QGroupBox):
         
         self.reset_roi_btn.setEnabled(max_w > 0 and max_h > 0)
         # Enable the whole ROI groupbox
-        self.parent().findChild(QGroupBox, "Region of Interest (ROI)").setEnabled(max_w > 0 and max_h > 0)
+        grp = self.parent().findChild(QGroupBox, "Region of Interest (ROI)")
+        if grp:
+            grp.setEnabled(max_w > 0 and max_h > 0)
+        else:
+            self.logger.warning("ROI groupbox not found; skipping ROI enable/disable")
 
     def _on_camera_selected_changed(self, index):
         cam_id = self.cam_selector.itemData(index)
