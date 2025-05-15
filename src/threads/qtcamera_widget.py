@@ -5,6 +5,8 @@ from PyQt5.QtGui        import QImage, QPixmap
 
 class QtCameraWidget(QWidget):
     frame_ready = pyqtSignal(QImage, object)
+    camera_error = pyqtSignal(str, int)
+
 
     def __init__(self, camera_id: int = -1, parent=None):
         super().__init__(parent)
