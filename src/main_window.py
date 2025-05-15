@@ -680,7 +680,7 @@ class MainWindow(QMainWindow):
 
         # Give the plot a little more real estate by default
         self.main_content_splitter.setStretchFactor(0, 1)    # camera
-        splitter.setStretchFactor(1, 1)    # plot
+        self.main_content_splitter.setStretchFactor(1, 1)    # plot
 
         # Wire plot‑control buttons
         self.top_ctrl.plot_controls.reset_btn.clicked.connect(
