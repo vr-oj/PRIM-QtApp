@@ -352,6 +352,8 @@ class TopControlPanel(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10,5,10,5)
         layout.setSpacing(15)
+        font = QFont("Segoe UI", 9)            # ~9 pt instead of 11–12
+        self.setFont(font)
 
         self.camera_controls = CameraControlPanel(self)
         self.camera_controls.setMaximumWidth(350)        # don’t let it get wider than 350px
@@ -666,9 +668,18 @@ class MainWindow(QMainWindow):
 
         # (a) Camera pane
         cam_container = QWidget()
+        cam_container = QWidget()
+        # ─── lock the camera pane to max 640px ─────────────────
+        cam_container.setMaximumWidth(640)
+        cam_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         cam_lay = QVBoxLayout(cam_container)
         cam_lay.setContentsMargins(0,0,0,0)
         self.qt_cam = QtCameraWidget(parent=self)
+        self.qt_cam.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        try:
+            self.qt_cam.video_label.setScaledContents(True)
+        except AttributeError:
+            pass
         self.qt_cam.frame_ready.connect(self._on_frame_ready)
         self.qt_cam.camera_error.connect(self._on_camera_error)
         self.qt_cam.camera_resolutions_updated.connect(self.top_ctrl.update_camera_resolutions)
@@ -682,6 +693,9 @@ class MainWindow(QMainWindow):
         # Give the plot a little more real estate by default
         self.main_content_splitter.setStretchFactor(0, 1)    # camera
         self.main_content_splitter.setStretchFactor(1, 1)    # plot
+        # Give the plot more space: camera=1, plot=3
+        self.main_content_splitter.setStretchFactor(0, 1)    # camera pane
+        self.main_content_splitter.setStretchFactor(1, 3)    # plot pane
 
         # Wire plot‑control buttons
         self.top_ctrl.plot_controls.reset_btn.clicked.connect(
