@@ -1,6 +1,107 @@
-QMainWindow { background: #2E3440; }
-QToolBar   { background: #3B4252; spacing: 8px; }
-QLabel, QLineEdit, QTextEdit { color: #ECEFF4; background: #434C5E; }
-QPushButton { background: #5E81AC; color: #ECEFF4; border-radius:4px; }
-QPushButton:hover { background: #81A1C1; }
-QStatusBar { background: #3B4252; color: #D8DEE9; }
+/* ─── Spartan Green Palette ────────────────────────────────────────────────── */
+/* Base greens */
+@spartan-dark:      #18453B;
+@spartan-mid:       #40634A;
+@spartan-light:     #2E674E;
+
+/* Gold accent */
+@spartan-gold:      #D6C832;
+
+/* Neutrals & text */
+@neutral-light:     #F9F9F9;
+@neutral-mid:       #7A8C8F;
+@neutral-dark:      #2E3B3A;
+@text-light:        #ECEFF4;
+@text-dark:         #333333;
+
+/* ─── Main Window & Panels ──────────────────────────────────────────────── */
+QMainWindow {
+  background: @spartan-light;
+}
+QToolBar, QStatusBar, QDockWidget {
+  background: @spartan-dark;
+  color: @text-light;
+}
+QStatusBar {
+  border-top: 1px solid @spartan-mid;
+}
+
+/* ─── Menus ──────────────────────────────────────────────────────────────── */
+QMenuBar {
+  background: @spartan-mid;
+  color: @text-light;
+}
+QMenuBar::item:selected {
+  background: @spartan-gold;
+  color: @spartan-dark;
+}
+QMenu {
+  background: @spartan-mid;
+  color: @text-light;
+}
+QMenu::item:selected {
+  background: @spartan-gold;
+  color: @spartan-dark;
+}
+
+/* ─── Text & Inputs ─────────────────────────────────────────────────────── */
+QLabel, QLineEdit, QTextEdit {
+  color: @text-light;
+  background: @spartan-mid;
+  selection-background-color: @spartan-gold;
+  selection-color: @spartan-dark;
+}
+QLineEdit, QTextEdit {
+  border: 1px solid @spartan-dark;
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+/* ─── Buttons ───────────────────────────────────────────────────────────── */
+QPushButton {
+  background: @spartan-mid;
+  color: @text-light;
+  border: 1px solid @spartan-dark;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+QPushButton:hover {
+  background: @spartan-gold;
+  color: @spartan-dark;
+}
+
+/* ─── Group Boxes ───────────────────────────────────────────────────────── */
+QGroupBox {
+  background-color: @neutral-light;
+  border: 1px solid @spartan-dark;
+  border-radius: 6px;
+  margin-top: 1.2em;
+  padding: 8px;
+}
+QGroupBox::title {
+  subcontrol-origin: margin;
+  subcontrol-position: top left;
+  padding: 0 6px;
+  color: @spartan-dark;
+  background-color: @neutral-light;
+  font-weight: bold;
+}
+
+/* ─── Sliders ───────────────────────────────────────────────────────────── */
+QSlider::groove:horizontal {
+  height: 6px;
+  background: @neutral-mid;
+  border-radius: 3px;
+}
+QSlider::handle:horizontal {
+  width: 14px;
+  background: @spartan-dark;
+  margin: -4px 0;
+  border-radius: 7px;
+}
+
+/* ─── Splitter Handle ───────────────────────────────────────────────────── */
+QSplitter::handle {
+  background-color: @spartan-dark;
+  width: 4px;
+}

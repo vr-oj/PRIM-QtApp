@@ -1,6 +1,5 @@
 import sys
 import os
-import logging
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel,
@@ -20,14 +19,6 @@ from utils import list_serial_ports, list_cameras
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-
-# ─── Logging ─────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s"
-)
-log = logging.getLogger(__name__)
-
 
 class TopControlPanel(QWidget):
     """Flat panel with Camera / PRIM box / Plot controls."""
