@@ -2,7 +2,7 @@ import logging
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PyQt5.QtMultimedia import (
     QCamera, QCameraInfo, QVideoProbe, QVideoFrame, QAbstractVideoBuffer,
-    QCameraViewfinderSettings, QMultimedia # For QCamera.Error enum
+    QCameraViewfinderSettings
 )
 from PyQt5.QtMultimediaWidgets import QCameraViewfinder
 from PyQt5 import QtCore
@@ -192,7 +192,7 @@ class QtCameraWidget(QWidget):
             self.camera.unload(); self.camera = None
         self.current_qimage = None
 
-    def _handle_camera_error(self, error_code: QMultimedia.CameraError):
+    def _handle_camera_error(self, error_code: QCamera.Error):
         error_string = "Unknown Camera Error"
         if self.camera: error_string = self.camera.errorString() # Get string if camera obj exists
         log.error(f"Camera {self.camera_id} error: {error_code} - {error_string}")
