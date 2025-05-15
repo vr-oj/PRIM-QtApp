@@ -438,6 +438,28 @@ class MainWindow(QMainWindow):
         # Populate cameras and then resolutions
         QTimer.singleShot(0, self.top_ctrl.camera_controls.populate_camera_selector)
 
+    # ──────────────────────────────────────────────────────────────────────
+    # Slots for camera panel signals
+    def _on_camera_device_selected(self, camera_id: int):
+        log.info(f"Camera device selected in MainWindow: {camera_id}")
+        if self.qt_cam:
+            self.qt_cam.set_active_camera(camera_id)
+        else:
+            log.error("qt_cam widget not initialized")
+
+    def _on_camera_resolution_selected(self, resolution_str: str):
+        log.info(f"Camera resolution selected in MainWindow: {resolution_str}")
+        if not self.qt_cam:
+            log.error("qt_cam widget not initialized")
+            return
+
+        try:
+            w, h = map(int, resolution_str.split('x'))
+            self.qt_cam.set_active_resolution(w, h)
+        except ValueError:
+            log.error(f"Invalid resolution string: {resolution_str}")
+
+
     # — Application menu
     def _build_menu(self):
         mb = self.menuBar()
