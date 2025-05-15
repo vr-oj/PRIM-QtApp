@@ -422,6 +422,7 @@ class TopControlPanel(QWidget):
 class PressurePlotWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setStyleSheet("background-color:white;")
         layout = QVBoxLayout(self); layout.setContentsMargins(0,0,0,0)
 
@@ -437,6 +438,7 @@ class PressurePlotWidget(QWidget):
 
         self.canvas = FigureCanvas(self.fig)
         layout.addWidget(self.canvas)
+        # self.setLayout(layout) # Not strictly needed as QVBoxLayout(self) does this
 
         self.times, self.pressures = [], []
         self.max_pts     = PLOT_MAX_POINTS
@@ -548,6 +550,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
+        self.main_content_splitter = None
         self._base       = os.path.dirname(__file__)
         self.icon_dir    = os.path.join(self._base, "icons")
         self._serial_thread = None
@@ -655,10 +658,10 @@ class MainWindow(QMainWindow):
         self.top_ctrl.resolution_selected.connect(self._on_camera_resolution_selected)
         self.top_ctrl.export_plot_image_requested.connect(lambda: self.plot_w.export_as_image())
 
-        # ─── Main area: camera & plot ───────────────────────
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        splitter.setStyleSheet("QSplitter::handle{background-color:#18453B;}")
+        # Make the splitter an instance variable
+        self.main_content_splitter = QSplitter(Qt.Horizontal)
+        self.main_content_splitter.setChildrenCollapsible(False)
+        self.main_content_splitter.setStyleSheet("QSplitter::handle{background-color:#18453B;}")
 
         # (a) Camera pane
         cam_container = QWidget()
@@ -852,8 +855,19 @@ class MainWindow(QMainWindow):
     # — Splitter resizing
     def _equalize_splitter(self):
         try:
-            total = self.splitter.width()
-            self.splitter.setSizes([int(total*0.5), int(total*0.5)])
+            # Use the instance variable self.main_content_splitter
+            if hasattr(self, "main_content_splitter") and self.main_content_splitter and self.main_content_splitter.isVisible():
+                total_width = self.main_content_splitter.width()
+                if total_width > 0:
+                    current_sizes = self.main_content_splitter.sizes()
+                    if len(current_sizes) == 2: # Check it's a 2-pane splitter
+                        self.main_content_splitter.setSizes([int(total_width * 0.5), int(total_width * 0.5)])
+                    else:
+                        log.warning(f"Splitter does not have 2 panes for equalization. Panes: {len(current_sizes)}")
+                else:
+                    log.warning(f"Splitter width is not positive ({total_width}) during equalization. May be too early.")
+            else:
+                log.warning("main_content_splitter not found, not an instance variable, or not visible for equalization.")
         except Exception as e:
             log.warning(f"Could not equalize splitter: {e}")
 

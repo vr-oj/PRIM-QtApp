@@ -1,6 +1,5 @@
-# src/threads/qtcamera_widget.py
 import cv2
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy # Make sure QSizePolicy is imported
 from PyQt5.QtCore import QTimer, pyqtSignal, Qt, QSize
 from PyQt5.QtGui import QImage, QPixmap
 import logging
@@ -9,12 +8,9 @@ import os
 
 log = logging.getLogger(__name__)
 
-# Define PROFILE_DIR relative to this file's location
-# Assuming qtcamera_widget.py is in src/threads/ and profiles are in src/camera_profiles/
 PROFILE_DIR = os.path.join(os.path.dirname(__file__), '..', 'camera_profiles')
 if not os.path.isdir(PROFILE_DIR):
     log.warning(f"Camera profiles directory not found: {PROFILE_DIR}")
-    # You might want to create it if it doesn't exist, or handle this more gracefully
     try:
         os.makedirs(PROFILE_DIR, exist_ok=True)
         log.info(f"Created camera profiles directory: {PROFILE_DIR}")
@@ -26,31 +22,34 @@ class QtCameraWidget(QWidget):
     frame_ready = pyqtSignal(QImage, object)
     camera_error = pyqtSignal(str, int)
     camera_resolutions_updated = pyqtSignal(list)
-    camera_properties_updated = pyqtSignal(dict) # Emits dict of {prop_name: value, prop_name_range: (min,max), prop_name_default: val}
+    camera_properties_updated = pyqtSignal(dict)
 
     def __init__(self, camera_id: int = -1, camera_description: str = "", parent=None):
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.label = QLabel(self)
-        # center the image in the widget
         self.label.setAlignment(Qt.AlignCenter)
         self.label.setText("Camera feed will appear here.")
         # allow the pixmap to scale down/up while preserving aspect ratio
         self.label.setScaledContents(False)
-        self.label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
  
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.label)
+        self.setLayout(layout)
 
         self.cap = None
         self.camera_id = camera_id # Store initial camera_id
         self.camera_description = camera_description
         self.active_profile = None
         self.full_frame_width = 0 # To store actual full frame width from camera
-        self.full_frame_height = 0# To store actual full frame height from camera
+        self.full_frame_height = 0 # To store actual full frame height from camera
 
         # ROI attributes (for software ROI)
-        self.roi_x, self.roi_y, self.roi_w, self.roi_h = 0, 0, 0, 0 # 0,0 for w,h means use full frame
+        self.roi_x, self.roi_y, self.roi_w, self.roi_h = 0, 0, 0, 0
+
+        self.label._last_pixmap = None
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._grab_frame)
@@ -87,6 +86,7 @@ class QtCameraWidget(QWidget):
             log.info(f"No specific profile found for: {self.camera_description}. Using generic settings.")
         except Exception as e:
             log.error(f"Error loading camera profiles from {PROFILE_DIR}: {e}", exc_info=True)
+
 
     def set_active_camera(self, camera_id: int, camera_description: str = ""):
         log.info(f"Attempting to set active camera to ID: {camera_id} ({camera_description})")
@@ -140,7 +140,6 @@ class QtCameraWidget(QWidget):
                 # Set initial ROI from profile or to full frame
                 self.reset_roi_to_default()
 
-
                 # Emit available resolutions (from profile or just the current one)
                 if self.active_profile and "resolutions" in self.active_profile:
                     res_list_str = [r["label"] for r in self.active_profile["resolutions"]]
@@ -166,6 +165,7 @@ class QtCameraWidget(QWidget):
             self.camera_properties_updated.emit({}) # Emit empty dict
             return True # Successfully set to "no camera"
 
+
     def set_active_resolution(self, width: int, height: int):
         if self.cap and self.cap.isOpened():
             log.info(f"Attempting to set resolution to {width}x{height} for camera ID: {self.camera_id}")
@@ -185,6 +185,7 @@ class QtCameraWidget(QWidget):
             if was_timing: self.timer.start(30)
         else:
             log.warning("No active camera to set resolution for.")
+
 
     def reset_roi_to_default(self):
         """Sets ROI to default from profile or full frame."""
@@ -269,6 +270,17 @@ class QtCameraWidget(QWidget):
             self.frame_ready.emit(qimg.copy(), bgr_frame_for_recording)
         else:
             pass
+
+    def resizeEvent(self, ev):
+            super().resizeEvent(ev)
+            # if we have a last pixmap, re‑scale it
+            if hasattr(self.label, "_last_pixmap") and self.label._last_pixmap is not None:
+                scaled = self.label._last_pixmap.scaled(
+                    self.label.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                self.label.setPixmap(scaled)
 
     def get_current_resolution(self):
         # This should now return the full frame resolution, not potentially cropped.
@@ -362,7 +374,7 @@ class QtCameraWidget(QWidget):
 
     def query_and_emit_camera_properties(self):
         if not (self.cap and self.cap.isOpened()):
-            self.camera_properties_updated.emit({}) # Emit empty if no camera
+            self.camera_properties_updated.emit({}) 
             return
 
         properties_payload = {"controls": {}, "roi": {
@@ -370,60 +382,65 @@ class QtCameraWidget(QWidget):
             "max_w": self.full_frame_width, "max_h": self.full_frame_height
         }}
         
-        # Default generic properties to try if no profile
-        controls_to_query_config = {
+        controls_to_query_config = { # Generic fallbacks
             "brightness": {"prop": "CAP_PROP_BRIGHTNESS"},
             "gain": {"prop": "CAP_PROP_GAIN"},
-            "exposure": {"prop": "CAP_PROP_EXPOSURE", "value_prop": "CAP_PROP_EXPOSURE", "auto_prop": "CAP_PROP_AUTO_EXPOSURE"}
-            # Add more generic ones if needed
+            # For exposure, "prop" is the value, "auto_prop" is the mode
+            "exposure": {"prop": "CAP_PROP_EXPOSURE", "auto_prop": "CAP_PROP_AUTO_EXPOSURE"}
         }
 
         if self.active_profile and "controls" in self.active_profile:
-            controls_to_query_config = self.active_profile["controls"] # Use profile if available
+            controls_to_query_config = self.active_profile["controls"] 
         
-        for control_name, config in controls_to_query_config.items():
-            prop_data = {}
-            # Get main value
-            val_prop_str = config.get("value_prop", config.get("prop")) # "value_prop" for exposure, "prop" for others
-            if val_prop_str and hasattr(cv2, val_prop_str):
-                prop_data["value"] = self.cap.get(getattr(cv2, val_prop_str))
+        for control_name, config_from_profile in controls_to_query_config.items():
+            prop_data_for_ui = {"enabled": True} # Assume enabled unless profile says otherwise
+
+            # Get main VALUE (e.g., exposure time, brightness level)
+            # Profile should define "prop" for the actual value property (e.g., CAP_PROP_EXPOSURE)
+            main_value_prop_str = config_from_profile.get("prop")
+            if main_value_prop_str and hasattr(cv2, main_value_prop_str):
+                prop_data_for_ui["value"] = self.cap.get(getattr(cv2, main_value_prop_str))
             
-            # Get auto mode if specified for this control (e.g., exposure)
-            auto_prop_str = config.get("auto_prop")
-            if auto_prop_str and hasattr(cv2, auto_prop_str):
-                prop_data["auto_mode"] = self.cap.get(getattr(cv2, auto_prop_str))
-                # Determine if it's "on" based on profile values
-                if "auto_on_value" in config and "auto_off_value" in config:
-                    # Compare float values carefully
-                    if abs(prop_data["auto_mode"] - config["auto_on_value"]) < 1e-3:
-                         prop_data["is_auto_on"] = True
-                    elif abs(prop_data["auto_mode"] - config["auto_off_value"]) < 1e-3:
-                         prop_data["is_auto_on"] = False
-                    # else, it's an indeterminate state or not matching profile values
+            # Get AUTO MODE status (e.g., for exposure)
+            # Profile should define "auto_prop" for the auto/manual mode property (e.g., CAP_PROP_AUTO_EXPOSURE)
+            auto_mode_prop_str = config_from_profile.get("auto_prop")
+            if auto_mode_prop_str and hasattr(cv2, auto_mode_prop_str):
+                current_auto_mode_val = self.cap.get(getattr(cv2, auto_mode_prop_str))
+                # Determine if "is_auto_on" based on profile's auto_on_value
+                auto_on_val_from_profile = config_from_profile.get("auto_on_value")
+                auto_off_val_from_profile = config_from_profile.get("auto_off_value")
 
-            # Add range and default from profile for UI to use
-            if "min" in config: prop_data["min"] = config["min"]
-            if "max" in config: prop_data["max"] = config["max"]
-            if "default" in config: prop_data["default"] = config["default"]
-            if "enabled" in config: prop_data["enabled"] = config["enabled"]
-            if "label" in config: prop_data["label"] = config.get("label", control_name)
+                if auto_on_val_from_profile is not None:
+                    if abs(current_auto_mode_val - auto_on_val_from_profile) < 1e-3:
+                        prop_data_for_ui["is_auto_on"] = True
+                    elif auto_off_val_from_profile is not None and abs(current_auto_mode_val - auto_off_val_from_profile) < 1e-3:
+                        prop_data_for_ui["is_auto_on"] = False
+                    else: # Undetermined or not matching profile, treat as 'auto might be on or in a weird state'
+                        # Could also be that auto_on_value and auto_off_value are the same (e.g. some cameras use one prop for both)
+                        # For simplicity, if it doesn't match auto_on explicitly, assume manual or unknown.
+                        # A more robust way is to check if it's NOT auto_off_value, if auto_on is less defined.
+                        log.debug(f"Control {control_name}: current auto mode {current_auto_mode_val}, profile auto_on: {auto_on_val_from_profile}, auto_off: {auto_off_val_from_profile}")
+                        prop_data_for_ui["is_auto_on"] = False # Default to false if not clearly "on"
+                elif control_name == "exposure": # Generic fallback for UVC exposure auto
+                    prop_data_for_ui["is_auto_on"] = abs(current_auto_mode_val - 0.75) < 1e-3 # 0.75 often UVC auto
 
-            if prop_data: # If we got any data for this control
-                properties_payload["controls"][control_name] = prop_data
+            # Add range (min/max) and default from profile for UI sliders
+            # Profile uses "min", "max", "default" (for value), not for auto_mode.
+            # These correspond to the main "value" of the control.
+            if "min" in config_from_profile: prop_data_for_ui["min"] = config_from_profile["min"]
+            if "max" in config_from_profile: prop_data_for_ui["max"] = config_from_profile["max"]
+            if "default" in config_from_profile: prop_data_for_ui["default_value"] = config_from_profile["default"] # Renamed to avoid clash
+            
+            # Is the control itself enabled (e.g. some cameras don't support all controls)
+            prop_data_for_ui["enabled"] = config_from_profile.get("enabled", True) # Default to true if not in profile
+            if "label" in config_from_profile: prop_data_for_ui["label"] = config_from_profile.get("label", control_name)
+
+
+            if "value" in prop_data_for_ui : # If we got at least the main value
+                properties_payload["controls"][control_name] = prop_data_for_ui
         
-        log.debug(f"Queried camera properties payload: {properties_payload}")
+        log.debug(f"Queried camera properties payload for UI: {properties_payload}")
         self.camera_properties_updated.emit(properties_payload)
-
-    def resizeEvent(self, ev):
-        super().resizeEvent(ev)
-        # if we have a last pixmap, re‑scale it
-        if hasattr(self.label, "_last_pixmap"):
-            scaled = self.label._last_pixmap.scaled(
-                self.label.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-            self.label.setPixmap(scaled)
 
 
     def closeEvent(self, event):
