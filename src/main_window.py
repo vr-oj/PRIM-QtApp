@@ -43,6 +43,11 @@ log = logging.getLogger(__name__)
 class CameraControlPanel(QGroupBox):
     camera_selected = pyqtSignal(int)
     resolution_selected = pyqtSignal(str)
+    exposure_changed = pyqtSignal(int)
+    gain_changed = pyqtSignal(int)
+    brightness_changed = pyqtSignal(int)
+    auto_exposure_toggled = pyqtSignal(bool) # New signal for checkbox
+    roi_changed = pyqtSignal(int, int, int, int) # x, y, w, h
 
     def __init__(self, parent=None):
         super().__init__("Camera", parent)
@@ -60,14 +65,69 @@ class CameraControlPanel(QGroupBox):
         self.res_selector.setEnabled(False)
         layout.addRow("Resolution:", self.res_selector)
 
-        self.exposure_slider  = QSlider(Qt.Horizontal); self.exposure_slider.setEnabled(False)
-        self.gain_slider      = QSlider(Qt.Horizontal); self.gain_slider.setEnabled(False)
-        self.brightness_slider= QSlider(Qt.Horizontal); self.brightness_slider.setEnabled(False)
-        layout.addRow("Exposure:", self.exposure_slider)
-        layout.addRow("Gain:",     self.gain_slider)
-        layout.addRow("Brightness:",self.brightness_slider)
+        # --- Camera Property Sliders & Auto Exposure ---
+        self.exposure_slider = QSlider(Qt.Horizontal)
+        self.exposure_value_label = QLabel("N/A") # To display current value
+        exposure_layout = QHBoxLayout(); exposure_layout.addWidget(self.exposure_slider); exposure_layout.addWidget(self.exposure_value_label)
+        layout.addRow("Exposure:", exposure_layout)
 
-        self.populate_camera_selector()
+        self.gain_slider = QSlider(Qt.Horizontal)
+        self.gain_value_label = QLabel("N/A")
+        gain_layout = QHBoxLayout(); gain_layout.addWidget(self.gain_slider); gain_layout.addWidget(self.gain_value_label)
+        layout.addRow("Gain:", gain_layout)
+
+        self.brightness_slider = QSlider(Qt.Horizontal)
+        self.brightness_value_label = QLabel("N/A")
+        brightness_layout = QHBoxLayout(); brightness_layout.addWidget(self.brightness_slider); brightness_layout.addWidget(self.brightness_value_label)
+        layout.addRow("Brightness:", brightness_layout)
+        
+        self.auto_exposure_cb = QCheckBox("Auto Exposure")
+        layout.addRow(self.auto_exposure_cb)
+
+        # Initially disable them until properties are loaded
+        self.exposure_slider.setEnabled(False)
+        self.gain_slider.setEnabled(False)
+        self.brightness_slider.setEnabled(False)
+        self.auto_exposure_cb.setEnabled(False)
+
+        # --- ROI Controls ---
+        roi_gb = QGroupBox("Region of Interest (ROI)")
+        roi_layout = QFormLayout(roi_gb)
+        
+        self.roi_x_spin = QSpinBox(); self.roi_x_spin.setRange(0, 8000); self.roi_x_spin.setSingleStep(1)
+        self.roi_y_spin = QSpinBox(); self.roi_y_spin.setRange(0, 8000); self.roi_y_spin.setSingleStep(1)
+        self.roi_w_spin = QSpinBox(); self.roi_w_spin.setRange(0, 8000); self.roi_w_spin.setSingleStep(1) # 0 for full
+        self.roi_h_spin = QSpinBox(); self.roi_h_spin.setRange(0, 8000); self.roi_h_spin.setSingleStep(1) # 0 for full
+        self.reset_roi_btn = QPushButton("Reset ROI")
+
+        roi_layout.addRow("ROI X:", self.roi_x_spin)
+        roi_layout.addRow("ROI Y:", self.roi_y_spin)
+        roi_layout.addRow("ROI Width (0=full):", self.roi_w_spin)
+        roi_layout.addRow("ROI Height (0=full):", self.roi_h_spin)
+        roi_layout.addRow(self.reset_roi_btn)
+        layout.addRow(roi_gb)
+        
+        # Initially disable ROI controls until camera is active and full resolution is known
+        roi_gb.setEnabled(False)
+
+
+        # Connect signals
+        self.cam_selector.currentIndexChanged.connect(self._on_camera_selected_changed)
+        self.res_selector.currentIndexChanged.connect(self._on_resolution_selected_changed)
+        
+        self.exposure_slider.valueChanged.connect(self.exposure_changed)
+        self.gain_slider.valueChanged.connect(self.gain_changed)
+        self.brightness_slider.valueChanged.connect(self.brightness_changed)
+        self.auto_exposure_cb.toggled.connect(self.auto_exposure_toggled)
+
+        # Emit ROI changes when any spinbox value changes
+        self.roi_x_spin.valueChanged.connect(self._emit_roi_change)
+        self.roi_y_spin.valueChanged.connect(self._emit_roi_change)
+        self.roi_w_spin.valueChanged.connect(self._emit_roi_change)
+        self.roi_h_spin.valueChanged.connect(self._emit_roi_change)
+        self.reset_roi_btn.clicked.connect(self._emit_reset_roi_request) # Need a signal for this too or handle in MainWindow
+
+        self.populate_camera_selector() # As befor
 
     def populate_camera_selector(self):
         self.cam_selector.clear()
@@ -87,6 +147,99 @@ class CameraControlPanel(QGroupBox):
             log.error("Error listing Qt cameras", exc_info=True)
             self.cam_selector.addItem("Error listing cameras", -1)
             self.cam_selector.setEnabled(False)
+
+    def _emit_roi_change(self):
+        self.roi_changed.emit(
+            self.roi_x_spin.value(), self.roi_y_spin.value(),
+            self.roi_w_spin.value(), self.roi_h_spin.value()
+        )
+    
+    def _emit_reset_roi_request(self):
+        # This could directly call a method on qt_cam if MainWindow passes a reference,
+        # or emit a dedicated signal like `roi_reset_requested`
+        # For simplicity here, we'll assume MainWindow handles the reset call via `roi_changed`
+        # by MainWindow sending 0,0,0,0 (or specific default values) via a slot.
+        # A more direct way is for MainWindow to have a slot that calls qt_cam.reset_roi_to_default()
+        # and then qt_cam emits camera_properties_updated which includes the new ROI.
+        log.info("Reset ROI button clicked - MainWindow should handle this.")
+        # Let's refine this: add a signal
+        # roi_reset_requested = pyqtSignal() # Add this to class signals
+        # self.roi_reset_requested.emit()
+
+    def update_control_from_properties(self, control_name, props):
+        """Updates a single control (slider, checkbox) based on properties from camera."""
+        slider = None
+        label = None
+        checkbox = None
+
+        if control_name == "exposure":
+            slider = self.exposure_slider
+            label = self.exposure_value_label
+            checkbox = self.auto_exposure_cb # Auto exposure is tied to the exposure control in profile
+        elif control_name == "gain":
+            slider = self.gain_slider
+            label = self.gain_value_label
+        elif control_name == "brightness":
+            slider = self.brightness_slider
+            label = self.brightness_value_label
+        # Add other controls like contrast, saturation, gamma here if you implement them
+
+        is_enabled = props.get("enabled", False)
+
+        if slider:
+            slider.setEnabled(is_enabled)
+            if is_enabled:
+                # Block signals while setting value to prevent feedback loop
+                slider.blockSignals(True)
+                if "min" in props and "max" in props:
+                    slider.setRange(props["min"], props["max"])
+                if "value" in props:
+                    slider.setValue(int(props["value"]))
+                slider.blockSignals(False)
+            if label and "value" in props:
+                label.setText(f"{props['value']:.1f}")
+            elif label:
+                label.setText("N/A")
+
+
+        if checkbox and control_name == "exposure": # Special handling for auto_exposure tied to exposure
+            checkbox.setEnabled(is_enabled) # Auto exposure checkbox enabled if exposure control is
+            if is_enabled and "is_auto_on" in props:
+                 checkbox.blockSignals(True)
+                 checkbox.setChecked(props["is_auto_on"])
+                 checkbox.blockSignals(False)
+                 # If auto is on, typically disable manual exposure slider
+                 slider.setEnabled(not props["is_auto_on"] if is_enabled else False)
+
+
+    def update_roi_controls(self, roi_props):
+        """Updates ROI spinboxes and their ranges."""
+        self.roi_x_spin.blockSignals(True)
+        self.roi_y_spin.blockSignals(True)
+        self.roi_w_spin.blockSignals(True)
+        self.roi_h_spin.blockSignals(True)
+
+        max_w = roi_props.get("max_w", 0)
+        max_h = roi_props.get("max_h", 0)
+
+        self.roi_x_spin.setRange(0, max_w -1 if max_w > 0 else 0) # x can go up to width-1
+        self.roi_y_spin.setRange(0, max_h -1 if max_h > 0 else 0) # y can go up to height-1
+        self.roi_w_spin.setRange(0, max_w) # w can be 0 (full) up to max_w
+        self.roi_h_spin.setRange(0, max_h) # h can be 0 (full) up to max_h
+        
+        self.roi_x_spin.setValue(roi_props.get("x", 0))
+        self.roi_y_spin.setValue(roi_props.get("y", 0))
+        self.roi_w_spin.setValue(roi_props.get("w", 0))
+        self.roi_h_spin.setValue(roi_props.get("h", 0))
+        
+        self.roi_x_spin.blockSignals(False)
+        self.roi_y_spin.blockSignals(False)
+        self.roi_w_spin.blockSignals(False)
+        self.roi_h_spin.blockSignals(False)
+        
+        self.reset_roi_btn.setEnabled(max_w > 0 and max_h > 0)
+        # Enable the whole ROI groupbox
+        self.parent().findChild(QGroupBox, "Region of Interest (ROI)").setEnabled(max_w > 0 and max_h > 0)
 
     def _on_camera_selected_changed(self, index):
         cam_id = self.cam_selector.itemData(index)
@@ -181,6 +334,12 @@ class TopControlPanel(QWidget):
     x_axis_limits_changed = pyqtSignal(float, float)
     y_axis_limits_changed = pyqtSignal(float, float)
     export_plot_image_requested = pyqtSignal()
+    exposure_changed = pyqtSignal(int)
+    gain_changed = pyqtSignal(int)
+    brightness_changed = pyqtSignal(int)
+    auto_exposure_toggled = pyqtSignal(bool)
+    roi_changed = pyqtSignal(int, int, int, int)
+    # roi_reset_requested = pyqtSignal() # if you added this specific signal
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -212,6 +371,35 @@ class TopControlPanel(QWidget):
         self.plot_controls.x_axis_limits_changed.connect(self.x_axis_limits_changed)
         self.plot_controls.y_axis_limits_changed.connect(self.y_axis_limits_changed)
         self.plot_controls.export_plot_image_requested.connect(self.export_plot_image_requested)
+
+        # Connect new signals from self.camera_controls
+        self.camera_controls.exposure_changed.connect(self.exposure_changed)
+        self.camera_controls.gain_changed.connect(self.gain_changed)
+        self.camera_controls.brightness_changed.connect(self.brightness_changed)
+        self.camera_controls.auto_exposure_toggled.connect(self.auto_exposure_toggled)
+        self.camera_controls.roi_changed.connect(self.roi_changed)
+        # if hasattr(self.camera_controls, 'roi_reset_requested'):
+        #    self.camera_controls.roi_reset_requested.connect(self.roi_reset_requested)
+
+    # Method to pass properties down to CameraControlPanel
+    def update_camera_ui_from_properties(self, properties_payload: dict):
+        controls_data = properties_payload.get("controls", {})
+        for control_name, props_for_control in controls_data.items():
+            self.camera_controls.update_control_from_properties(control_name, props_for_control)
+        
+        roi_data = properties_payload.get("roi", {})
+        if roi_data:
+            self.camera_controls.update_roi_controls(roi_data)
+        else: # Disable ROI if no data (e.g. no camera)
+            self.camera_controls.update_roi_controls({"max_w":0, "max_h":0}) # effectively disables
+
+    def disable_all_camera_controls(self):
+        """Call this when camera disconnects."""
+        # Create dummy structures to disable all
+        dummy_control_props = {"enabled": False, "value": 0, "min":0, "max":0}
+        for control in ["exposure", "gain", "brightness"]: # Add others if they exist
+             self.camera_controls.update_control_from_properties(control, dummy_control_props)
+        self.camera_controls.update_roi_controls({"max_w":0, "max_h":0})
 
     def update_connection_status(self, text, connected):
         self.conn_lbl.setText(text)
@@ -380,6 +568,58 @@ class MainWindow(QMainWindow):
         log.info(f"{APP_NAME} started.")
         self.statusBar().showMessage("Ready. Select camera and serial port.", 5000)
         self.top_ctrl.update_connection_status("Disconnected", False)
+        self.top_ctrl.exposure_changed.connect(self._on_exposure_changed)
+        self.top_ctrl.gain_changed.connect(self._on_gain_changed)
+        self.top_ctrl.brightness_changed.connect(self._on_brightness_changed)
+        self.top_ctrl.auto_exposure_toggled.connect(self._on_auto_exposure_toggled)
+        self.top_ctrl.roi_changed.connect(self._on_roi_changed)
+        # if hasattr(self.top_ctrl, 'roi_reset_requested'): # If using dedicated signal
+        #    self.top_ctrl.roi_reset_requested.connect(self._on_roi_reset_requested)
+        self.qt_cam.camera_properties_updated.connect(self._on_camera_properties_updated)
+
+    def _on_exposure_changed(self, value):
+        if self.qt_cam:
+            self.qt_cam.set_exposure(value)
+
+    def _on_gain_changed(self, value):
+        if self.qt_cam:
+            self.qt_cam.set_gain(value)
+
+    def _on_brightness_changed(self, value):
+        if self.qt_cam:
+            self.qt_cam.set_brightness(value)
+
+    def _on_auto_exposure_toggled(self, checked):
+        if self.qt_cam:
+            self.qt_cam.set_auto_exposure(enable_auto=checked)
+
+    def _on_roi_changed(self, x, y, w, h):
+        if self.qt_cam:
+            self.qt_cam.set_software_roi(x, y, w, h)
+
+    # def _on_roi_reset_requested(self): # If using dedicated signal for reset
+    # if self.qt_cam:
+    # self.qt_cam.reset_roi_to_default()
+            # qt_cam should then emit camera_properties_updated which includes new ROI values
+
+    @pyqtSlot(dict) # Important for connecting to pyqtSignal(dict)
+    def _on_camera_properties_updated(self, properties_payload: dict):
+        log.debug(f"MainWindow received camera_properties_updated: {properties_payload}")
+        if self.top_ctrl:
+            self.top_ctrl.update_camera_ui_from_properties(properties_payload)
+
+    # Modify _on_camera_device_selected:
+    def _on_camera_device_selected(self, index_in_combobox): # Assuming index is passed
+        # Get camera_id AND description from the QComboBox
+        cam_id = self.top_ctrl.camera_controls.cam_selector.itemData(index_in_combobox)
+        cam_description = self.top_ctrl.camera_controls.cam_selector.itemText(index_in_combobox)
+        
+        log.info(f"Camera device selected in MainWindow: ID={cam_id}, Desc={cam_description}")
+        if self.qt_cam:
+            # Pass both id and description to set_active_camera
+            self.qt_cam.set_active_camera(cam_id, cam_description)
+        else:
+            log.error("qt_cam widget not initialized")
 
     # — Console Dock
     def _build_console(self):
