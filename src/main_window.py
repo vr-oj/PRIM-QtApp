@@ -369,9 +369,9 @@ class MainWindow(QMainWindow):
 
         # Build UI
         self._build_console()
+        self._build_menu()
         self._build_toolbar()
         self._build_central()
-        self._build_menu()
         self._build_statusbar()
 
         self.showMaximized()
