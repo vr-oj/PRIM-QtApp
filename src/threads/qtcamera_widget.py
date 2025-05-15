@@ -1,11 +1,12 @@
 import cv2
 from PyQt5.QtWidgets    import QWidget, QVBoxLayout, QLabel
-from PyQt5.QtCore       import QTimer, pyqtSignal, Qt
+from PyQt5.QtCore       import QTimer, pyqtSignal, Qt, QSize
 from PyQt5.QtGui        import QImage, QPixmap
 
 class QtCameraWidget(QWidget):
     frame_ready = pyqtSignal(QImage, object)
     camera_error = pyqtSignal(str, int)
+    camera_resolutions_updated = pyqtSignal(list)
 
 
     def __init__(self, camera_id: int = -1, parent=None):
