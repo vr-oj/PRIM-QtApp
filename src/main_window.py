@@ -646,8 +646,8 @@ class MainWindow(QMainWindow):
         # ─── Top tools ribbon ───────────────────────────────
         self.top_ctrl = TopControlPanel(self)
         # Make the ribbon a fixed‑height strip
-        self.top_ctrl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.top_ctrl.setFixedHeight(180)   # adjust as you like
+        self.top_ctrl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.top_ctrl.setMinimumHeight(120)   # adjust as you like
         v_layout.addWidget(self.top_ctrl)
 
         # Connect top_ctrl signals
@@ -676,8 +676,8 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.plot_w)
 
         # Give the plot a little more real estate by default
-        splitter.setStretchFactor(0, 2)  # camera
-        splitter.setStretchFactor(1, 3)  # plot
+        splitter.setStretchFactor(0, 1)    # camera
+        splitter.setStretchFactor(1, 1)    # plot
 
         # Wire plot‑control buttons
         self.top_ctrl.plot_controls.reset_btn.clicked.connect(
@@ -853,7 +853,7 @@ class MainWindow(QMainWindow):
     def _equalize_splitter(self):
         try:
             total = self.splitter.width()
-            self.splitter.setSizes([int(total*0.6), int(total*0.4)])
+            self.splitter.setSizes([int(total*0.5), int(total*0.5)])
         except Exception as e:
             log.warning(f"Could not equalize splitter: {e}")
 
