@@ -672,14 +672,14 @@ class MainWindow(QMainWindow):
         self.qt_cam.camera_error.connect(self._on_camera_error)
         self.qt_cam.camera_resolutions_updated.connect(self.top_ctrl.update_camera_resolutions)
         cam_lay.addWidget(self.qt_cam)
-        splitter.addWidget(cam_container)
+        self.main_content_splitter.addWidget(cam_container)
 
         # (b) Plot pane
         self.plot_w = PressurePlotWidget()
-        splitter.addWidget(self.plot_w)
+        self.main_content_splitter.addWidget(self.plot_w)
 
         # Give the plot a little more real estate by default
-        splitter.setStretchFactor(0, 1)    # camera
+        self.main_content_splitter.setStretchFactor(0, 1)    # camera
         splitter.setStretchFactor(1, 1)    # plot
 
         # Wire plot‑control buttons
@@ -693,7 +693,7 @@ class MainWindow(QMainWindow):
         self.top_ctrl.plot_controls.y_axis_limits_changed.connect(self.plot_w.set_manual_y_limits)
 
         # Add splitter as the main content (stretch=1)
-        v_layout.addWidget(splitter, 1)
+        v_layout.addWidget(self.main_content_splitter, 1)
         self.setCentralWidget(cw)
 
         # Populate cameras and then resolutions
