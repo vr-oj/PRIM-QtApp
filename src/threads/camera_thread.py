@@ -46,12 +46,24 @@ class CameraThread(QThread):
             bytes_per_line = 3 * w
             qt_img = QImage(rgb_disp.data, w, h, bytes_per_line, QImage.Format_RGB888)
 
-            # emit both display image and full-res array
-            self.frameReady.emit(qt_img, full_frame)
+            # Keep a COPY of the full-res frame for your pipeline
+            bgr_for_rec = full_frame.copy()
+            self.frameReady.emit(qt_img, bgr_for_rec)
             self.msleep(delay)
 
         cap.release()
 
-    def stop(self):
-        self._running = False
-        self.wait()
+    def run(self):
+        # … open cap, set CAP_PROP_BUFFERSIZE, etc …
+        delay = int(1000 / self.fps)
+        try:
+            while self._running:
+                ret, full_frame = cap.read()
+                if not ret:
+                    continue
+                # down-scale → qt_img, copy full_frame → bgr_for_rec
+                self.frameReady.emit(qt_img, bgr_for_rec)
+                self.msleep(delay)
+        finally:
+            cap.release()
+

@@ -823,7 +823,7 @@ class QtCameraWidget(QWidget):
         )
         self.camera_properties_updated.emit(properties_payload)
 
-    def _on_thread_frame(self, qimage: QImage, full_frame: object):
+    def _on_thread_frame(self, qimage: QImage, bgr_frame):
         """
         qimage: downscaled RGB image for display
         full_frame: full-res BGR numpy array for measurements/recording
@@ -833,8 +833,8 @@ class QtCameraWidget(QWidget):
         self._last_pixmap_displayed = pix
         self._update_displayed_pixmap()
 
-        # 2) Re-emit full data for downstream code
-        self.frame_ready.emit(qimage, full_frame)
+        # now forward the real BGR frame so the recorder can write it
+        self.frame_ready.emit(qimage, bgr_frame)
 
 
 

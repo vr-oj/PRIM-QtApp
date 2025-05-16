@@ -4,6 +4,7 @@ import os
 import time
 import logging # Added for logging
 from config import DEFAULT_VIDEO_CODEC, DEFAULT_VIDEO_EXTENSION # Added for config
+from tifffile import TiffWriter
 
 log = logging.getLogger(__name__) # Added for logging
 
@@ -89,16 +90,31 @@ class CSVRecorder:
 
 
 class TrialRecorder:
-    def __init__(self, basepath, fps, frame_size, video_codec=DEFAULT_VIDEO_CODEC, video_ext=DEFAULT_VIDEO_EXTENSION): # Added video_codec and ext
+    def __init__(self, basepath, fps, frame_size,
+                 video_codec=DEFAULT_VIDEO_CODEC,
+                 video_ext=DEFAULT_VIDEO_EXTENSION):
         ts = time.strftime("%Y%m%d-%H%M%S")
-        self.basepath_with_ts = f"{basepath}_{ts}" # Renamed for clarity
-        
-        video_filename = f"{self.basepath_with_ts}.{video_ext}"
-        csv_filename = f"{self.basepath_with_ts}.csv"
+        self.basepath_with_ts = f"{basepath}_{ts}"
 
-        # Pass configured or specified codec and frame size
-        self.video = VideoRecorder(video_filename, fourcc=video_codec, fps=fps, frame_size=frame_size)
-        self.csv = CSVRecorder(csv_filename) # Uses updated fieldnames by default
+        # Decide on filename & recorder class based on extension
+        if video_ext.lower() in ('tif', 'tiff'):
+            # full-res TIFF stack
+            tif_filename = f"{self.basepath_with_ts}.tif"
+            self.video = TiffStackRecorder(tif_filename, frame_shape=frame_size)
+        else:
+            # AVI or other compressed video
+            vid_filename = f"{self.basepath_with_ts}.{video_ext}"
+            self.video = VideoRecorder(
+                vid_filename,
+                fourcc=video_codec,
+                fps=fps,
+                frame_size=frame_size
+            )
+
+        # still record CSV alongside
+        csv_filename = f"{self.basepath_with_ts}.csv"
+        self.csv = CSVRecorder(csv_filename)
+
 
     def write_video_frame(self, frame): # Separate method for video
         if self.video:
@@ -125,3 +141,25 @@ class TrialRecorder:
         # More precisely, if they were successfully initialized.
         return (self.video and self.video.is_recording) or \
                (self.csv and self.csv.is_recording)
+    
+
+class TiffStackRecorder:
+    def __init__(self, filename, frame_shape):
+        # ensure output directory exists
+        os.makedirs(os.path.dirname(filename) or '.', exist_ok=True)
+        # force .tif extension
+        base, _ = os.path.splitext(filename)
+        self.filename = base + '.tif'
+        # bigtiff in case you have thousands of frames
+        self._writer = TiffWriter(self.filename, bigtiff=True)
+        self.is_recording = True
+
+    def write_frame(self, frame):
+        # frame is BGR; convert to RGB
+        rgb = frame[..., ::-1]
+        self._writer.write(rgb, photometric='rgb')
+
+    def stop(self):
+        if self.is_recording:
+            self._writer.close()
+            self.is_recording = False

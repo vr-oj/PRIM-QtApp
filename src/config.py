@@ -6,7 +6,7 @@ PRIM_RESULTS_DIR = os.path.join(DOCUMENTS_DIR, "PRIMalyze Results")
 
 
 # Recording settings
-DEFAULT_VIDEO_CODEC = "MJPG"
+DEFAULT_VIDEO_CODEC = "XVID"
 DEFAULT_VIDEO_EXTENSION = "avi"
 DEFAULT_FPS = 20  # Adjusted based on typical Arduino sampling if it's around 10Hz (20-30fps is fine)
 DEFAULT_CAMERA_INDEX = 0  # Or your preferred default camera

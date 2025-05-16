@@ -1424,6 +1424,10 @@ class MainWindow(QMainWindow):
         self.notes_edit = QTextEdit()
         self.notes_edit.setFixedHeight(70)  # Compacted
         form.addRow("Notes:", self.notes_edit)
+        # ── Add an Output Format combo-box here ────────────────────────────
+        self.format_selector = QComboBox()
+        self.format_selector.addItems(["AVI", "TIFF stack"])
+        form.addRow("Output Format:", self.format_selector)
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(dlg.accept)
         btns.rejected.connect(dlg.reject)
@@ -1463,6 +1467,11 @@ class MainWindow(QMainWindow):
 
         base_save_path = os.path.join(trial_folder, folder_name_safe)  # Filename base
 
+        # ── Read the user’s choice & map to extension ─────────────────────
+        fmt = self.format_selector.currentText()
+        video_ext = "avi" if fmt == "AVI" else "tiff"
+        # ───────────────────────────────────────────────────────────────────
+
         try:
             fw, fh = DEFAULT_FRAME_SIZE  # Fallback
             if self.qt_cam and hasattr(
@@ -1493,7 +1502,7 @@ class MainWindow(QMainWindow):
                 fps=DEFAULT_FPS,
                 frame_size=(fw, fh),
                 video_codec=DEFAULT_VIDEO_CODEC,
-                video_ext=DEFAULT_VIDEO_EXTENSION,
+                video_ext=video_ext,
             )
             if (
                 not self.trial_recorder or not self.trial_recorder.is_recording
