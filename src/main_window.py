@@ -1501,7 +1501,7 @@ class MainWindow(QMainWindow):
                 base_save_path,
                 fps=DEFAULT_FPS,
                 frame_size=(fw, fh),
-                video_codec=self.qt_cam.cam_camera_description,  # e.g. "DMK 33UX250"
+                video_codec=self.qt_cam.camera_description,  # e.g. "DMK 33UX250"
                 video_ext=DEFAULT_VIDEO_EXTENSION,
             )
             if (
