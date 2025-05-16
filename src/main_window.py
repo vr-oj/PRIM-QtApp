@@ -1565,11 +1565,11 @@ class MainWindow(QMainWindow):
                 if hasattr(self.trial_recorder, "basepath_with_ts")
                 else "UnknownTrial"
             )
-            frames_recorded = (
-                self.trial_recorder.video_frame_count
-                if self.trial_recorder.video
-                else "N/A"
-            )
+            try:
+                frames_recorded = self.trial_recorder.video_frame_count
+            except AttributeError:
+                frames_recorded = "N/A"
+                
             self.trial_recorder.stop()  # This handles closing files
             log.info(
                 f"PC recording stopped for {base}. Video frames recorded: {frames_recorded}"

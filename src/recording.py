@@ -11,16 +11,9 @@ log = logging.getLogger(__name__) # Added for logging
 class VideoRecorder:
     def __init__(self, filename, fourcc=DEFAULT_VIDEO_CODEC, fps=30, frame_size=(640,480)): # Modified default fourcc
         os.makedirs(os.path.dirname(filename) or '.', exist_ok=True)
-        
-        # Ensure filename has the correct extension based on config or passed extension
-        # This part assumes filename might come without extension or with a different one.
-        # If TrialRecorder always sets the correct extension, this check might be simplified.
         name, _ = os.path.splitext(filename)
-        effective_extension = DEFAULT_VIDEO_EXTENSION # Use configured default
-        # If an extension was part of the fourcc logic before, it needs to be handled.
-        # For now, we assume TrialRecorder constructs filename with the desired extension.
-
-        self.filename = f"{name}.{effective_extension}" # Ensure correct extension
+        effective_extension = DEFAULT_VIDEO_EXTENSION
+        self.filename = f"{name}.{effective_extension}"
 
         try:
             self.writer = cv2.VideoWriter(
@@ -29,6 +22,12 @@ class VideoRecorder:
                 fps,
                 frame_size
             )
+            if not self.writer.isOpened():
+                log.error(f"Failed to open VideoWriter for {self.filename}")
+                self.is_recording = False
+                self.writer = None
+                return
+            
             self.frame_count = 0
             self.is_recording = True
             log.info(f"VideoRecorder started for {self.filename} with codec {fourcc}, {fps}fps, {frame_size}")
@@ -133,7 +132,9 @@ class TrialRecorder:
 
     @property
     def video_frame_count(self):
-        return self.video.frame_count if self.video else 0
+        if not self.video:
+            return 0
+        return getattr(self.video, 'frame_count', 0)
         
     @property
     def is_recording(self):
@@ -147,19 +148,21 @@ class TiffStackRecorder:
     def __init__(self, filename, frame_shape):
         # ensure output directory exists
         os.makedirs(os.path.dirname(filename) or '.', exist_ok=True)
-        # force .tif extension
         base, _ = os.path.splitext(filename)
         self.filename = base + '.tif'
-        # bigtiff in case you have thousands of frames
         self._writer = TiffWriter(self.filename, bigtiff=True)
         self.is_recording = True
+        self.frame_count = 0
+        log.info(f"TiffStackRecorder started for {self.filename}")
 
     def write_frame(self, frame):
         # frame is BGR; convert to RGB
         rgb = frame[..., ::-1]
         self._writer.write(rgb, photometric='rgb')
+        self.frame_count += 1
 
     def stop(self):
         if self.is_recording:
             self._writer.close()
             self.is_recording = False
+            log.info(f"Stopping TIFF recording for {self.filename}. Total frames: {self.frame_count}")
