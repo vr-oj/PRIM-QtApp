@@ -1,3 +1,10 @@
+import os
+
+# Base folder for all trial outputs
+DOCUMENTS_DIR = os.path.join(os.path.expanduser("~"), "Documents")
+PRIM_RESULTS_DIR = os.path.join(DOCUMENTS_DIR, "PRIMalyze Results")
+
+
 # Recording settings
 DEFAULT_VIDEO_CODEC = "MJPG"
 DEFAULT_VIDEO_EXTENSION = "avi"

@@ -64,6 +64,7 @@ from config import (
     PLOT_MAX_POINTS,
     PLOT_DEFAULT_Y_MIN,
     PLOT_DEFAULT_Y_MAX,
+    PRIM_RESULTS_DIR,
 )
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -1440,7 +1441,7 @@ class MainWindow(QMainWindow):
         notes = self.notes_edit.toPlainText()
 
         # Path setup
-        base_dir = os.path.join(os.path.expanduser("~"), "PRIM_Trials")
+        base_dir = PRIM_RESULTS_DIR
         folder_name_safe = (
             "".join(
                 c if c.isalnum() or c in (" ", "_", "-") else "_" for c in trial_name
