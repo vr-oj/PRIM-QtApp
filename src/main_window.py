@@ -656,26 +656,42 @@ class TopControlPanel(QWidget):
 class PressurePlotWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        # ─── Widget setup ────────────────────────────────────────────
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        # ─── Figure & axes ───────────────────────────────────────────
+        # `facecolor` = the *outside* background (around the axes)
+        # `tight_layout=True` auto-adjusts margins so labels don't get cut off
         self.fig = Figure(facecolor="white", tight_layout=True)  # Added tight_layout
-        self.ax = self.fig.add_subplot(111)
-        self.ax.set_facecolor("#ECEFF4")  # Nord Polar Night 1
-        self.ax.set_xlabel(
-            "Time (s)", color="#4C566A", fontsize=9
-        )  # Nord Polar Night 3
-        self.ax.set_ylabel("Pressure (mmHg)", color="#4C566A", fontsize=9)
-        self.ax.tick_params(colors="#4C566A", labelsize=8)
-        for spine_pos in ["bottom", "left", "top", "right"]:
-            self.ax.spines[spine_pos].set_color(
-                "#D8DEE9"
-            )  # Nord Polar Night 4 / Snow Storm 1
 
-        (self.line,) = self.ax.plot(
-            [], [], "-", lw=1.5, color="#BF616A"
-        )  # Nord Aurora Red
+        # create a single subplot (axes)
+        self.ax = self.fig.add_subplot(111)
+
+        # ─── Axes background ────────────────────────────────────────
+        # this is the *inside* background behind your data & grid
+        self.ax.set_facecolor("#FFFFFF")
+
+        # ─── Axis labels ────────────────────────────────────────────
+        # text, color, size, weight
+        self.ax.set_xlabel("Time (s)", color="#000000", fontsize=16, fontweight="bold")
+        self.ax.set_ylabel(
+            "Pressure (mmHg)", color="#000000", fontsize=16, fontweight="bold"
+        )
+
+        # ─── Tick styling ────────────────────────────────────────────
+        # controls the tick marks *and* the tick labels
+        self.ax.tick_params(colors="#000000", labelsize=8)
+
+        # ─── Spine (border) colors ───────────────────────────────────
+        # you can individually style each side of the box
+        for spine_pos in ["bottom", "left", "top", "right"]:
+            self.ax.spines[spine_pos].set_color("#D8DEE9")
+
+        # ─── The trace (line) ────────────────────────────────────────
+        # the color= argument is what sets your data-line color
+        (self.line,) = self.ax.plot([], [], "-", lw=2, color="#000000")
 
         self.canvas = FigureCanvas(self.fig)
         layout.addWidget(self.canvas)
