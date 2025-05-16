@@ -254,14 +254,15 @@ class QtCameraWidget(QWidget):
                    if self.active_profile
                    else 30
                 )
-                fps = min(raw_fps, 15)
-                # choose a small display footprint—e.g. 640×480
+                display_fps = min(raw_fps, 15)
+                # ── Use a small display size for smooth preview ───────────────────────────
                 disp_w, disp_h = 640, 480
+
                 self._camera_thread = CameraThread(
                     device_index=self.camera_id,
-                    display_width=disp_w,
-                    display_height=disp_h,
-                    fps=fps,
+                    display_width   = disp_w,
+                    display_height  = disp_h,
+                    fps             = display_fps,
                     parent=self,
                 )
 

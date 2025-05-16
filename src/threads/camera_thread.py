@@ -15,25 +15,32 @@ class CameraThread(QThread):
         self._running = True
 
     def run(self):
-        cap = cv2.VideoCapture(self.device_index, cv2.CAP_DSHOW)
+        # Use the faster Media Foundation backend on Windows, fallback to DSHOW if needed
+        try:
+            cap = cv2.VideoCapture(self.device_index, cv2.CAP_MSMF)
+            if not cap.isOpened():
+                raise RuntimeError
+        except:
+            cap = cv2.VideoCapture(self.device_index, cv2.CAP_DSHOW)
         if not cap.isOpened():
              return
+        # ── Drop any stale frames to minimize latency ─────────────────────────────:contentReference[oaicite:0]{index=0}:contentReference[oaicite:1]{index=1}
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
         delay = int(1000 / self.fps)
         while self._running:
             ret, full_frame = cap.read()
             if not ret:
                 continue
-            # 1) Keep the full-res frame for measurements:
-            bgr_for_measurement = full_frame
-
-            # 2) Downscale a copy just for display:
+            # ── Create a smaller copy for the UI (e.g. 640×480) ─────────────:contentReference[oaicite:2]{index=2}:contentReference[oaicite:3]{index=3}
             if self.display_width and self.display_height:
                 disp = cv2.resize(full_frame,
-                                  (self.display_width, self.display_height),
-                                  interpolation=cv2.INTER_LINEAR)
+                                    (self.display_width, self.display_height),
+                                    interpolation=cv2.INTER_LINEAR)
             else:
                 disp = full_frame
-            # BGR→RGB and wrap in QImage
+
+            # Convert display copy to QImage
             rgb_disp = cv2.cvtColor(disp, cv2.COLOR_BGR2RGB)
             h, w, _ = rgb_disp.shape
             bytes_per_line = 3 * w
