@@ -128,9 +128,7 @@ class CameraControlPanel(QGroupBox):
         advanced_layout.setContentsMargins(0, 0, 0, 0)
 
         self.exposure_spin = QSpinBox()
-        self.exposure_spin.setRange(
-            min_exp, max_exp
-        )  # e.g. -13 to 0, or whatever your camera profile gives you
+        self.exposure_spin.setEnabled(False)
         self.exposure_spin.setSingleStep(1)  # or adjust the step size to taste
 
         # Put it into the form
