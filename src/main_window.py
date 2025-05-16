@@ -189,7 +189,6 @@ class CameraControlPanel(QGroupBox):
         )  # Add tab widget to the main layout of the CameraControlPanel
 
         # Initially disable them until properties are loaded
-        self.exposure_slider.setEnabled(False)
         self.gain_slider.setEnabled(False)
         self.brightness_slider.setEnabled(False)
         self.auto_exposure_cb.setEnabled(False)
