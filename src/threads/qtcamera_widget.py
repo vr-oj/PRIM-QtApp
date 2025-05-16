@@ -6,7 +6,7 @@ import logging
 import json
 import os
 
-from src.threads.camera_thread import CameraThread
+from threads.camera_thread import CameraThread
 
 log = logging.getLogger(__name__)
 
