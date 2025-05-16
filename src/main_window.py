@@ -30,14 +30,19 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QSlider,
     QStyleFactory,
-    QTabWidget,
+    QTabWidget,  # Added QTabWidget
 )
-from PyQt5.QtCore import (
-    Qt, QTimer, QSize, pyqtSignal, QDateTime, QUrl, pyqtSlot, QThread, QCoreApplication
-)
+from PyQt5.QtCore import Qt, QTimer, QSize, pyqtSignal, QDateTime, QUrl, pyqtSlot
 from PyQt5.QtGui import (
-    QIcon, QImage, QPixmap, QPalette, QColor, QTextCursor, QKeySequence,
-    QDesktopServices, QFont
+    QIcon,
+    QImage,
+    QPixmap,
+    QPalette,
+    QColor,
+    QTextCursor,
+    QKeySequence,
+    QDesktopServices,
+    QFont,
 )
 from PyQt5.QtMultimedia import QCameraInfo
 
@@ -87,8 +92,6 @@ class CameraControlPanel(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("Camera", parent)
-        self._gain_timer = QTimer(self)
-        self._gain_timer.setSingleShot(True)
         # Main layout for the camera panel
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(5, 5, 5, 5)  # Reduced margins
@@ -124,13 +127,11 @@ class CameraControlPanel(QGroupBox):
         advanced_layout.setSpacing(6)
         advanced_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.exposure_spin = QSpinBox()
-        self.exposure_spin.setEnabled(False)
-        self.exposure_spin.setSingleStep(1)  # or adjust the step size to taste
-
-        # Put it into the form
+        self.exposure_slider = QSlider(Qt.Horizontal)
+        self.exposure_value_label = QLabel("N/A")
         exposure_layout = QHBoxLayout()
-        exposure_layout.addWidget(self.exposure_spin)
+        exposure_layout.addWidget(self.exposure_slider)
+        exposure_layout.addWidget(self.exposure_value_label)
         advanced_layout.addRow("Exposure:", exposure_layout)
 
         self.gain_slider = QSlider(Qt.Horizontal)
@@ -186,6 +187,7 @@ class CameraControlPanel(QGroupBox):
         )  # Add tab widget to the main layout of the CameraControlPanel
 
         # Initially disable them until properties are loaded
+        self.exposure_slider.setEnabled(False)
         self.gain_slider.setEnabled(False)
         self.brightness_slider.setEnabled(False)
         self.auto_exposure_cb.setEnabled(False)
@@ -197,13 +199,8 @@ class CameraControlPanel(QGroupBox):
         # self.cam_selector.currentIndexChanged.connect(self._on_camera_selected_changed) # Already connected
         # self.res_selector.currentIndexChanged.connect(self._on_resolution_selected_changed) # Already connected
 
-        self.exposure_spin.editingFinished.connect(
-            lambda: self.exposure_changed.emit(self.exposure_spin.value())
-        )
-        self.gain_slider.valueChanged.connect(lambda _: self._gain_timer.start(200))
-        self._gain_timer.timeout.connect(
-            lambda: self.gain_changed.emit(self.gain_slider.value())
-        )
+        self.exposure_slider.valueChanged.connect(self.exposure_changed)
+        self.gain_slider.valueChanged.connect(self.gain_changed)
         self.brightness_slider.valueChanged.connect(self.brightness_changed)
         self.auto_exposure_cb.toggled.connect(self.auto_exposure_toggled)
 
@@ -290,50 +287,15 @@ class CameraControlPanel(QGroupBox):
         # self.roi_reset_requested.emit()
 
     def update_control_from_properties(self, control_name, props):
-        # prepare handles
         slider = None
         label = None
-        spin = None
         checkbox = None
-        is_enabled = props.get("enabled", False)
+        is_enabled = props.get("enabled", False)  # Default to False if not specified
 
-        # ─── exposure branch ───────────────────────────────────────────────
         if control_name == "exposure":
-            spin = self.exposure_spin
+            slider = self.exposure_slider
+            label = self.exposure_value_label
             checkbox = self.auto_exposure_cb
-
-            # Enable/disable the whole tab if needed
-            spin.setEnabled(is_enabled)
-            if is_enabled:
-                spin.blockSignals(True)
-                # adjust range dynamically
-                spin.setRange(
-                    int(props.get("min", spin.minimum())),
-                    int(props.get("max", spin.maximum())),
-                )
-                if "value" in props:
-                    spin.setValue(int(props["value"]))
-                spin.blockSignals(False)
-            else:
-                # grey it out
-                spin.setValue(spin.minimum())
-
-            # handle auto‐exposure checkbox
-            if checkbox:
-                checkbox.setEnabled(is_enabled)
-                if is_enabled and props.get("is_auto_on", False):
-                    checkbox.blockSignals(True)
-                    checkbox.setChecked(True)
-                    checkbox.blockSignals(False)
-                    spin.setEnabled(False)
-                elif is_enabled:
-                    checkbox.blockSignals(True)
-                    checkbox.setChecked(False)
-                    checkbox.blockSignals(False)
-                else:
-                    checkbox.setChecked(False)
-
-        # ─── gain and brightness still use sliders ─────────────────────────
         elif control_name == "gain":
             slider = self.gain_slider
             label = self.gain_value_label
@@ -341,15 +303,16 @@ class CameraControlPanel(QGroupBox):
             slider = self.brightness_slider
             label = self.brightness_value_label
 
-        # ─── enable/disable entire “Adjustments” tab ────────────────────────
-        if control_name in ("exposure", "gain", "brightness"):
-            tab = self.findChild(QTabWidget)
-            if tab:
-                tab.widget(1).setEnabled(
-                    is_enabled
-                )  # assuming tab index 1 is “Adjustments”
+        parent_tab_index = -1
+        if control_name in ["exposure", "gain", "brightness"]:
+            parent_tab_index = 1  # Adjustments tab
 
-        # ─── update slider branches (gain & brightness) ────────────────────
+        tab_widget = self.findChild(QTabWidget)
+        if tab_widget and parent_tab_index != -1:
+            tab_widget.widget(parent_tab_index).setEnabled(
+                is_enabled
+            )  # Enable/disable the whole tab content
+
         if slider:
             slider.setEnabled(is_enabled)
             if is_enabled:
@@ -359,12 +322,23 @@ class CameraControlPanel(QGroupBox):
                 if "value" in props:
                     slider.setValue(int(props["value"]))
                 slider.blockSignals(False)
-            if label:
-                label.setText(
-                    f"{props['value']:.1f}"
-                    if is_enabled and "value" in props
-                    else "N/A"
-                )
+            if label and "value" in props:
+                label.setText(f"{props['value']:.1f}")
+            elif label:  # Not enabled or no value
+                label.setText("N/A")
+                if slider:
+                    slider.setValue(0)  # Reset slider if not enabled
+
+        if checkbox and control_name == "exposure":
+            checkbox.setEnabled(is_enabled)
+            if is_enabled and "is_auto_on" in props:
+                checkbox.blockSignals(True)
+                checkbox.setChecked(props["is_auto_on"])
+                checkbox.blockSignals(False)
+                if slider:  # Slider exists for exposure
+                    slider.setEnabled(not props["is_auto_on"] if is_enabled else False)
+            elif not is_enabled:  # if exposure control overall is disabled
+                checkbox.setChecked(False)
 
     def update_roi_controls(self, roi_props):
         roi_tab_content_widget = self.findChild(QTabWidget).widget(
@@ -960,11 +934,10 @@ class MainWindow(QMainWindow):
         # Connect signals from TopControlPanel (which forwards from sub-panels)
         self.top_ctrl.camera_selected.connect(self._on_camera_device_selected)
         self.top_ctrl.resolution_selected.connect(self._on_camera_resolution_selected)
-        # drive camera setters in the camera thread:
-        self.top_ctrl.exposure_changed.connect(self.qt_cam.set_exposure)
-        self.top_ctrl.gain_changed.connect(self.qt_cam.set_gain)
-        self.top_ctrl.brightness_changed.connect(self.qt_cam.set_brightness)
-        self.top_ctrl.auto_exposure_toggled.connect(self.qt_cam.set_auto_exposure)
+        self.top_ctrl.exposure_changed.connect(self._on_exposure_changed)
+        self.top_ctrl.gain_changed.connect(self._on_gain_changed)
+        self.top_ctrl.brightness_changed.connect(self._on_brightness_changed)
+        self.top_ctrl.auto_exposure_toggled.connect(self._on_auto_exposure_toggled)
         self.top_ctrl.roi_changed.connect(self._on_roi_changed)
         self.top_ctrl.roi_reset_requested.connect(self._on_roi_reset_requested)
 
@@ -990,6 +963,22 @@ class MainWindow(QMainWindow):
 
         # Populate cameras after UI is fully up
         QTimer.singleShot(100, self.top_ctrl.camera_controls.populate_camera_selector)
+
+    def _on_exposure_changed(self, value):
+        if self.qt_cam:
+            self.qt_cam.set_exposure(value)
+
+    def _on_gain_changed(self, value):
+        if self.qt_cam:
+            self.qt_cam.set_gain(value)
+
+    def _on_brightness_changed(self, value):
+        if self.qt_cam:
+            self.qt_cam.set_brightness(value)
+
+    def _on_auto_exposure_toggled(self, checked):
+        if self.qt_cam:
+            self.qt_cam.set_auto_exposure(enable_auto=checked)
 
     def _on_roi_changed(self, x, y, w, h):
         if self.qt_cam:
@@ -1045,11 +1034,11 @@ class MainWindow(QMainWindow):
             "QSplitter::handle{background-color:#D8DEE9;}"
         )  # Example color
 
-        # Camera Pane (moved into its own thread to prevent UI blocking)
-        self.qt_cam = QtCameraWidget(parent=self)
-        self._camera_thread = QThread(self)
-        self.qt_cam.moveToThread(self._camera_thread)
-        self._camera_thread.start()
+        # Camera Pane
+        # No extra container needed if QtCameraWidget handles its own background/border
+        self.qt_cam = QtCameraWidget(parent=self)  # Provide parent
+        # self.qt_cam.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding) # Already in QtCameraWidget
+        # self.qt_cam.setMinimumSize(320, 240) # Ensure it doesn't get too small
         self.main_content_splitter.addWidget(self.qt_cam)
 
         # Plot Pane
@@ -1100,31 +1089,15 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(QImage, object)  # QImage for display, object for BGR frame
     def _on_frame_ready(self, qimage, bgr_frame_obj):
-        # --- Display Logic (now in main thread) ---
-        if qimage and not qimage.isNull() and self.qt_cam and self.qt_cam.viewfinder_label:
-            # Ensure viewfinder_label is valid and visible before scaling
-            label_size = self.qt_cam.viewfinder_label.size()
-            if label_size.width() > 0 and label_size.height() > 0:
-                pix = QPixmap.fromImage(qimage)
-                self.qt_cam.viewfinder_label.setPixmap(
-                    pix.scaled(
-                        label_size,
-                        Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation # Consider Qt.FastTransformation if still laggy
-                    )
-                )
-            # else: log.debug("viewfinder_label size is invalid for pixmap scaling")
-
-        # --- Recording Logic (uses updated TrialRecorder) ---
         if self._is_recording and self.trial_recorder and bgr_frame_obj is not None:
             try:
-                # This now puts the frame onto TrialRecorder's internal queue
                 self.trial_recorder.write_video_frame(bgr_frame_obj)
-            except Exception as e: # Should be rare if queue.put_nowait is used
-                log.error(f"Error queueing video frame: {e}", exc_info=True)
-                # Consider how to handle this; stopping recording might be too drastic
-                # if it's just a temporary queue full issue.
-                # For now, if TrialRecorder's queue fills, it logs a warning.
+            except Exception as e:
+                log.error(f"Error writing video frame: {e}", exc_info=True)
+                self._stop_pc_recording()  # Stop on error
+                self.statusBar().showMessage(
+                    "ERROR: Video recording failed critically.", 5000
+                )
 
     @pyqtSlot(str, int)  # error_message, error_code
     def _on_camera_error(self, error_message: str, error_code: int):
@@ -1488,22 +1461,33 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # base_save_path = os.path.join(trial_folder, folder_name_safe)  # Filename base
+        base_save_path = os.path.join(trial_folder, folder_name_safe)  # Filename base
 
         try:
-            fw, fh = DEFAULT_FRAME_SIZE
-            if self.qt_cam and hasattr(self.qt_cam, "get_current_resolution"):
-                current_cam_res = self.qt_cam.get_current_resolution()
-                if current_cam_res and not current_cam_res.isEmpty() and \
-                   current_cam_res.width() > 0 and current_cam_res.height() > 0:
+            fw, fh = DEFAULT_FRAME_SIZE  # Fallback
+            if self.qt_cam and hasattr(
+                self.qt_cam, "get_current_resolution"
+            ):  # Check attribute first
+                current_cam_res = self.qt_cam.get_current_resolution()  # This is QSize
+                if (
+                    current_cam_res
+                    and not current_cam_res.isEmpty()
+                    and current_cam_res.width() > 0
+                    and current_cam_res.height() > 0
+                ):
                     fw, fh = current_cam_res.width(), current_cam_res.height()
                 else:
-                    log.warning(f"Could not get valid resolution from camera, falling back to default {fw}x{fh}")
+                    log.warning(
+                        f"Could not get valid resolution from camera, falling back to default {fw}x{fh}"
+                    )
             else:
-                log.warning(f"qt_cam or get_current_resolution not available, falling back to default {fw}x{fh}")
+                log.warning(
+                    f"qt_cam or get_current_resolution not available, falling back to default {fw}x{fh}"
+                )
 
-            log.info(f"Starting trial recording. Video frame size: {fw}x{fh}. Target FPS: {DEFAULT_FPS}")
-            
+            log.info(
+                f"Starting trial recording. Video frame size: {fw}x{fh}. Target FPS: {DEFAULT_FPS}"
+            )
             self.trial_recorder = TrialRecorder(
                 base_save_path,
                 fps=DEFAULT_FPS,
@@ -1511,24 +1495,14 @@ class MainWindow(QMainWindow):
                 video_codec=DEFAULT_VIDEO_CODEC,
                 video_ext=DEFAULT_VIDEO_EXTENSION,
             )
-            
-            # Start the recording session which initializes recorders in worker thread
-            if not self.trial_recorder.start_recording_session():
-                raise RuntimeError("TrialRecorder session could not be started (already running or other issue).")
-
-            # Wait a brief moment for the recorder's worker thread to attempt initialization.
-            # This is a pragmatic approach. A more robust solution would involve signals/callbacks
-            # from TrialRecorder about its initialization status.
-            QCoreApplication.processEvents() 
-            time.sleep(0.3) # Slightly increased delay for thread init
-
-            if not self.trial_recorder.is_recording: # is_recording now reflects worker's initialization status
-                # Check logs from TrialRecorder for specific initialization errors
+            if (
+                not self.trial_recorder or not self.trial_recorder.is_recording
+            ):  # is_recording checks if internal recorders initialized
                 raise RuntimeError(
-                    "TrialRecorder failed to initialize one or more internal recorders (video/CSV) in its worker thread. Check logs."
+                    "TrialRecorder failed to initialize one or more internal recorders (video/CSV). Check logs."
                 )
 
-            self.last_trial_basepath = trial_folder
+            self.last_trial_basepath = trial_folder  # Store the folder path
             self.open_last_trial_folder_action.setEnabled(True)
 
             # Metadata
@@ -1547,27 +1521,32 @@ class MainWindow(QMainWindow):
                 )
             log.info(f"Metadata saved to {meta_filepath}")
 
-            self._is_recording = True # This flag indicates MainWindow's intent to record
+            self._is_recording = True
             self.start_trial_action.setEnabled(False)
-            self.start_trial_action.setIcon(self.icon_recording_active)
+            self.start_trial_action.setIcon(self.icon_recording_active)  # Change icon
             self.stop_trial_action.setEnabled(True)
-            self.plot_w.clear_plot()
-            self.statusBar().showMessage(f"PC Recording Started: {trial_name}", 0)
+            self.plot_w.clear_plot()  # Clear plot for new recording
+            self.statusBar().showMessage(
+                f"PC Recording Started: {trial_name}", 0
+            )  # Persistent message
             log.info(f"PC recording started. Base path: {base_save_path}")
 
         except Exception as e_rec_start:
             log.error("Failed to start PC recording process", exc_info=True)
-            QMessageBox.critical(self, "Recording Error", f"Could not start recording: {e_rec_start}")
+            QMessageBox.critical(
+                self, "Recording Error", f"Could not start recording: {e_rec_start}"
+            )
             if self.trial_recorder:
-                self.trial_recorder.stop() 
+                self.trial_recorder.stop()  # Cleanup
             self.trial_recorder = None
             self._is_recording = False
-            self.open_last_trial_folder_action.setEnabled(bool(self.last_trial_basepath))
-            self.start_trial_action.setIcon(self.icon_record_start)
+            self.open_last_trial_folder_action.setEnabled(
+                bool(self.last_trial_basepath)
+            )  # Only if a path was set
+            self.start_trial_action.setIcon(self.icon_record_start)  # Reset icon
             self.start_trial_action.setEnabled(
-                self._serial_thread is not None and self._serial_thread.isRunning() and
-                self.qt_cam is not None and self.qt_cam.cap is not None and self.qt_cam.cap.isOpened() # check camera too
-            )
+                self._serial_thread is not None and self._serial_thread.isRunning()
+            )  # Re-evaluate
             self.stop_trial_action.setEnabled(False)
 
     def _stop_pc_recording(self):
@@ -1616,18 +1595,33 @@ class MainWindow(QMainWindow):
         auto_y = self.top_ctrl.plot_controls.auto_y_cb.isChecked()
         self.plot_w.update_plot(t_dev, p_dev, auto_x, auto_y)
 
-        if self.dock_console.isVisible() and self.console_out:
+        if (
+            self.dock_console.isVisible() and self.console_out
+        ):  # Only process if console is visible
             line = f"Data: Idx={idx}, Time={t_dev:.3f}s, Pressure={p_dev:.2f} mmHg"
-            self.console_out.append(line)
-            # Consider batching console updates if serial rate is very high
+            self.console_out.append(
+                line
+            )  # append() is efficient enough for moderate rates
+            # Auto-scrolling is usually default for QTextEdit with append
+            # Limit console lines for performance if rate is very high (already implemented)
+            # doc = self.console_out.document()
+            # if doc and doc.blockCount() > 500: # Using blockCount is more accurate
+            #     cursor = self.console_out.textCursor()
+            #     cursor.movePosition(QTextCursor.Start)
+            #     cursor.movePosition(QTextCursor.NextBlock, QTextCursor.KeepAnchor, doc.blockCount() - 200)
+            #     cursor.removeSelectedText()
+            #     cursor.movePosition(QTextCursor.End)
+            #     self.console_out.setTextCursor(cursor)
 
         if self._is_recording and self.trial_recorder:
             try:
-                # This now puts data onto TrialRecorder's internal queue
                 self.trial_recorder.write_csv_data(t_dev, idx, p_dev)
-            except Exception as e_csv: # Should be rare
-                log.error("Error queueing CSV data during recording", exc_info=True)
-                # Consider how to handle this.
+            except Exception as e_csv:
+                log.error("Error writing CSV data during recording", exc_info=True)
+                self._stop_pc_recording()  # Stop trial
+                self.statusBar().showMessage(
+                    "ERROR: CSV data recording failed critically.", 5000
+                )
 
     def _tick_app_elapsed_time(self):
         self._app_elapsed_seconds += 1
