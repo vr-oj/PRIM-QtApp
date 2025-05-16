@@ -33,25 +33,11 @@ from PyQt5.QtWidgets import (
     QTabWidget,
 )
 from PyQt5.QtCore import (
-    Qt,
-    QTimer,
-    QSize,
-    pyqtSignal,
-    QDateTime,
-    QUrl,
-    pyqtSlot,
-    QThread,
+    Qt, QTimer, QSize, pyqtSignal, QDateTime, QUrl, pyqtSlot, QThread, QCoreApplication
 )
 from PyQt5.QtGui import (
-    QIcon,
-    QImage,
-    QPixmap,
-    QPalette,
-    QColor,
-    QTextCursor,
-    QKeySequence,
-    QDesktopServices,
-    QFont,
+    QIcon, QImage, QPixmap, QPalette, QColor, QTextCursor, QKeySequence,
+    QDesktopServices, QFont
 )
 from PyQt5.QtMultimedia import QCameraInfo
 
@@ -1114,15 +1100,31 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(QImage, object)  # QImage for display, object for BGR frame
     def _on_frame_ready(self, qimage, bgr_frame_obj):
+        # --- Display Logic (now in main thread) ---
+        if qimage and not qimage.isNull() and self.qt_cam and self.qt_cam.viewfinder_label:
+            # Ensure viewfinder_label is valid and visible before scaling
+            label_size = self.qt_cam.viewfinder_label.size()
+            if label_size.width() > 0 and label_size.height() > 0:
+                pix = QPixmap.fromImage(qimage)
+                self.qt_cam.viewfinder_label.setPixmap(
+                    pix.scaled(
+                        label_size,
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation # Consider Qt.FastTransformation if still laggy
+                    )
+                )
+            # else: log.debug("viewfinder_label size is invalid for pixmap scaling")
+
+        # --- Recording Logic (uses updated TrialRecorder) ---
         if self._is_recording and self.trial_recorder and bgr_frame_obj is not None:
             try:
+                # This now puts the frame onto TrialRecorder's internal queue
                 self.trial_recorder.write_video_frame(bgr_frame_obj)
-            except Exception as e:
-                log.error(f"Error writing video frame: {e}", exc_info=True)
-                self._stop_pc_recording()  # Stop on error
-                self.statusBar().showMessage(
-                    "ERROR: Video recording failed critically.", 5000
-                )
+            except Exception as e: # Should be rare if queue.put_nowait is used
+                log.error(f"Error queueing video frame: {e}", exc_info=True)
+                # Consider how to handle this; stopping recording might be too drastic
+                # if it's just a temporary queue full issue.
+                # For now, if TrialRecorder's queue fills, it logs a warning.
 
     @pyqtSlot(str, int)  # error_message, error_code
     def _on_camera_error(self, error_message: str, error_code: int):
@@ -1486,33 +1488,22 @@ class MainWindow(QMainWindow):
             )
             return
 
-        base_save_path = os.path.join(trial_folder, folder_name_safe)  # Filename base
+        # base_save_path = os.path.join(trial_folder, folder_name_safe)  # Filename base
 
         try:
-            fw, fh = DEFAULT_FRAME_SIZE  # Fallback
-            if self.qt_cam and hasattr(
-                self.qt_cam, "get_current_resolution"
-            ):  # Check attribute first
-                current_cam_res = self.qt_cam.get_current_resolution()  # This is QSize
-                if (
-                    current_cam_res
-                    and not current_cam_res.isEmpty()
-                    and current_cam_res.width() > 0
-                    and current_cam_res.height() > 0
-                ):
+            fw, fh = DEFAULT_FRAME_SIZE
+            if self.qt_cam and hasattr(self.qt_cam, "get_current_resolution"):
+                current_cam_res = self.qt_cam.get_current_resolution()
+                if current_cam_res and not current_cam_res.isEmpty() and \
+                   current_cam_res.width() > 0 and current_cam_res.height() > 0:
                     fw, fh = current_cam_res.width(), current_cam_res.height()
                 else:
-                    log.warning(
-                        f"Could not get valid resolution from camera, falling back to default {fw}x{fh}"
-                    )
+                    log.warning(f"Could not get valid resolution from camera, falling back to default {fw}x{fh}")
             else:
-                log.warning(
-                    f"qt_cam or get_current_resolution not available, falling back to default {fw}x{fh}"
-                )
+                log.warning(f"qt_cam or get_current_resolution not available, falling back to default {fw}x{fh}")
 
-            log.info(
-                f"Starting trial recording. Video frame size: {fw}x{fh}. Target FPS: {DEFAULT_FPS}"
-            )
+            log.info(f"Starting trial recording. Video frame size: {fw}x{fh}. Target FPS: {DEFAULT_FPS}")
+            
             self.trial_recorder = TrialRecorder(
                 base_save_path,
                 fps=DEFAULT_FPS,
@@ -1520,14 +1511,24 @@ class MainWindow(QMainWindow):
                 video_codec=DEFAULT_VIDEO_CODEC,
                 video_ext=DEFAULT_VIDEO_EXTENSION,
             )
-            if (
-                not self.trial_recorder or not self.trial_recorder.is_recording
-            ):  # is_recording checks if internal recorders initialized
+            
+            # Start the recording session which initializes recorders in worker thread
+            if not self.trial_recorder.start_recording_session():
+                raise RuntimeError("TrialRecorder session could not be started (already running or other issue).")
+
+            # Wait a brief moment for the recorder's worker thread to attempt initialization.
+            # This is a pragmatic approach. A more robust solution would involve signals/callbacks
+            # from TrialRecorder about its initialization status.
+            QCoreApplication.processEvents() 
+            time.sleep(0.3) # Slightly increased delay for thread init
+
+            if not self.trial_recorder.is_recording: # is_recording now reflects worker's initialization status
+                # Check logs from TrialRecorder for specific initialization errors
                 raise RuntimeError(
-                    "TrialRecorder failed to initialize one or more internal recorders (video/CSV). Check logs."
+                    "TrialRecorder failed to initialize one or more internal recorders (video/CSV) in its worker thread. Check logs."
                 )
 
-            self.last_trial_basepath = trial_folder  # Store the folder path
+            self.last_trial_basepath = trial_folder
             self.open_last_trial_folder_action.setEnabled(True)
 
             # Metadata
@@ -1546,32 +1547,27 @@ class MainWindow(QMainWindow):
                 )
             log.info(f"Metadata saved to {meta_filepath}")
 
-            self._is_recording = True
+            self._is_recording = True # This flag indicates MainWindow's intent to record
             self.start_trial_action.setEnabled(False)
-            self.start_trial_action.setIcon(self.icon_recording_active)  # Change icon
+            self.start_trial_action.setIcon(self.icon_recording_active)
             self.stop_trial_action.setEnabled(True)
-            self.plot_w.clear_plot()  # Clear plot for new recording
-            self.statusBar().showMessage(
-                f"PC Recording Started: {trial_name}", 0
-            )  # Persistent message
+            self.plot_w.clear_plot()
+            self.statusBar().showMessage(f"PC Recording Started: {trial_name}", 0)
             log.info(f"PC recording started. Base path: {base_save_path}")
 
         except Exception as e_rec_start:
             log.error("Failed to start PC recording process", exc_info=True)
-            QMessageBox.critical(
-                self, "Recording Error", f"Could not start recording: {e_rec_start}"
-            )
+            QMessageBox.critical(self, "Recording Error", f"Could not start recording: {e_rec_start}")
             if self.trial_recorder:
-                self.trial_recorder.stop()  # Cleanup
+                self.trial_recorder.stop() 
             self.trial_recorder = None
             self._is_recording = False
-            self.open_last_trial_folder_action.setEnabled(
-                bool(self.last_trial_basepath)
-            )  # Only if a path was set
-            self.start_trial_action.setIcon(self.icon_record_start)  # Reset icon
+            self.open_last_trial_folder_action.setEnabled(bool(self.last_trial_basepath))
+            self.start_trial_action.setIcon(self.icon_record_start)
             self.start_trial_action.setEnabled(
-                self._serial_thread is not None and self._serial_thread.isRunning()
-            )  # Re-evaluate
+                self._serial_thread is not None and self._serial_thread.isRunning() and
+                self.qt_cam is not None and self.qt_cam.cap is not None and self.qt_cam.cap.isOpened() # check camera too
+            )
             self.stop_trial_action.setEnabled(False)
 
     def _stop_pc_recording(self):
@@ -1620,33 +1616,18 @@ class MainWindow(QMainWindow):
         auto_y = self.top_ctrl.plot_controls.auto_y_cb.isChecked()
         self.plot_w.update_plot(t_dev, p_dev, auto_x, auto_y)
 
-        if (
-            self.dock_console.isVisible() and self.console_out
-        ):  # Only process if console is visible
+        if self.dock_console.isVisible() and self.console_out:
             line = f"Data: Idx={idx}, Time={t_dev:.3f}s, Pressure={p_dev:.2f} mmHg"
-            self.console_out.append(
-                line
-            )  # append() is efficient enough for moderate rates
-            # Auto-scrolling is usually default for QTextEdit with append
-            # Limit console lines for performance if rate is very high (already implemented)
-            # doc = self.console_out.document()
-            # if doc and doc.blockCount() > 500: # Using blockCount is more accurate
-            #     cursor = self.console_out.textCursor()
-            #     cursor.movePosition(QTextCursor.Start)
-            #     cursor.movePosition(QTextCursor.NextBlock, QTextCursor.KeepAnchor, doc.blockCount() - 200)
-            #     cursor.removeSelectedText()
-            #     cursor.movePosition(QTextCursor.End)
-            #     self.console_out.setTextCursor(cursor)
+            self.console_out.append(line)
+            # Consider batching console updates if serial rate is very high
 
         if self._is_recording and self.trial_recorder:
             try:
+                # This now puts data onto TrialRecorder's internal queue
                 self.trial_recorder.write_csv_data(t_dev, idx, p_dev)
-            except Exception as e_csv:
-                log.error("Error writing CSV data during recording", exc_info=True)
-                self._stop_pc_recording()  # Stop trial
-                self.statusBar().showMessage(
-                    "ERROR: CSV data recording failed critically.", 5000
-                )
+            except Exception as e_csv: # Should be rare
+                log.error("Error queueing CSV data during recording", exc_info=True)
+                # Consider how to handle this.
 
     def _tick_app_elapsed_time(self):
         self._app_elapsed_seconds += 1
