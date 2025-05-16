@@ -47,7 +47,7 @@ class CameraThread(QThread):
             qt_img = QImage(rgb_disp.data, w, h, bytes_per_line, QImage.Format_RGB888)
 
             # emit both display image and full-res array
-            self.frameReady.emit(qt_img, bgr_for_measurement)
+            self.frameReady.emit(qt_img, full_frame)
             self.msleep(delay)
 
         cap.release()
