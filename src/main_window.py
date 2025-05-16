@@ -92,6 +92,8 @@ class CameraControlPanel(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("Camera", parent)
+        self._gain_timer = QTimer(self)
+        self._gain_timer.setSingleShot(True)
         # Main layout for the camera panel
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(5, 5, 5, 5)  # Reduced margins
@@ -203,7 +205,10 @@ class CameraControlPanel(QGroupBox):
         self.exposure_spin.editingFinished.connect(
             lambda: self.exposure_changed.emit(self.exposure_spin.value())
         )
-        self.gain_slider.valueChanged.connect(self.gain_changed)
+        self.gain_slider.valueChanged.connect(lambda _: self._gain_timer.start(200))
+        self._gain_timer.timeout.connect(
+            lambda: self.gain_changed.emit(self.gain_slider.value())
+        )
         self.brightness_slider.valueChanged.connect(self.brightness_changed)
         self.auto_exposure_cb.toggled.connect(self.auto_exposure_toggled)
 
