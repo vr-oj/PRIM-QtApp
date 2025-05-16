@@ -37,7 +37,7 @@ class FFmpegRecorder:
             # CTRL+C event will tell ffmpeg to finalize the file
             self.proc.send_signal(subprocess.signal.CTRL_C_EVENT)
             self.proc.wait()
-
+        self.is_recording = False
 class VideoRecorder:
     def __init__(self, filename, fourcc, fps, frame_size):
         os.makedirs(os.path.dirname(filename) or '.', exist_ok=True)
@@ -128,11 +128,14 @@ class TrialRecorder:
 
         # Decide on filename & recorder class based on extension
         if video_ext.lower() in ('tif','tiff'):
-            # full-res TIFF stack
-            tif_filename = f"{self.basepath_with_ts}.tif"
-            self.video = TiffStackRecorder(tif_filename, frame_shape=frame_size)
-            # Native FFmpeg capture from DirectShow device
-            # video_codec is being repurposed to carry the device name
+            # TIFF‐stack
+            self.video = TiffStackRecorder(
+                filename=f"{self.basepath_with_ts}.tif",
+                frame_shape=frame_size
+            )
+        else:
+            # Native FFmpeg capture from your camera
+            # repurpose `video_codec` to carry the camera description string
             self.video = FFmpegRecorder(
                 device_name=video_codec,
                 out_path=self.basepath_with_ts,
