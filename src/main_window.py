@@ -127,11 +127,15 @@ class CameraControlPanel(QGroupBox):
         advanced_layout.setSpacing(6)
         advanced_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.exposure_slider = QSlider(Qt.Horizontal)
-        self.exposure_value_label = QLabel("N/A")
+        self.exposure_spin = QSpinBox()
+        self.exposure_spin.setRange(
+            min_exp, max_exp
+        )  # e.g. -13 to 0, or whatever your camera profile gives you
+        self.exposure_spin.setSingleStep(1)  # or adjust the step size to taste
+
+        # Put it into the form
         exposure_layout = QHBoxLayout()
-        exposure_layout.addWidget(self.exposure_slider)
-        exposure_layout.addWidget(self.exposure_value_label)
+        exposure_layout.addWidget(self.exposure_spin)
         advanced_layout.addRow("Exposure:", exposure_layout)
 
         self.gain_slider = QSlider(Qt.Horizontal)
@@ -199,7 +203,9 @@ class CameraControlPanel(QGroupBox):
         # self.cam_selector.currentIndexChanged.connect(self._on_camera_selected_changed) # Already connected
         # self.res_selector.currentIndexChanged.connect(self._on_resolution_selected_changed) # Already connected
 
-        self.exposure_slider.valueChanged.connect(self.exposure_changed)
+        self.exposure_spin.editingFinished.connect(
+            lambda: self.exposure_changed.emit(self.exposure_spin.value())
+        )
         self.gain_slider.valueChanged.connect(self.gain_changed)
         self.brightness_slider.valueChanged.connect(self.brightness_changed)
         self.auto_exposure_cb.toggled.connect(self.auto_exposure_toggled)
@@ -287,15 +293,50 @@ class CameraControlPanel(QGroupBox):
         # self.roi_reset_requested.emit()
 
     def update_control_from_properties(self, control_name, props):
+        # prepare handles
         slider = None
         label = None
+        spin = None
         checkbox = None
-        is_enabled = props.get("enabled", False)  # Default to False if not specified
+        is_enabled = props.get("enabled", False)
 
+        # ─── exposure branch ───────────────────────────────────────────────
         if control_name == "exposure":
-            slider = self.exposure_slider
-            label = self.exposure_value_label
+            spin = self.exposure_spin
             checkbox = self.auto_exposure_cb
+
+            # Enable/disable the whole tab if needed
+            spin.setEnabled(is_enabled)
+            if is_enabled:
+                spin.blockSignals(True)
+                # adjust range dynamically
+                spin.setRange(
+                    int(props.get("min", spin.minimum())),
+                    int(props.get("max", spin.maximum())),
+                )
+                if "value" in props:
+                    spin.setValue(int(props["value"]))
+                spin.blockSignals(False)
+            else:
+                # grey it out
+                spin.setValue(spin.minimum())
+
+            # handle auto‐exposure checkbox
+            if checkbox:
+                checkbox.setEnabled(is_enabled)
+                if is_enabled and props.get("is_auto_on", False):
+                    checkbox.blockSignals(True)
+                    checkbox.setChecked(True)
+                    checkbox.blockSignals(False)
+                    spin.setEnabled(False)
+                elif is_enabled:
+                    checkbox.blockSignals(True)
+                    checkbox.setChecked(False)
+                    checkbox.blockSignals(False)
+                else:
+                    checkbox.setChecked(False)
+
+        # ─── gain and brightness still use sliders ─────────────────────────
         elif control_name == "gain":
             slider = self.gain_slider
             label = self.gain_value_label
@@ -303,16 +344,15 @@ class CameraControlPanel(QGroupBox):
             slider = self.brightness_slider
             label = self.brightness_value_label
 
-        parent_tab_index = -1
-        if control_name in ["exposure", "gain", "brightness"]:
-            parent_tab_index = 1  # Adjustments tab
+        # ─── enable/disable entire “Adjustments” tab ────────────────────────
+        if control_name in ("exposure", "gain", "brightness"):
+            tab = self.findChild(QTabWidget)
+            if tab:
+                tab.widget(1).setEnabled(
+                    is_enabled
+                )  # assuming tab index 1 is “Adjustments”
 
-        tab_widget = self.findChild(QTabWidget)
-        if tab_widget and parent_tab_index != -1:
-            tab_widget.widget(parent_tab_index).setEnabled(
-                is_enabled
-            )  # Enable/disable the whole tab content
-
+        # ─── update slider branches (gain & brightness) ────────────────────
         if slider:
             slider.setEnabled(is_enabled)
             if is_enabled:
@@ -322,23 +362,12 @@ class CameraControlPanel(QGroupBox):
                 if "value" in props:
                     slider.setValue(int(props["value"]))
                 slider.blockSignals(False)
-            if label and "value" in props:
-                label.setText(f"{props['value']:.1f}")
-            elif label:  # Not enabled or no value
-                label.setText("N/A")
-                if slider:
-                    slider.setValue(0)  # Reset slider if not enabled
-
-        if checkbox and control_name == "exposure":
-            checkbox.setEnabled(is_enabled)
-            if is_enabled and "is_auto_on" in props:
-                checkbox.blockSignals(True)
-                checkbox.setChecked(props["is_auto_on"])
-                checkbox.blockSignals(False)
-                if slider:  # Slider exists for exposure
-                    slider.setEnabled(not props["is_auto_on"] if is_enabled else False)
-            elif not is_enabled:  # if exposure control overall is disabled
-                checkbox.setChecked(False)
+            if label:
+                label.setText(
+                    f"{props['value']:.1f}"
+                    if is_enabled and "value" in props
+                    else "N/A"
+                )
 
     def update_roi_controls(self, roi_props):
         roi_tab_content_widget = self.findChild(QTabWidget).widget(
