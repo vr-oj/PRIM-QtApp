@@ -1501,8 +1501,8 @@ class MainWindow(QMainWindow):
                 base_save_path,
                 fps=DEFAULT_FPS,
                 frame_size=(fw, fh),
-                video_codec=DEFAULT_VIDEO_CODEC,
-                video_ext=video_ext,
+                video_codec=self.qt_cam.current_camera_desc,  # e.g. "DMK 33UX250"
+                video_ext=DEFAULT_VIDEO_EXTENSION,
             )
             if (
                 not self.trial_recorder or not self.trial_recorder.is_recording
@@ -1569,7 +1569,7 @@ class MainWindow(QMainWindow):
                 frames_recorded = self.trial_recorder.video_frame_count
             except AttributeError:
                 frames_recorded = "N/A"
-                
+
             self.trial_recorder.stop()  # This handles closing files
             log.info(
                 f"PC recording stopped for {base}. Video frames recorded: {frames_recorded}"

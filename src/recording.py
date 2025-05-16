@@ -4,10 +4,39 @@ import os
 import time
 import logging
 import imageio
+import subprocess, shlex
 from config import DEFAULT_VIDEO_CODEC, DEFAULT_VIDEO_EXTENSION # Added for config
 from tifffile import TiffWriter
 
 log = logging.getLogger(__name__) # Added for logging
+
+class FFmpegRecorder:
+    """
+    Spawns an FFmpeg process to capture directly from a DSHOW camera.
+    """
+    def __init__(self, device_name, out_path, fps, frame_size):
+        width, height = frame_size
+        # build a command that uses the DirectShow video= device
+        cmd = (
+            f'ffmpeg -y '
+            f'-f dshow '
+            f'-video_size {width}x{height} '
+            f'-framerate {fps} '
+            f'-i video="{device_name}" '
+            f'-c:v libx264 '
+            f'-pix_fmt yuv420p '
+            f'"{out_path}.mp4"'
+        )
+        log.info(f"Starting FFmpeg capture: {cmd}")
+        # launch FFmpeg; it will record until we kill it
+        self.proc = subprocess.Popen(shlex.split(cmd), stdin=subprocess.DEVNULL)
+
+    def stop(self):
+        if self.proc and self.proc.poll() is None:
+            log.info("Stopping FFmpeg capture")
+            # CTRL+C event will tell ffmpeg to finalize the file
+            self.proc.send_signal(subprocess.signal.CTRL_C_EVENT)
+            self.proc.wait()
 
 class VideoRecorder:
     def __init__(self, filename, fourcc, fps, frame_size):
@@ -98,16 +127,15 @@ class TrialRecorder:
         self.basepath_with_ts = f"{basepath}_{ts}"
 
         # Decide on filename & recorder class based on extension
-        if video_ext.lower() in ('tif', 'tiff'):
+        if video_ext.lower() in ('tif','tiff'):
             # full-res TIFF stack
             tif_filename = f"{self.basepath_with_ts}.tif"
             self.video = TiffStackRecorder(tif_filename, frame_shape=frame_size)
-        else:
-            # AVI or other compressed video
-            vid_filename = f"{self.basepath_with_ts}.{video_ext}"
-            self.video = VideoRecorder(
-                vid_filename,
-                fourcc=video_codec,
+            # Native FFmpeg capture from DirectShow device
+            # video_codec is being repurposed to carry the device name
+            self.video = FFmpegRecorder(
+                device_name=video_codec,
+                out_path=self.basepath_with_ts,
                 fps=fps,
                 frame_size=frame_size
             )
