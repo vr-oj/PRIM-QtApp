@@ -249,18 +249,19 @@ class QtCameraWidget(QWidget):
 
                 # ── Launch new capture thread ───────────────────────────────────
                 w, h = self.full_frame_width, self.full_frame_height
-                fps = (
-                    self.active_profile.get("default_fps", 30)
-                    if self.active_profile
-                    else 30
+                raw_fps = (
+                   self.active_profile.get("default_fps", 30)
+                   if self.active_profile
+                   else 30
                 )
+                fps = min(raw_fps, 15)
                 # choose a small display footprint—e.g. 640×480
                 disp_w, disp_h = 640, 480
                 self._camera_thread = CameraThread(
                     device_index=self.camera_id,
                     display_width=disp_w,
                     display_height=disp_h,
-                    fps=min(raw_fps, 15),
+                    fps=fps,
                     parent=self,
                 )
 

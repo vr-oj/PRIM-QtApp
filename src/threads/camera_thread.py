@@ -5,11 +5,11 @@ from PyQt5.QtGui import QImage
 class CameraThread(QThread):
     frameReady = pyqtSignal(QImage, object)
 
-    def __init__(self, device_index=0, width=None, height=None, fps=30, parent=None):
+    def __init__(self, device_index=0, display_width=None, display_height=None, fps=30, parent=None):
         super().__init__(parent)
         self.device_index = device_index
-        # width/height become the **display** size, not the cap size
-        self.display_width = display_width
+        # these control only the **down-scale** for the UI
+        self.display_width  = display_width
         self.display_height = display_height
         self.fps = fps
         self._running = True
