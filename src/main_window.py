@@ -30,9 +30,18 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QSlider,
     QStyleFactory,
-    QTabWidget,  # Added QTabWidget
+    QTabWidget,
 )
-from PyQt5.QtCore import Qt, QTimer, QSize, pyqtSignal, QDateTime, QUrl, pyqtSlot
+from PyQt5.QtCore import (
+    Qt,
+    QTimer,
+    QSize,
+    pyqtSignal,
+    QDateTime,
+    QUrl,
+    pyqtSlot,
+    QThread,
+)
 from PyQt5.QtGui import (
     QIcon,
     QImage,
@@ -965,10 +974,11 @@ class MainWindow(QMainWindow):
         # Connect signals from TopControlPanel (which forwards from sub-panels)
         self.top_ctrl.camera_selected.connect(self._on_camera_device_selected)
         self.top_ctrl.resolution_selected.connect(self._on_camera_resolution_selected)
-        self.top_ctrl.exposure_changed.connect(self._on_exposure_changed)
-        self.top_ctrl.gain_changed.connect(self._on_gain_changed)
-        self.top_ctrl.brightness_changed.connect(self._on_brightness_changed)
-        self.top_ctrl.auto_exposure_toggled.connect(self._on_auto_exposure_toggled)
+        # drive camera setters in the camera thread:
+        self.top_ctrl.exposure_changed.connect(self.qt_cam.set_exposure)
+        self.top_ctrl.gain_changed.connect(self.qt_cam.set_gain)
+        self.top_ctrl.brightness_changed.connect(self.qt_cam.set_brightness)
+        self.top_ctrl.auto_exposure_toggled.connect(self.qt_cam.set_auto_exposure)
         self.top_ctrl.roi_changed.connect(self._on_roi_changed)
         self.top_ctrl.roi_reset_requested.connect(self._on_roi_reset_requested)
 
@@ -994,22 +1004,6 @@ class MainWindow(QMainWindow):
 
         # Populate cameras after UI is fully up
         QTimer.singleShot(100, self.top_ctrl.camera_controls.populate_camera_selector)
-
-    def _on_exposure_changed(self, value):
-        if self.qt_cam:
-            self.qt_cam.set_exposure(value)
-
-    def _on_gain_changed(self, value):
-        if self.qt_cam:
-            self.qt_cam.set_gain(value)
-
-    def _on_brightness_changed(self, value):
-        if self.qt_cam:
-            self.qt_cam.set_brightness(value)
-
-    def _on_auto_exposure_toggled(self, checked):
-        if self.qt_cam:
-            self.qt_cam.set_auto_exposure(enable_auto=checked)
 
     def _on_roi_changed(self, x, y, w, h):
         if self.qt_cam:
@@ -1065,11 +1059,11 @@ class MainWindow(QMainWindow):
             "QSplitter::handle{background-color:#D8DEE9;}"
         )  # Example color
 
-        # Camera Pane
-        # No extra container needed if QtCameraWidget handles its own background/border
-        self.qt_cam = QtCameraWidget(parent=self)  # Provide parent
-        # self.qt_cam.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding) # Already in QtCameraWidget
-        # self.qt_cam.setMinimumSize(320, 240) # Ensure it doesn't get too small
+        # Camera Pane (moved into its own thread to prevent UI blocking)
+        self.qt_cam = QtCameraWidget(parent=self)
+        self._camera_thread = QThread(self)
+        self.qt_cam.moveToThread(self._camera_thread)
+        self._camera_thread.start()
         self.main_content_splitter.addWidget(self.qt_cam)
 
         # Plot Pane

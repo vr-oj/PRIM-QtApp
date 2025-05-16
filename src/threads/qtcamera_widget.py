@@ -1,7 +1,7 @@
 import cv2
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy
-from PyQt5.QtCore import QTimer, pyqtSignal, Qt, QSize
-from PyQt5.QtGui import QImage, QPixmap, QFont  # Added QFont
+from PyQt5.QtCore import QTimer, pyqtSignal, Qt, QSize, pyqtSlot
+from PyQt5.QtGui import QImage, QPixmap, QFont
 import logging
 import json
 import os
@@ -115,6 +115,7 @@ class QtCameraWidget(QWidget):
                 f"Error loading camera profiles from {PROFILE_DIR}: {e}", exc_info=True
             )
 
+    @pyqtSlot(int, str)
     def set_active_camera(self, camera_id: int, camera_description: str = ""):
         log.info(
             f"Attempting to set active camera to ID: {camera_id} ('{camera_description}')"
@@ -270,8 +271,8 @@ class QtCameraWidget(QWidget):
             )  # Emit empty dict to disable controls
             return True  # Successfully set to "no camera" state
 
+    @pyqtSlot(int, int)
     def set_active_resolution(self, width: int, height: int):
-        # ... (no significant changes needed here, but ensure logging is good)
         if self.cap and self.cap.isOpened():
             log.info(
                 f"Attempting to set resolution to {width}x{height} for camera ID: {self.camera_id}"
@@ -569,15 +570,18 @@ class QtCameraWidget(QWidget):
             )
             return False
 
-    def set_brightness(self, value: int):  # value from UI slider
+    @pyqtSlot(int)
+    def set_brightness(self, value: int):
         if self._set_camera_property("brightness", float(value)):
             self.query_and_emit_camera_properties()  # Refresh UI with actual value
 
+    @pyqtSlot(int)
     def set_gain(self, value: int):
         if self._set_camera_property("gain", float(value)):
             self.query_and_emit_camera_properties()
 
-    def set_exposure(self, value: int):  # value from UI slider (manual exposure time)
+    @pyqtSlot(int)
+    def set_exposure(self, value: int):
         # Profile should guide if auto-exposure needs to be turned off first.
         # Some cameras manage this automatically, others require explicit mode switch.
         # For now, assume setting CAP_PROP_EXPOSURE implies manual if camera supports it.
@@ -630,6 +634,7 @@ class QtCameraWidget(QWidget):
         ):
             self.query_and_emit_camera_properties()
 
+    @pyqtSlot(bool)
     def set_auto_exposure(
         self, enable_auto: bool
     ):  # True to enable auto, False for manual
