@@ -2,91 +2,69 @@ import cv2
 import csv
 import os
 import time
-import logging # Added for logging
+import logging
+import imageio
 from config import DEFAULT_VIDEO_CODEC, DEFAULT_VIDEO_EXTENSION # Added for config
 from tifffile import TiffWriter
 
 log = logging.getLogger(__name__) # Added for logging
 
 class VideoRecorder:
-    def __init__(self, filename, fourcc=DEFAULT_VIDEO_CODEC, fps=30, frame_size=(640,480)): # Modified default fourcc
+    def __init__(self, filename, fourcc, fps, frame_size):
         os.makedirs(os.path.dirname(filename) or '.', exist_ok=True)
         name, _ = os.path.splitext(filename)
-        effective_extension = DEFAULT_VIDEO_EXTENSION
-        self.filename = f"{name}.{effective_extension}"
+        self.filename = f"{name}.avi"
+        self.frame_count = 0
+        self.is_recording = False
 
-        try:
-            self.writer = cv2.VideoWriter(
-                self.filename,
-                cv2.VideoWriter_fourcc(*fourcc),
-                fps,
-                frame_size
+        # 1) Try OpenCV writer first
+        self.writer = cv2.VideoWriter(
+            self.filename,
+            cv2.VideoWriter_fourcc(*fourcc),
+            fps,
+            frame_size
+        )
+        log.info(f"OpenCV VideoWriter.isOpened()? {self.writer.isOpened()}")
+
+        # 2) If that failed, fall back to imageio
+        if not getattr(self.writer, "isOpened", lambda: False)():
+            log.warning("OpenCV writer failed—switching to imageio-ffmpeg")
+            self.writer = imageio.get_writer(
+                self.filename.replace('.avi', '.mp4'),  # mp4 is fine
+                fps=fps,
+                codec='libx264',
+                quality=8,          # you can tune this
+                ffmpeg_log_level='warning'
             )
-            if not self.writer.isOpened():
-                log.error(f"Failed to open VideoWriter for {self.filename}")
-                self.is_recording = False
-                self.writer = None
-                return
-            
-            self.frame_count = 0
-            self.is_recording = True
-            log.info(f"VideoRecorder started for {self.filename} with codec {fourcc}, {fps}fps, {frame_size}")
-        except Exception as e:
-            log.error(f"Failed to initialize VideoWriter for {self.filename}: {e}")
-            self.writer = None
-            self.is_recording = False
 
+        self.is_recording = True
+        log.info(f"Recording → {self.filename}")
 
     def write_frame(self, frame):
-        if self.is_recording and self.writer:
-            try:
-                self.writer.write(frame)
-                self.frame_count += 1
-            except Exception as e:
-                log.error(f"Error writing video frame: {e}")
-                self.stop() # Stop recording on error
+        """frame: BGR numpy array from camera"""
+        if not self.is_recording:
+            return
+
+        # if it's an imageio writer (has append_data)
+        if hasattr(self.writer, "append_data"):
+            rgb = frame[..., ::-1]
+            self.writer.append_data(rgb)
+        else:
+            self.writer.write(frame)
+
+        self.frame_count += 1
 
     def stop(self):
-        if self.is_recording and self.writer:
-            log.info(f"Stopping video recording for {self.filename}. Total frames: {self.frame_count}")
-            self.writer.release()
-        self.is_recording = False
-        self.writer = None # Ensure it's reset
-
-class CSVRecorder:
-    def __init__(self, filename, fieldnames=('time_s', 'frame_idx', 'pressure_mmHg')): # Modified fieldnames for clarity
-        os.makedirs(os.path.dirname(filename) or '.', exist_ok=True)
-        self.filename = filename
+        if not self.is_recording:
+            return
+        # close whichever writer you’ve got
         try:
-            self.file = open(self.filename, 'w', newline='')
-            self.writer = csv.DictWriter(self.file, fieldnames=fieldnames)
-            self.writer.writeheader()
-            self.is_recording = True
-            log.info(f"CSVRecorder started for {self.filename}")
-        except Exception as e:
-            log.error(f"Failed to initialize CSVWriter for {self.filename}: {e}")
-            self.file = None
-            self.writer = None
-            self.is_recording = False
-
-    def write_data(self, time_s, frame_idx, pressure): # Renamed method for clarity
-        if self.is_recording and self.writer:
-            try:
-                self.writer.writerow({'time_s': time_s, 'frame_idx': frame_idx, 'pressure_mmHg': pressure})
-                self.file.flush() # Ensure data is written to disk
-            except Exception as e:
-                log.error(f"Error writing CSV data: {e}")
-                self.stop() # Stop recording on error
-
-
-    def stop(self):
-        if self.is_recording and self.file:
-            log.info(f"Stopping CSV recording for {self.filename}")
-            self.file.close()
+            self.writer.close()
+        except AttributeError:
+            # cv2 writer has release()
+            self.writer.release()
+        log.info(f"Stopped recording: {self.filename}  total_frames={self.frame_count}")
         self.is_recording = False
-        self.file = None
-        self.writer = None
-
 
 class TrialRecorder:
     def __init__(self, basepath, fps, frame_size,
