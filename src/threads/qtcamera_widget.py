@@ -241,30 +241,30 @@ class QtCameraWidget(QWidget):
                     )
 
 
-               self.query_and_emit_camera_properties()
+                self.query_and_emit_camera_properties()
 
-               # ── Stop old thread if any ─────────────────────────────────────
-               if self._camera_thread:
-                   self._camera_thread.stop()
+                # ── Stop old thread if any ─────────────────────────────────────
+                if self._camera_thread:
+                    self._camera_thread.stop()
 
-               # ── Launch new capture thread ───────────────────────────────────
-               w, h = self.full_frame_width, self.full_frame_height
-               fps = (
-                   self.active_profile.get("default_fps", 30)
-                   if self.active_profile
-                   else 30
-               )
-               self._camera_thread = CameraThread(
-                   device_index=self.camera_id,
-                   width=w,
-                   height=h,
-                   fps=fps,
-                   parent=self,
-               )
-               self._camera_thread.frameReady.connect(self._on_thread_frame)
-               self._camera_thread.start()
+                # ── Launch new capture thread ───────────────────────────────────
+                w, h = self.full_frame_width, self.full_frame_height
+                fps = (
+                    self.active_profile.get("default_fps", 30)
+                    if self.active_profile
+                    else 30
+                )
+                self._camera_thread = CameraThread(
+                    device_index=self.camera_id,
+                    width=w,
+                    height=h,
+                    fps=fps,
+                    parent=self,
+                )
+                self._camera_thread.frameReady.connect(self._on_thread_frame)
+                self._camera_thread.start()
 
-               return True
+                return True
 
             except Exception as e:
                 error_msg = (
