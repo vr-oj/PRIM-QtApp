@@ -1,10 +1,12 @@
 import cv2
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy
-from PyQt5.QtCore import QTimer, pyqtSignal, Qt, QSize
-from PyQt5.QtGui import QImage, QPixmap, QFont  # Added QFont
+from PyQt5.QtCore import pyqtSignal, Qt, QSize
+from PyQt5.QtGui import QImage, QPixmap, QFont
 import logging
 import json
 import os
+
+from src.threads.camera_thread import CameraThread
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +45,7 @@ class QtCameraWidget(QWidget):
         self.viewfinder_label.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Expanding
         )
+        self._camera_thread = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -57,8 +60,6 @@ class QtCameraWidget(QWidget):
         self.roi_x, self.roi_y, self.roi_w, self.roi_h = 0, 0, 0, 0
         self._last_pixmap_displayed = None
 
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self._grab_frame)
 
         self.load_camera_profile()  # Load based on initial description if provided
         self._update_placeholder_text()  # Initial placeholder
@@ -119,8 +120,7 @@ class QtCameraWidget(QWidget):
         log.info(
             f"Attempting to set active camera to ID: {camera_id} ('{camera_description}')"
         )
-        if self.timer.isActive():
-            self.timer.stop()
+        
         if self.cap:
             self.cap.release()
             self.cap = None
@@ -240,11 +240,31 @@ class QtCameraWidget(QWidget):
                         [f"{self.full_frame_width}x{self.full_frame_height}"]
                     )
 
-                self.query_and_emit_camera_properties()
-                self.timer.start(
-                    max(15, 1000 // 60)
-                )  # Target ~60fps for UI, min 15ms interval
-                return True
+
+               self.query_and_emit_camera_properties()
+
+               # ── Stop old thread if any ─────────────────────────────────────
+               if self._camera_thread:
+                   self._camera_thread.stop()
+
+               # ── Launch new capture thread ───────────────────────────────────
+               w, h = self.full_frame_width, self.full_frame_height
+               fps = (
+                   self.active_profile.get("default_fps", 30)
+                   if self.active_profile
+                   else 30
+               )
+               self._camera_thread = CameraThread(
+                   device_index=self.camera_id,
+                   width=w,
+                   height=h,
+                   fps=fps,
+                   parent=self,
+               )
+               self._camera_thread.frameReady.connect(self._on_thread_frame)
+               self._camera_thread.start()
+
+               return True
 
             except Exception as e:
                 error_msg = (
@@ -276,9 +296,6 @@ class QtCameraWidget(QWidget):
             log.info(
                 f"Attempting to set resolution to {width}x{height} for camera ID: {self.camera_id}"
             )
-            was_timing = self.timer.isActive()
-            if was_timing:
-                self.timer.stop()
 
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, float(width))
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, float(height))
@@ -306,8 +323,6 @@ class QtCameraWidget(QWidget):
             self.reset_roi_to_default()
             self.query_and_emit_camera_properties()
 
-            if was_timing:
-                self.timer.start(max(15, 1000 // 60))
         else:
             log.warning("No active camera to set resolution for.")
 
@@ -396,8 +411,6 @@ class QtCameraWidget(QWidget):
         if not (self.cap and self.cap.isOpened()):
             # This case should ideally be prevented by timer not running or set_active_camera failing.
             # If it happens, ensure placeholder is shown.
-            if self.timer.isActive():
-                self.timer.stop()  # Stop timer if camera died
             self._update_placeholder_text(f"Camera {self.camera_id} not available.")
             return
 
@@ -805,11 +818,30 @@ class QtCameraWidget(QWidget):
         )
         self.camera_properties_updated.emit(properties_payload)
 
+    def _on_thread_frame(self, qimage: QImage):
+        """
+        Receives each QImage from CameraThread, scales & displays it,
+        and emits the original frame_ready signal (with QImage + raw BGR).
+        """
+        # 1) Update our pixmap store & repaint:
+        pix = QPixmap.fromImage(qimage)
+        self._last_pixmap_displayed = pix
+        self._update_displayed_pixmap()
+
+        # 2) Emit for recording/plotting elsewhere:
+        #    frame_ready signature is (QImage, object),
+        #    so we emit qimage and None or raw if your thread also emitted it.
+        self.frame_ready.emit(qimage, None)
+
+
     def closeEvent(self, event):
         log.info("QtCameraWidget closeEvent called.")
-        self.timer.stop()
+        if self._camera_thread:
+            self._camera_thread.stop()
+            self._camera_thread = None
         if self.cap:
             log.info(f"Releasing camera ID: {self.camera_id} during closeEvent.")
             self.cap.release()
             self.cap = None
         super().closeEvent(event)
+
