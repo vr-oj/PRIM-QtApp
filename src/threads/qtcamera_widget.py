@@ -254,13 +254,16 @@ class QtCameraWidget(QWidget):
                     if self.active_profile
                     else 30
                 )
+                # choose a small display footprint—e.g. 640×480
+                disp_w, disp_h = 640, 480
                 self._camera_thread = CameraThread(
                     device_index=self.camera_id,
-                    width=w,
-                    height=h,
-                    fps=fps,
+                    display_width=disp_w,
+                    display_height=disp_h,
+                    fps=min(raw_fps, 15),
                     parent=self,
                 )
+
                 self._camera_thread.frameReady.connect(self._on_thread_frame)
                 self._camera_thread.start()
 
@@ -818,20 +821,19 @@ class QtCameraWidget(QWidget):
         )
         self.camera_properties_updated.emit(properties_payload)
 
-    def _on_thread_frame(self, qimage: QImage):
+    def _on_thread_frame(self, qimage: QImage, full_frame: object):
         """
-        Receives each QImage from CameraThread, scales & displays it,
-        and emits the original frame_ready signal (with QImage + raw BGR).
+        qimage: downscaled RGB image for display
+        full_frame: full-res BGR numpy array for measurements/recording
         """
-        # 1) Update our pixmap store & repaint:
+        # 1) Display only the downscaled pixmap
         pix = QPixmap.fromImage(qimage)
         self._last_pixmap_displayed = pix
         self._update_displayed_pixmap()
 
-        # 2) Emit for recording/plotting elsewhere:
-        #    frame_ready signature is (QImage, object),
-        #    so we emit qimage and None or raw if your thread also emitted it.
-        self.frame_ready.emit(qimage, None)
+        # 2) Re-emit full data for downstream code
+        self.frame_ready.emit(qimage, full_frame)
+
 
 
     def closeEvent(self, event):
