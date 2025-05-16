@@ -66,6 +66,30 @@ class VideoRecorder:
         log.info(f"Stopped recording: {self.filename}  total_frames={self.frame_count}")
         self.is_recording = False
 
+class CSVRecorder:
+    def __init__(self, filename):
+        # make sure the folder exists
+        os.makedirs(os.path.dirname(filename) or '.', exist_ok=True)
+        self.filename = filename
+        # open CSV and write a header row
+        self.file = open(self.filename, 'w', newline='')
+        self.writer = csv.writer(self.file)
+        self.writer.writerow(['time', 'frame_index', 'value'])
+        self.is_recording = True
+        log.info(f"CSVRecorder started for {self.filename}")
+
+    def write_data(self, t, frame_idx, p):
+        if self.is_recording:
+            self.writer.writerow([t, frame_idx, p])
+
+    def stop(self):
+        if not self.is_recording:
+            return
+        self.file.close()
+        self.is_recording = False
+        log.info(f"Stopped CSV recording for {self.filename}")
+
+
 class TrialRecorder:
     def __init__(self, basepath, fps, frame_size,
                  video_codec=DEFAULT_VIDEO_CODEC,
