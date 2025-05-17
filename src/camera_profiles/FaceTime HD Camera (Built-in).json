@@ -1,0 +1,47 @@
+{
+    "model_identifiers": [
+        "FaceTime HD Camera (Built-in)",
+        "FaceTime HD"
+    ],
+    "friendly_name": "Apple FaceTime HD Camera (Built-in)",
+    "resolutions": [
+        {
+            "width": 1280,
+            "height": 720,
+            "label": "1280x720"
+        },
+        {
+            "width": 640,
+            "height": 480,
+            "label": "640x480"
+        }
+    ],
+    "default_resolution_label": "1280x720",
+    "controls": {
+        "brightness": {
+            "label": "Brightness",
+            "prop": "CAP_PROP_BRIGHTNESS",
+            "min": 0,
+            "max": 255,
+            "default_value": 128,
+            "enabled": true
+        },
+        "exposure": {
+            "label": "Exposure",
+            "prop": "CAP_PROP_EXPOSURE",
+            "auto_prop": "CAP_PROP_AUTO_EXPOSURE",
+            "auto_on_value": 0.75,
+            "auto_off_value": 0.25,
+            "min": -7,
+            "max": -2,
+            "default_auto": true,
+            "enabled": true
+        }
+    },
+    "roi": {
+        "supports_hardware_roi": false,
+        "default_y": 0,
+        "default_w": 0,
+        "default_h": 0
+    }
+}

@@ -1,115 +1,37 @@
-import cv2
-import csv
 import os
 import time
+import csv
 import logging
+import threading
 import imageio
-import subprocess, shlex
-from config import DEFAULT_VIDEO_CODEC, DEFAULT_VIDEO_EXTENSION # Added for config
-from tifffile import TiffWriter
 
-log = logging.getLogger(__name__) # Added for logging
+try:
+    from pycromanager import Bridge
+except ImportError:
+    Bridge = None  # If pycromanager or Bridge is not found, set Bridge to None
 
-class FFmpegRecorder:
-    """
-    Spawns an FFmpeg process to capture directly from a DSHOW camera.
-    """
-    def __init__(self, device_name, out_path, fps, frame_size):
-        width, height = frame_size
-        # build a command that uses the DirectShow video= device
-        cmd = (
-            f'ffmpeg -y '
-            f'-f dshow '
-            f'-video_size {width}x{height} '
-            f'-framerate {fps} '
-            f'-i video="{device_name}" '
-            f'-c:v libx264 '
-            f'-pix_fmt yuv420p '
-            f'"{out_path}.mp4"'
-        )
-        log.info(f"Starting FFmpeg capture: {cmd}")
-        # launch FFmpeg; it will record until we kill it
-        self.proc = subprocess.Popen(shlex.split(cmd), stdin=subprocess.DEVNULL)
 
-    def stop(self):
-        if self.proc and self.proc.poll() is None:
-            log.info("Stopping FFmpeg capture")
-            # CTRL+C event will tell ffmpeg to finalize the file
-            self.proc.send_signal(subprocess.signal.CTRL_C_EVENT)
-            self.proc.wait()
-        self.is_recording = False
-class VideoRecorder:
-    def __init__(self, filename, fourcc, fps, frame_size):
-        os.makedirs(os.path.dirname(filename) or '.', exist_ok=True)
-        name, _ = os.path.splitext(filename)
-        self.filename = f"{name}.avi"
-        self.frame_count = 0
-        self.is_recording = False
+log = logging.getLogger(__name__)
 
-        # 1) Try OpenCV writer first
-        self.writer = cv2.VideoWriter(
-            self.filename,
-            cv2.VideoWriter_fourcc(*fourcc),
-            fps,
-            frame_size
-        )
-        log.info(f"OpenCV VideoWriter.isOpened()? {self.writer.isOpened()}")
-
-        # 2) If that failed, fall back to imageio
-        if not getattr(self.writer, "isOpened", lambda: False)():
-            log.warning("OpenCV writer failed—switching to imageio-ffmpeg")
-            self.writer = imageio.get_writer(
-                self.filename.replace('.avi', '.mp4'),  # mp4 is fine
-                fps=fps,
-                codec='libx264',
-                quality=8,          # you can tune this
-                ffmpeg_log_level='warning'
-            )
-
-        self.is_recording = True
-        log.info(f"Recording → {self.filename}")
-
-    def write_frame(self, frame):
-        """frame: BGR numpy array from camera"""
-        if not self.is_recording:
-            return
-
-        # if it's an imageio writer (has append_data)
-        if hasattr(self.writer, "append_data"):
-            rgb = frame[..., ::-1]
-            self.writer.append_data(rgb)
-        else:
-            self.writer.write(frame)
-
-        self.frame_count += 1
-
-    def stop(self):
-        if not self.is_recording:
-            return
-        # close whichever writer you’ve got
-        try:
-            self.writer.close()
-        except AttributeError:
-            # cv2 writer has release()
-            self.writer.release()
-        log.info(f"Stopped recording: {self.filename}  total_frames={self.frame_count}")
-        self.is_recording = False
 
 class CSVRecorder:
+    """
+    Records timestamped data (time, frame index, pressure) to a CSV file.
+    """
+
     def __init__(self, filename):
-        # make sure the folder exists
-        os.makedirs(os.path.dirname(filename) or '.', exist_ok=True)
+        os.makedirs(os.path.dirname(filename) or ".", exist_ok=True)
         self.filename = filename
-        # open CSV and write a header row
-        self.file = open(self.filename, 'w', newline='')
+        self.file = open(self.filename, "w", newline="")
         self.writer = csv.writer(self.file)
-        self.writer.writerow(['time', 'frame_index', 'value'])
+        # Write header
+        self.writer.writerow(["time", "frame_index", "pressure"])
         self.is_recording = True
         log.info(f"CSVRecorder started for {self.filename}")
 
-    def write_data(self, t, frame_idx, p):
+    def write_data(self, t, frame_idx, pressure):
         if self.is_recording:
-            self.writer.writerow([t, frame_idx, p])
+            self.writer.writerow([f"{t:.6f}", frame_idx, f"{pressure:.6f}"])
 
     def stop(self):
         if not self.is_recording:
@@ -119,83 +41,115 @@ class CSVRecorder:
         log.info(f"Stopped CSV recording for {self.filename}")
 
 
+class MMRecorder:
+    """
+    Uses pycromanager to grab continuous frames from a µManager-configured camera and writes to MP4 via imageio.
+    """
+
+    def __init__(self, out_path, fps, frame_size):
+        # Initialize bridge to µManager
+        self.bridge = Bridge()
+        self.mmcore = self.bridge.get_core()
+        self.out_path = f"{out_path}.mp4"
+        self.fps = fps
+        self.frame_size = frame_size  # (width, height)
+        self._stop_event = threading.Event()
+        self.frame_count = 0
+        self.is_recording = False
+        self.thread = None
+
+    def start(self):
+        self.is_recording = True
+        self.thread = threading.Thread(target=self._acquire_loop, daemon=True)
+        self.thread.start()
+
+    def _acquire_loop(self):
+        # Start continuous acquisition
+        self.mmcore.startContinuousSequenceAcquisition(0)
+        writer = imageio.get_writer(self.out_path, fps=self.fps, codec="libx264")
+        try:
+            while not self._stop_event.is_set():
+                tagged = self.bridge.get_tagged_image()
+                # reshape flat pixel array to (height, width)
+                img = tagged.pix.reshape(self.frame_size[1], self.frame_size[0])
+                writer.append_data(img)
+                self.frame_count += 1
+        finally:
+            writer.close()
+            self.mmcore.stopSequenceAcquisition()
+
+    def stop(self):
+        if not self.is_recording:
+            return
+        self._stop_event.set()
+        if self.thread:
+            self.thread.join()
+        self.is_recording = False
+        log.info(
+            f"Stopped µManager recording: {self.out_path} (frames: {self.frame_count})"
+        )
+
+
 class TrialRecorder:
-    def __init__(self, basepath, fps, frame_size,
-                 video_codec=DEFAULT_VIDEO_CODEC,
-                 video_ext=DEFAULT_VIDEO_EXTENSION):
+    def __init__(self, basepath, fps, frame_size, video_codec=None, video_ext="avi"):
         ts = time.strftime("%Y%m%d-%H%M%S")
         self.basepath_with_ts = f"{basepath}_{ts}"
 
-        # Decide on filename & recorder class based on extension
-        if video_ext.lower() in ('tif','tiff'):
-            # TIFF‐stack
-            self.video = TiffStackRecorder(
-                filename=f"{self.basepath_with_ts}.tif",
-                frame_shape=frame_size
-            )
+        # ─── Video recorder ────────────────────
+        if Bridge is not None:
+            # use µManager
+            try:
+                self.video = MMRecorder(self.basepath_with_ts, fps, frame_size)
+                self.video.start()
+                log.info("Started µManager video recording")
+            except Exception as e:
+                log.error(f"µManager recording failed: {e}", exc_info=True)
+                log.info("Falling back to OpenCV recorder")
+                self.video = CV2Recorder(
+                    self.basepath_with_ts + f".{video_ext}",
+                    fps,
+                    frame_size,
+                    codec=video_codec,
+                )
+                self.video.start()
         else:
-            # Native FFmpeg capture from your camera
-            # repurpose `video_codec` to carry the camera description string
-            self.video = FFmpegRecorder(
-                device_name=video_codec,
-                out_path=self.basepath_with_ts,
-                fps=fps,
-                frame_size=frame_size
+            # no µManager available → use OpenCV
+            log.info("pycromanager Bridge not available, using OpenCV recorder")
+            self.video = CV2Recorder(
+                self.basepath_with_ts + f".{video_ext}",
+                fps,
+                frame_size,
+                codec=video_codec,
             )
+            self.video.start()
 
-        # still record CSV alongside
+        # ─── CSV recorder ──────────────────────
         csv_filename = f"{self.basepath_with_ts}.csv"
         self.csv = CSVRecorder(csv_filename)
 
+    def write_csv_data(self, t, frame_idx, pressure):
+        """
+        Called by the main loop to log sensor data.
+        """
+        self.csv.write_data(t, frame_idx, pressure)
 
-    def write_video_frame(self, frame): # Separate method for video
-        if self.video:
-            self.video.write_frame(frame)
-
-    def write_csv_data(self, t, frame_idx, p): # Separate method for CSV data
-        if self.csv:
-            self.csv.write_data(t, frame_idx, p)
+    def write_video_frame(self, frame=None):
+        """
+        No-op: MMRecorder streams autonomously.
+        """
+        pass
 
     def stop(self):
+        # Stop video and CSV
         if self.video:
             self.video.stop()
         if self.csv:
             self.csv.stop()
-        log.info(f"Trial recording stopped for base: {self.basepath_with_ts}")
+
+    @property
+    def is_recording(self):
+        return bool(self.video and self.video.is_recording)
 
     @property
     def video_frame_count(self):
-        if not self.video:
-            return 0
-        return getattr(self.video, 'frame_count', 0)
-        
-    @property
-    def is_recording(self):
-        # Considered recording if either video or CSV (or both) are active
-        # More precisely, if they were successfully initialized.
-        return (self.video and self.video.is_recording) or \
-               (self.csv and self.csv.is_recording)
-    
-
-class TiffStackRecorder:
-    def __init__(self, filename, frame_shape):
-        # ensure output directory exists
-        os.makedirs(os.path.dirname(filename) or '.', exist_ok=True)
-        base, _ = os.path.splitext(filename)
-        self.filename = base + '.tif'
-        self._writer = TiffWriter(self.filename, bigtiff=True)
-        self.is_recording = True
-        self.frame_count = 0
-        log.info(f"TiffStackRecorder started for {self.filename}")
-
-    def write_frame(self, frame):
-        # frame is BGR; convert to RGB
-        rgb = frame[..., ::-1]
-        self._writer.write(rgb, photometric='rgb')
-        self.frame_count += 1
-
-    def stop(self):
-        if self.is_recording:
-            self._writer.close()
-            self.is_recording = False
-            log.info(f"Stopping TIFF recording for {self.filename}. Total frames: {self.frame_count}")
+        return getattr(self.video, "frame_count", 0)

@@ -1,10 +1,9 @@
-# requirements.txt
-
 PyQt5>=5.15.0,<5.16
 pyserial>=3.5,<4.0
 opencv-python>=4.5,<5.0
 matplotlib>=3.5,<3.9
-numpy>=1.20,<2.0 
-# Using tilde for numpy as opencv and matplotlib can be sensitive
-# to very new major versions of numpy. <2.0 ensures it stays on 1.x for now.
-# If your original numpy==2.2.5 works, you can use that, but this is safer for wider compatibility.
+numpy>=1.20,<2.0
+imageio>=2.9.0  # Or a more recent stable version you've tested
+tifffile>=2021.11.2 # Or a more recent stable version you've tested
+imageio-ffmpeg # Often needed by imageio for writing MP4/AVI files
+pycromanager>=0.15.0

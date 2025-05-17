@@ -52,8 +52,6 @@ from recording import TrialRecorder
 from utils import list_serial_ports
 
 from config import (
-    DEFAULT_VIDEO_CODEC,
-    DEFAULT_VIDEO_EXTENSION,
     DEFAULT_FPS,
     DEFAULT_FRAME_SIZE,
     DEFAULT_CAMERA_INDEX,
@@ -1087,18 +1085,6 @@ class MainWindow(QMainWindow):
         except ValueError as e:
             log.error(f"Invalid resolution string values: {resolution_str} - {e}")
 
-    @pyqtSlot(QImage, object)  # QImage for display, object for BGR frame
-    def _on_frame_ready(self, qimage, bgr_frame_obj):
-        if self._is_recording and self.trial_recorder and bgr_frame_obj is not None:
-            try:
-                self.trial_recorder.write_video_frame(bgr_frame_obj)
-            except Exception as e:
-                log.error(f"Error writing video frame: {e}", exc_info=True)
-                self._stop_pc_recording()  # Stop on error
-                self.statusBar().showMessage(
-                    "ERROR: Video recording failed critically.", 5000
-                )
-
     @pyqtSlot(str, int)  # error_message, error_code
     def _on_camera_error(self, error_message: str, error_code: int):
         log.error(f"Camera Error in MainWindow: {error_message} (Code: {error_code})")
@@ -1394,14 +1380,15 @@ class MainWindow(QMainWindow):
                 "PRIM device not connected or simulating. Cannot start PC recording.",
             )
             return
+
         if not self.qt_cam or not self.qt_cam.cap or not self.qt_cam.cap.isOpened():
-            if self.qt_cam.camera_id == -1:  # No camera explicitly selected
+            if getattr(self.qt_cam, "camera_id", -1) == -1:
                 QMessageBox.warning(
                     self,
                     "No Camera Selected",
                     "Please select a camera device to start recording.",
                 )
-            else:  # Camera selected but failed to open
+            else:
                 QMessageBox.warning(
                     self,
                     "Camera Not Ready",
@@ -1409,25 +1396,21 @@ class MainWindow(QMainWindow):
                 )
             return
 
-        # Trial Info Dialog
+        # ─── Trial Info Dialog ─────────────────────────────
         dlg = QDialog(self)
-        dlg.setWindowTitle("Start New PC Recording Trial")
+        dlg.setWindowTitle("Start New Recording")
         form = QFormLayout(dlg)
         self.trial_name_edit = QLineEdit(
-            f"Trial_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')}"
+            f"Session_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')}"
         )
-        form.addRow("Trial Name/ID:", self.trial_name_edit)
+        form.addRow("Session Name/ID:", self.trial_name_edit)
         self.operator_edit = QLineEdit()
         form.addRow("Operator:", self.operator_edit)
         self.sample_edit = QLineEdit()
         form.addRow("Sample Details:", self.sample_edit)
         self.notes_edit = QTextEdit()
-        self.notes_edit.setFixedHeight(70)  # Compacted
+        self.notes_edit.setFixedHeight(70)
         form.addRow("Notes:", self.notes_edit)
-        # ── Add an Output Format combo-box here ────────────────────────────
-        self.format_selector = QComboBox()
-        self.format_selector.addItems(["AVI", "TIFF stack"])
-        form.addRow("Output Format:", self.format_selector)
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(dlg.accept)
         btns.rejected.connect(dlg.reject)
@@ -1438,13 +1421,13 @@ class MainWindow(QMainWindow):
 
         trial_name = (
             self.trial_name_edit.text()
-            or f"Trial_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')}"
+            or f"Session_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')}"
         )
         operator = self.operator_edit.text()
         sample = self.sample_edit.text()
         notes = self.notes_edit.toPlainText()
 
-        # Path setup
+        # ─── Make trial folder ──────────────────────────────
         base_dir = PRIM_RESULTS_DIR
         folder_name_safe = (
             "".join(
@@ -1456,106 +1439,82 @@ class MainWindow(QMainWindow):
         trial_folder = os.path.join(base_dir, folder_name_safe)
         try:
             os.makedirs(trial_folder, exist_ok=True)
-        except OSError as e_mkdir:
-            log.error(f"Failed to create trial directory {trial_folder}: {e_mkdir}")
+        except OSError as e:
+            log.error(f"Failed to create trial directory {trial_folder}: {e}")
             QMessageBox.critical(
                 self,
                 "Directory Error",
-                f"Could not create trial directory:\n{trial_folder}\n{e_mkdir}",
+                f"Could not create trial directory:\n{trial_folder}\n{e}",
             )
             return
 
-        base_save_path = os.path.join(trial_folder, folder_name_safe)  # Filename base
+        base_save_path = os.path.join(trial_folder, folder_name_safe)
 
-        # ── Read the user’s choice & map to extension ─────────────────────
-        fmt = self.format_selector.currentText()
-        video_ext = "avi" if fmt == "AVI" else "tiff"
-        # ───────────────────────────────────────────────────────────────────
+        # ─── Determine frame size ────────────────────────────
+        fw, fh = DEFAULT_FRAME_SIZE
+        if hasattr(self.qt_cam, "get_current_resolution"):
+            res = self.qt_cam.get_current_resolution()
+            if res and not res.isEmpty():
+                fw, fh = res.width(), res.height()
+        log.info(
+            f"Starting trial recording with MMRecorder. Frame size={fw}x{fh}, FPS={DEFAULT_FPS}"
+        )
 
         try:
-            fw, fh = DEFAULT_FRAME_SIZE  # Fallback
-            if self.qt_cam and hasattr(
-                self.qt_cam, "get_current_resolution"
-            ):  # Check attribute first
-                current_cam_res = self.qt_cam.get_current_resolution()  # This is QSize
-                if (
-                    current_cam_res
-                    and not current_cam_res.isEmpty()
-                    and current_cam_res.width() > 0
-                    and current_cam_res.height() > 0
-                ):
-                    fw, fh = current_cam_res.width(), current_cam_res.height()
-                else:
-                    log.warning(
-                        f"Could not get valid resolution from camera, falling back to default {fw}x{fh}"
-                    )
-            else:
-                log.warning(
-                    f"qt_cam or get_current_resolution not available, falling back to default {fw}x{fh}"
-                )
-
-            log.info(
-                f"Starting trial recording. Video frame size: {fw}x{fh}. Target FPS: {DEFAULT_FPS}"
-            )
+            # ─── Instantiate the new TrialRecorder ────────────
             self.trial_recorder = TrialRecorder(
                 base_save_path,
                 fps=DEFAULT_FPS,
                 frame_size=(fw, fh),
-                video_codec=self.qt_cam.camera_description,  # e.g. "DMK 33UX250"
-                video_ext=DEFAULT_VIDEO_EXTENSION,
             )
-            if (
-                not self.trial_recorder or not self.trial_recorder.is_recording
-            ):  # is_recording checks if internal recorders initialized
-                raise RuntimeError(
-                    "TrialRecorder failed to initialize one or more internal recorders (video/CSV). Check logs."
-                )
+            if not self.trial_recorder.is_recording:
+                raise RuntimeError("TrialRecorder failed to start recording.")
 
-            self.last_trial_basepath = trial_folder  # Store the folder path
+            # ─── Enable “Open Last Folder” button ────────────
+            self.last_trial_basepath = trial_folder
             self.open_last_trial_folder_action.setEnabled(True)
 
-            # Metadata
+            # ─── Pull file names & write metadata ────────────
+            video_filename_for_meta = os.path.basename(
+                self.trial_recorder.video_filename
+            )
+            csv_filename_for_meta = os.path.basename(self.trial_recorder.csv_filename)
+
             meta_filepath = f"{base_save_path}_metadata.txt"
             with open(meta_filepath, "w") as mf:
                 mf.write(
-                    f"Trial Name: {trial_name}\n"
+                    f"Session Name: {trial_name}\n"
                     f"Date: {QDateTime.currentDateTime().toString('yyyy-MM-dd HH:mm:ss')}\n"
                     f"Operator: {operator}\n"
                     f"Sample Details: {sample}\n"
-                    f"FPS Target (Video): {DEFAULT_FPS}\n"
-                    f"Resolution (Video): {fw}x{fh}\n"
-                    f"Video File: {os.path.basename(self.trial_recorder.video.filename) if self.trial_recorder.video else 'N/A'}\n"
-                    f"CSV File: {os.path.basename(self.trial_recorder.csv.filename) if self.trial_recorder.csv else 'N/A'}\n"
+                    f"FPS Target: {DEFAULT_FPS}\n"
+                    f"Resolution: {fw}x{fh}\n"
+                    f"Video File: {video_filename_for_meta}\n"
+                    f"CSV File: {csv_filename_for_meta}\n"
                     f"Notes:\n{notes}\n"
                 )
             log.info(f"Metadata saved to {meta_filepath}")
 
+            # ─── Flip UI state to “recording” ────────────────
             self._is_recording = True
             self.start_trial_action.setEnabled(False)
-            self.start_trial_action.setIcon(self.icon_recording_active)  # Change icon
+            self.start_trial_action.setIcon(self.icon_recording_active)
             self.stop_trial_action.setEnabled(True)
-            self.plot_w.clear_plot()  # Clear plot for new recording
-            self.statusBar().showMessage(
-                f"PC Recording Started: {trial_name}", 0
-            )  # Persistent message
-            log.info(f"PC recording started. Base path: {base_save_path}")
-
-        except Exception as e_rec_start:
+            self.plot_w.clear_plot()
+            self.statusBar().showMessage(f"Recording Started: {trial_name}", 0)
+        except Exception as e:
             log.error("Failed to start PC recording process", exc_info=True)
             QMessageBox.critical(
-                self, "Recording Error", f"Could not start recording: {e_rec_start}"
+                self, "Recording Error", f"Could not start recording: {e}"
             )
             if self.trial_recorder:
-                self.trial_recorder.stop()  # Cleanup
+                self.trial_recorder.stop()
             self.trial_recorder = None
             self._is_recording = False
-            self.open_last_trial_folder_action.setEnabled(
-                bool(self.last_trial_basepath)
-            )  # Only if a path was set
-            self.start_trial_action.setIcon(self.icon_record_start)  # Reset icon
+            self.start_trial_action.setIcon(self.icon_record_start)
             self.start_trial_action.setEnabled(
-                self._serial_thread is not None and self._serial_thread.isRunning()
-            )  # Re-evaluate
+                self._serial_thread and self._serial_thread.isRunning()
+            )
             self.stop_trial_action.setEnabled(False)
 
     def _stop_pc_recording(self):

@@ -29,7 +29,7 @@ class QtCameraWidget(QWidget):
     def __init__(self, camera_id: int = -1, camera_description: str = "", parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.setMinimumSize(720, 720)
+        self.setMinimumSize(1080, 1080)
         self._aspect_ratio = 1 / 1
         # QSS Suggestion: QtCameraWidget { background-color: #yourCameraBg; border: 1px solid #yourBorderColor; }
 
