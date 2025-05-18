@@ -34,7 +34,19 @@ class SDKCameraThread(QThread):
         # 4) Grab the property map once
         pm = grabber.device_property_map
 
-        # 5) Properly enumerate 'WIDTH' integer property
+        # 5) Switch camera into free-run (continuous) mode & disable triggers
+        for prop, val in (
+            (ic4.PropId.ACQUISITION_MODE, "Continuous"),
+            (ic4.PropId.TRIGGER_MODE, "Off"),
+            (ic4.PropId.TRIGGER_SOURCE, "Software"),
+        ):
+            try:
+                pm.set_value(prop, val)
+            except ic4.IC4Exception as e:
+                name = getattr(prop, "name", str(prop))
+                print(f"⚠️ Couldn’t set {name} to {val!r}: {e}")
+
+        # 6) Properly enumerate 'WIDTH' integer property
         try:
             width_prop = pm.find(ic4.PropId.WIDTH)
             if isinstance(width_prop, PropInteger):
@@ -48,7 +60,7 @@ class SDKCameraThread(QThread):
         except ic4.IC4Exception as e:
             print("⚠️ Couldn’t access WIDTH property:", e)
 
-        # 6) Safely set desired properties
+        # 7) Safely set desired properties
         for prop, val in (
             (ic4.PropId.WIDTH, 640),
             (ic4.PropId.HEIGHT, 480),
