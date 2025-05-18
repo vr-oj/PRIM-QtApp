@@ -2,7 +2,7 @@ import logging
 import imagingcontrol4 as ic4
 from PyQt5.QtCore import QThread, pyqtSignal, QMutex
 from PyQt5.QtGui import QImage
-from imagingcontrol4.properties import PropInteger
+from imagingcontrol4.properties import PropInteger, PropBoolean
 
 log = logging.getLogger(__name__)
 
@@ -11,7 +11,6 @@ class SDKCameraThread(QThread):
     frame_ready = pyqtSignal(QImage, object)
     camera_error = pyqtSignal(str, str)
     camera_resolutions_available = pyqtSignal(list)
-    # new signal for exposing camera control ranges & current values
     camera_properties_available = pyqtSignal(dict)
 
     def __init__(
@@ -34,16 +33,26 @@ class SDKCameraThread(QThread):
         self.desired_pixel_format = pixel_format
         self.desired_exposure = exposure_us
         self.desired_gain = None
+        self.desired_brightness = None
+        self.desired_auto_exposure = None
 
         # pending updates
         self._pending_exposure = None
         self._pending_gain = None
+        self._pending_brightness = None
+        self._pending_auto_exposure = None
 
     def update_exposure(self, new_exp_us: int):
         self._pending_exposure = new_exp_us
 
     def update_gain(self, new_gain: int):
         self._pending_gain = new_gain
+
+    def update_brightness(self, new_brightness: int):
+        self._pending_brightness = new_brightness
+
+    def update_auto_exposure(self, enable: bool):
+        self._pending_auto_exposure = enable
 
     def run(self):
         self._stop_requested = False
@@ -53,7 +62,7 @@ class SDKCameraThread(QThread):
         grabber = None
 
         try:
-            # ─── open device ────────────────────────────────────
+            # ─── open camera ───────────────────────────────────
             devices = ic4.DeviceEnum.devices()
             if not devices:
                 raise RuntimeError("No TIS cameras found")
@@ -65,7 +74,7 @@ class SDKCameraThread(QThread):
             log.info("Camera opened.")
             pm = grabber.device_property_map
 
-            # ─── enumerate resolutions ────────────────────────────
+            # ─── enumerate resolutions ──────────────────────────
             try:
                 wprop = pm.find(ic4.PropId.WIDTH)
                 hprop = pm.find(ic4.PropId.HEIGHT)
@@ -83,43 +92,48 @@ class SDKCameraThread(QThread):
             except Exception as e:
                 log.warning(f"Couldn’t enumerate resolutions: {e}")
 
-            # ─── emit initial control properties ───────────────────
+            # ─── emit initial control properties ────────────────
             controls = {}
 
             def try_prop(name, pid):
                 try:
                     prop = pm.find(pid)
+                    # integer-valued
                     if isinstance(prop, PropInteger):
-                        # for auto_exposure we track on/off via value!=0
-                        entry = {
+                        controls[name] = {
                             "enabled": True,
                             "min": prop.minimum,
                             "max": prop.maximum,
                             "value": prop.get(),
                         }
-                        if name == "auto_exposure":
-                            entry["is_auto_on"] = prop.get() != 0
-                        controls[name] = entry
+                    # boolean-valued (auto_exposure)
+                    elif name == "auto_exposure" and isinstance(prop, PropBoolean):
+                        controls[name] = {
+                            "enabled": True,
+                            "value": prop.get() != 0,
+                            "is_auto_on": prop.get() != 0,
+                            "min": 0,
+                            "max": 1,
+                        }
                 except Exception:
-                    # unsupported or not found: leave absent (TopControlPanel treats missing as disabled)
                     pass
 
-            # mandatory controls
+            # always try exposure & gain
             try_prop("exposure", ic4.PropId.EXPOSURE_TIME)
             try_prop("gain", ic4.PropId.GAIN)
-            # optional
+            # optional brightness
             if hasattr(ic4.PropId, "BRIGHTNESS"):
                 try_prop("brightness", ic4.PropId.BRIGHTNESS)
+            # optional auto-exposure
             if hasattr(ic4.PropId, "AUTO_EXPOSURE"):
                 try_prop("auto_exposure", ic4.PropId.AUTO_EXPOSURE)
 
-            # ROI defaults (will be updated later if needed)
-            roi = {"x": 0, "y": 0, "w": 0, "h": 0, "max_w": 0, "max_h": 0}
+            # placeholder ROI
+            roi = {"max_w": 0, "max_h": 0, "x": 0, "y": 0, "w": 0, "h": 0}
 
-            # send them up to the UI
             self.camera_properties_available.emit({"controls": controls, "roi": roi})
 
-            # ─── configure free-run mode ──────────────────────────
+            # ─── configure free-run mode ────────────────────────
             for pid, val in (
                 (ic4.PropId.ACQUISITION_MODE, "Continuous"),
                 (ic4.PropId.TRIGGER_MODE, "Off"),
@@ -129,21 +143,20 @@ class SDKCameraThread(QThread):
                 except Exception as e:
                     log.warning(f"Couldn’t set {pid.name}: {e}")
 
-            # ─── set pixel-format, size, exposure ─────────────────
+            # ─── set pixel-format, size, exposure ───────────────
             if pm.get_value_str(ic4.PropId.PIXEL_FORMAT) != self.desired_pixel_format:
                 pm.set_value(ic4.PropId.PIXEL_FORMAT, self.desired_pixel_format)
             pm.set_value(ic4.PropId.WIDTH, self.desired_width)
             pm.set_value(ic4.PropId.HEIGHT, self.desired_height)
             pm.set_value(ic4.PropId.EXPOSURE_TIME, self.desired_exposure)
 
-            # ─── start acquisition ────────────────────────────────
             sink = ic4.SnapSink()
             grabber.stream_setup(
                 sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
             log.info("Acquisition started.")
 
-            # ─── grab loop ────────────────────────────────────────
+            # ─── grab loop ───────────────────────────────────────
             while True:
                 self._mutex.lock()
                 stop = self._stop_requested
@@ -151,7 +164,7 @@ class SDKCameraThread(QThread):
                 if stop:
                     break
 
-                # pending exposure
+                # apply pending exposure
                 if self._pending_exposure is not None:
                     try:
                         pm.set_value(ic4.PropId.EXPOSURE_TIME, self._pending_exposure)
@@ -162,7 +175,7 @@ class SDKCameraThread(QThread):
                     finally:
                         self._pending_exposure = None
 
-                # pending gain
+                # apply pending gain
                 if self._pending_gain is not None:
                     try:
                         pm.set_value(ic4.PropId.GAIN, self._pending_gain)
@@ -173,7 +186,35 @@ class SDKCameraThread(QThread):
                     finally:
                         self._pending_gain = None
 
-                # grab a frame
+                # apply pending brightness if supported
+                if self._pending_brightness is not None and hasattr(
+                    ic4.PropId, "BRIGHTNESS"
+                ):
+                    try:
+                        pm.set_value(ic4.PropId.BRIGHTNESS, self._pending_brightness)
+                        log.info(f"Brightness set to {self._pending_brightness}")
+                        self.desired_brightness = self._pending_brightness
+                    except Exception as e:
+                        log.warning(f"Failed to set brightness: {e}")
+                    finally:
+                        self._pending_brightness = None
+
+                # apply pending auto-exposure if supported
+                if self._pending_auto_exposure is not None and hasattr(
+                    ic4.PropId, "AUTO_EXPOSURE"
+                ):
+                    try:
+                        # boolean prop: On/Off
+                        val = "On" if self._pending_auto_exposure else "Off"
+                        pm.set_value(ic4.PropId.AUTO_EXPOSURE, val)
+                        log.info(f"Auto‐Exposure set to {val}")
+                        self.desired_auto_exposure = self._pending_auto_exposure
+                    except Exception as e:
+                        log.warning(f"Failed to set auto‐exposure: {e}")
+                    finally:
+                        self._pending_auto_exposure = None
+
+                # snap a frame
                 try:
                     timeout = max(int(1000 / self.target_fps * 2), 100)
                     buf = sink.snap_single(timeout_ms=timeout)
@@ -209,9 +250,9 @@ class SDKCameraThread(QThread):
                     )
                     break
 
-        except Exception:
+        except Exception as e:
             log.error("Camera thread error", exc_info=True)
-            self.camera_error.emit("Camera thread error", "THREAD_ERROR")
+            self.camera_error.emit(str(e), "THREAD_ERROR")
 
         finally:
             if grabber:
