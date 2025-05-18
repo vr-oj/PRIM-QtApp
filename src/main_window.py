@@ -951,10 +951,7 @@ class MainWindow(QMainWindow):
         )
 
         # Connect signals from QtCameraWidget (already done in _build_central)
-        # Connect camera properties update from QtCameraWidget to TopControlPanel
-        self.qt_cam.camera_properties_updated.connect(
-            self.top_ctrl.update_camera_ui_from_properties
-        )
+
         self.qt_cam.camera_resolutions_updated.connect(
             self.top_ctrl.update_camera_resolutions
         )
