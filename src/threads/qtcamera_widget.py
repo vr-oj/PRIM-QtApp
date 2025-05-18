@@ -2,7 +2,7 @@ import logging
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QImage, QPixmap, QFont
-from .threads.sdk_camera_thread import SDKCameraThread
+from .sdk_camera_thread import SDKCameraThread
 
 log = logging.getLogger(__name__)
 
@@ -52,19 +52,21 @@ class QtCameraWidget(QWidget):
 
         # start TIS SDK thread
         self._camera_thread = SDKCameraThread(exposure=20000, parent=self)
-        # when thread emits a new QImage, handle it
         self._camera_thread.frame_ready.connect(self._on_sdk_frame)
         self._camera_thread.start()
 
-        # you can emit a single “native” resolution if you want
+        # (Optional) emit native resolution if needed
+        # w, h = self._camera_thread.get_resolution()
         # self.camera_resolutions_updated.emit([f"{w}x{h}"])
+
         return True
 
     def _on_sdk_frame(self, qimg: QImage):
+        """Handle incoming QImage frames from the SDK thread"""
         # update display
         self._last_pixmap = QPixmap.fromImage(qimg)
         self._update_display()
-        # if you need to record, you can still forward the QImage
+        # forward to recorder (raw array not provided here)
         self.frame_ready.emit(qimg, None)
 
     def _update_display(self):
