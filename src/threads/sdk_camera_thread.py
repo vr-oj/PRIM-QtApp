@@ -88,7 +88,8 @@ class SDKCameraThread(QThread):
             ):
                 try:
                     pm.set_value(prop_id, val_str)
-                    log.debug(f"Set {prop_id.name} to {val_str}")
+                    prop_name = getattr(prop_id, "name", str(prop_id))
+                    log.debug(f"Set {prop_name} to {val_str}")
                 except ic4.IC4Exception as e:
                     log.warning(f"Could not set {prop_id.name} to {val_str}: {e}")
 
@@ -279,7 +280,7 @@ class SDKCameraThread(QThread):
         finally:
             log.info("SDKCameraThread run method finishing. Cleaning up resources...")
             if local_grabber is not None:
-                if local_grabber.is_streaming():
+                if local_grabber.is_streaming:
                     try:
                         log.info("Stopping stream...")
                         local_grabber.stream_stop()
