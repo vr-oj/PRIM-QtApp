@@ -369,7 +369,9 @@ class MainWindow(QMainWindow):
         dlg = QDialog(self)
         dlg.setWindowTitle("Start Recording")
         form = QFormLayout(dlg)
-        name = QLineEdit(f"Session_{QDateTime.currentDateTime():yyyyMMdd_HHmmss}")
+        name = QLineEdit(
+            f"Session_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')}"
+        )
         form.addRow("Session Name:", name)
         operator = QLineEdit()
         form.addRow("Operator:", operator)
