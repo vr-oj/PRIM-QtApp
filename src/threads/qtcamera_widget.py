@@ -37,7 +37,13 @@ class QtCameraWidget(QWidget):
         self._camera_thread = None
         self._last_pixmap = None
 
-    def set_active_camera(self, camera_id: int):
+    def set_active_camera(self, camera_id: int, camera_description: str = ""):
+        """
+        camera_id: integer device index
+        camera_description: human-readable name (e.g. "DMK 33UX250")
+        """
+        self.camera_description = camera_description
+
         # Stop any existing capture
         if self._camera_thread:
             self._camera_thread.stop()
