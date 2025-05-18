@@ -24,6 +24,7 @@ class QtCameraWidget(QWidget):
         self.default_pixel_format = "Mono8"
         self.default_exposure_us = 20000
         self.default_target_fps = 20
+        self.default_gain = 0
 
         self._camera_thread = None
         self._last_pixmap = None
@@ -42,7 +43,6 @@ class QtCameraWidget(QWidget):
         layout.addWidget(self.viewfinder)
 
     def set_active_camera(self, camera_id: int, camera_description: str = ""):
-        """Start or stop camera thread based on selection."""
         log.info(f"Setting camera ID {camera_id} ('{camera_description}')")
         self._active_camera_id = camera_id
         self._active_camera_description = camera_description
@@ -100,12 +100,25 @@ class QtCameraWidget(QWidget):
                 self._active_camera_id, self._active_camera_description
             )
 
+    def set_exposure(self, exposure_us: int):
+        if self._camera_thread and self._camera_thread.isRunning():
+            log.info(f"Queuing exposure change: {exposure_us}")
+            self._camera_thread.update_exposure(exposure_us)
+        else:
+            self.default_exposure_us = exposure_us
+
+    def set_gain(self, gain: int):
+        if self._camera_thread and self._camera_thread.isRunning():
+            log.info(f"Queuing gain change: {gain}")
+            self._camera_thread.update_gain(gain)
+        else:
+            self.default_gain = gain
+
     @pyqtSlot(QImage, object)
     def _on_sdk_frame_received(self, qimg: QImage, frame: object):
         if self.viewfinder.text():
             self.viewfinder.setText("")
-        pix = QPixmap.fromImage(qimg)
-        self._last_pixmap = pix
+        self._last_pixmap = QPixmap.fromImage(qimg)
         self._update_display()
         self.frame_ready.emit(qimg, frame)
 
