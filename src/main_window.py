@@ -4,35 +4,42 @@ import logging
 
 from PyQt5.QtWidgets import (
     QMainWindow,
-    QApplication,
-    QMessageBox,
     QDockWidget,
     QWidget,
+    QLabel,  # ← for status widgets
+    QTextEdit,
     QVBoxLayout,
     QSplitter,
     QStatusBar,
     QAction,
     QToolBar,
     QComboBox,
-    QTextEdit,
     QLineEdit,
     QDialog,
     QFormLayout,
     QDialogButtonBox,
     QSizePolicy,
     QFileDialog,
+    QMessageBox,  # ← for warning/info dialogs
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSlot, QDateTime, QUrl, QSize
+from PyQt5.QtCore import (
+    Qt,
+    QTimer,
+    pyqtSlot,
+    QDateTime,
+    QSize,  # ← for setIconSize
+)
 from PyQt5.QtGui import QIcon, QKeySequence
-from PyQt5.QtMultimedia import QCameraInfo
 
 from threads.qtcamera_widget import QtCameraWidget
 from threads.serial_thread import SerialThread
 from recording import TrialRecorder
 from utils import list_serial_ports
+
 from control_panels.camera_control_panel import CameraControlPanel
 from control_panels.plot_control_panel import PlotControlPanel
 from control_panels.top_control_panel import TopControlPanel
+
 from canvas.pressure_plot_widget import PressurePlotWidget
 
 from config import (
@@ -181,7 +188,8 @@ class MainWindow(QMainWindow):
 
     def _build_toolbar(self):
         tb = QToolBar("Main Controls")
-        tb.setIconSize(Qt.QSize(20, 20))
+        tb.setIconSize(QSize(20, 20))
+        tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.addToolBar(Qt.TopToolBarArea, tb)
 
         self.act_connect = QAction(
