@@ -1125,14 +1125,36 @@ class MainWindow(QMainWindow):
         except ValueError as e:
             log.error(f"Invalid resolution string values: {resolution_str} - {e}")
 
-    @pyqtSlot(str, int)  # error_message, error_code
-    def _on_camera_error(self, error_message: str, error_code: int):
-        log.error(f"Camera Error in MainWindow: {error_message} (Code: {error_code})")
-        # Display in status bar or a non-modal notification if preferred over QMessageBox
-        self.statusBar().showMessage(f"Camera Error: {error_message}", 5000)
+    @pyqtSlot(str, str)
+    def _on_camera_error(self, error_message: str, error_code_str: str):
+        # Log with the new string error code
+        log.error(
+            f"Camera Error in MainWindow: '{error_message}' (Code: {error_code_str})"
+        )
+
+        # Display in status bar or a non-modal notification
+        status_bar_msg = f"Camera Error: {error_message}"
+        if error_code_str:  # Add code if it's not empty
+            status_bar_msg += f" (Code: {error_code_str})"
+        self.statusBar().showMessage(status_bar_msg, 7000)  # Show for 7 seconds
+
         # Potentially disable camera-dependent UI elements
+        # This call should now ensure that all camera controls, including resolution,
+        # exposure, gain, brightness, and ROI tabs/controls are disabled.
         self.top_ctrl.disable_all_camera_controls()
-        self.start_trial_action.setEnabled(False)  # Can't record if camera error
+
+        # Update camera resolutions list to be empty in the UI
+        self.top_ctrl.update_camera_resolutions([])
+
+        # Disable recording action if a camera error occurs
+        self.start_trial_action.setEnabled(False)
+        if self._is_recording:  # If was recording and camera failed
+            self._stop_pc_recording()  # Stop the ongoing recording
+            QMessageBox.warning(
+                self,
+                "Recording Stopped",
+                "Camera error occurred. PC recording has been stopped.",
+            )
 
     def _build_menu(self):
         mb = self.menuBar()
