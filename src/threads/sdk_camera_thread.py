@@ -2,7 +2,12 @@ import logging
 import imagingcontrol4 as ic4
 from PyQt5.QtCore import QThread, pyqtSignal, QMutex
 from PyQt5.QtGui import QImage
-from imagingcontrol4.properties import PropInteger, PropBoolean, PropFloat, PropEnumeration
+from imagingcontrol4.properties import (
+    PropInteger,
+    PropBoolean,
+    PropFloat,
+    PropEnumeration,
+)
 
 log = logging.getLogger(__name__)
 
@@ -100,22 +105,34 @@ class SDKCameraThread(QThread):
                             "max": int(prop.maximum),  # Min/max are attributes
                             "value": int(prop.value),  # CHANGE prop.get() to prop.value
                         }
-                    elif name == "auto_exposure" and isinstance(prop, PropEnumeration): # Check for PropEnumeration
+                    elif name == "auto_exposure" and isinstance(
+                        prop, PropEnumeration
+                    ):  # Check for PropEnumeration
                         try:
-                            current_auto_exposure_state = prop.get_value_str() # Get current string value
+                            current_auto_exposure_state = (
+                                prop.get_value_str()
+                            )  # Get current string value
                             # Common states are "Off", "Continuous", "Once". Adjust "Off" if your SDK uses a different term.
                             is_on = current_auto_exposure_state != "Off"
                             controls[name] = {
                                 "enabled": True,
                                 "min": 0,
                                 "max": 1,
-                                "value": is_on, # Boolean state for checkbox
+                                "value": is_on,  # Boolean state for checkbox
                                 "is_auto_on": is_on,
                                 # "available_options": prop.entries # Optional: for debugging or advanced UI
                             }
-                            log.debug(f"Auto exposure ({name}) state: {current_auto_exposure_state}, is_on: {is_on}")
+                            log.debug(
+                                f"Auto exposure ({name}) state: {current_auto_exposure_state}, is_on: {is_on}"
+                            )
                         except Exception as e_auto:
-                            log.debug(f"Could not determine auto_exposure state for {name} (PID {pid}): {e_auto}")
+                            log.debug(
+                                f"Could not determine auto_exposure state for {name} (PID {pid}): {e_auto}"
+                            )
+                except Exception as e_outer:  # CATCH BLOCK FOR THE OUTER TRY
+                    log.debug(
+                        f"Property {name} (PID {pid}) not available or failed during find/initial access: {e_outer}"
+                    )
 
             # Always try these
             try_prop("exposure", ic4.PropId.EXPOSURE_TIME)
