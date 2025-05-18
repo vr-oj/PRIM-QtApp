@@ -2,7 +2,7 @@ import logging
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QImage, QPixmap, QFont
-from threads.camera_thread import CameraThread
+from .threads.sdk_camera_thread import SDKCameraThread
 
 log = logging.getLogger(__name__)
 
@@ -50,23 +50,22 @@ class QtCameraWidget(QWidget):
             self.camera_resolutions_updated.emit([])
             return True
 
-        # start μManager thread
-        self._camera_thread = CameraThread(fps=20, parent=self)
-        # when thread emits full-res+preview, handle it
-        self._camera_thread.frameReady.connect(self._on_thread_frame)
+        # start TIS SDK thread
+        self._camera_thread = SDKCameraThread(exposure=20000, parent=self)
+        # when thread emits a new QImage, handle it
+        self._camera_thread.frame_ready.connect(self._on_sdk_frame)
         self._camera_thread.start()
 
-        # once thread is running, grab its frame_size
-        w, h = self._camera_thread.frame_size
-        self.camera_resolutions_updated.emit([f"{w}x{h}"])
+        # you can emit a single “native” resolution if you want
+        # self.camera_resolutions_updated.emit([f"{w}x{h}"])
         return True
 
-    def _on_thread_frame(self, qimg: QImage, bgr_frame):
+    def _on_sdk_frame(self, qimg: QImage)
         # update display
         self._last_pixmap = QPixmap.fromImage(qimg)
         self._update_display()
-        # forward to recorder
-        self.frame_ready.emit(qimg, bgr_frame)
+        # if you need to record, you can still forward the QImage
+        self.frame_ready.emit(qimg, None)
 
     def _update_display(self):
         if self._last_pixmap and not self._last_pixmap.isNull():
