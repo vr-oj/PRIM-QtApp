@@ -64,6 +64,7 @@ from config import (
     PLOT_DEFAULT_Y_MAX,
     PRIM_RESULTS_DIR,
 )
+from config import DEFAULT_VIDEO_EXTENSION, DEFAULT_VIDEO_CODEC, SUPPORTED_FORMATS
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -1205,6 +1206,15 @@ class MainWindow(QMainWindow):
             self.port_combo.addItem("Error listing ports", "ERROR_PORTS_PLACEHOLDER")
         tb.addWidget(self.port_combo)
 
+        # ─── Recording Format Selector ───────────────────
+        self.format_combo = QComboBox()
+        self.format_combo.setToolTip("Select recording format")
+        for fmt in SUPPORTED_FORMATS:
+            self.format_combo.addItem(fmt.upper(), fmt)
+        # default selection:
+        self.format_combo.setCurrentText(DEFAULT_VIDEO_EXTENSION.upper())
+        tb.addWidget(self.format_combo)
+
         tb.addSeparator()
         tb.addAction(self.start_trial_action)
         tb.addAction(self.stop_trial_action)
@@ -1429,14 +1439,11 @@ class MainWindow(QMainWindow):
 
         # ─── Make trial folder ──────────────────────────────
         base_dir = PRIM_RESULTS_DIR
-        folder_name_safe = (
-            "".join(
-                c if c.isalnum() or c in (" ", "_", "-") else "_" for c in trial_name
-            )
-            .rstrip()
-            .replace(" ", "_")
+        safe_name = "".join(
+            c if c.isalnum() or c in (" ", "_", "-") else "_" for c in trial_name
         )
-        trial_folder = os.path.join(base_dir, folder_name_safe)
+        folder = safe_name.rstrip().replace(" ", "_")
+        trial_folder = os.path.join(base_dir, folder)
         try:
             os.makedirs(trial_folder, exist_ok=True)
         except OSError as e:
@@ -1448,60 +1455,79 @@ class MainWindow(QMainWindow):
             )
             return
 
-        base_save_path = os.path.join(trial_folder, folder_name_safe)
+        base_save_path = os.path.join(trial_folder, folder)
 
         # ─── Determine frame size ────────────────────────────
         fw, fh = DEFAULT_FRAME_SIZE
-        if hasattr(self.qt_cam, "get_current_resolution"):
-            res = self.qt_cam.get_current_resolution()
-            if res and not res.isEmpty():
-                fw, fh = res.width(), res.height()
-        log.info(
-            f"Starting trial recording with MMRecorder. Frame size={fw}x{fh}, FPS={DEFAULT_FPS}"
+        res = (
+            self.qt_cam.get_current_resolution()
+            if hasattr(self.qt_cam, "get_current_resolution")
+            else QSize()
         )
+        if res and not res.isEmpty():
+            fw, fh = res.width(), res.height()
+        log.info(f"Starting trial recording. Frame size={fw}x{fh}, FPS={DEFAULT_FPS}")
 
         try:
-            # ─── Instantiate the new TrialRecorder ────────────
+            # Read format choice
+            chosen_ext = (
+                self.format_combo.currentData()
+                or self.format_combo.currentText().lower()
+            )
+            chosen_codec = DEFAULT_VIDEO_CODEC
+
+            # Instantiate recorder
             self.trial_recorder = TrialRecorder(
-                base_save_path,
+                basepath=base_save_path,
                 fps=DEFAULT_FPS,
                 frame_size=(fw, fh),
+                video_ext=chosen_ext,
+                video_codec=chosen_codec,
             )
             if not self.trial_recorder.is_recording:
                 raise RuntimeError("TrialRecorder failed to start recording.")
 
-            # ─── Enable “Open Last Folder” button ────────────
+            # ─── <<< IMPORTANT: hook up camera frames >>> ────
+            # avoid duplicate connections
+            try:
+                self.qt_cam.frame_ready.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            self.qt_cam.frame_ready.connect(
+                lambda qimg, bgr: self.trial_recorder.write_video_frame(bgr)
+            )
+            # ───────────────────────────────────────────────────
+
+            # Enable “Open Last Folder” button
             self.last_trial_basepath = trial_folder
             self.open_last_trial_folder_action.setEnabled(True)
 
-            # ─── Pull file names & write metadata ────────────
-            video_filename_for_meta = os.path.basename(
-                self.trial_recorder.video_filename
-            )
-            csv_filename_for_meta = os.path.basename(self.trial_recorder.csv_filename)
-
-            meta_filepath = f"{base_save_path}_metadata.txt"
-            with open(meta_filepath, "w") as mf:
+            # Write metadata file
+            video_meta = os.path.basename(self.trial_recorder.video_filename)
+            csv_meta = os.path.basename(self.trial_recorder.csv_filename)
+            meta_fp = f"{base_save_path}_metadata.txt"
+            with open(meta_fp, "w") as mf:
                 mf.write(
                     f"Session Name: {trial_name}\n"
                     f"Date: {QDateTime.currentDateTime().toString('yyyy-MM-dd HH:mm:ss')}\n"
                     f"Operator: {operator}\n"
-                    f"Sample Details: {sample}\n"
-                    f"FPS Target: {DEFAULT_FPS}\n"
+                    f"Sample: {sample}\n"
+                    f"FPS: {DEFAULT_FPS}\n"
                     f"Resolution: {fw}x{fh}\n"
-                    f"Video File: {video_filename_for_meta}\n"
-                    f"CSV File: {csv_filename_for_meta}\n"
+                    f"Video File: {video_meta}\n"
+                    f"CSV File: {csv_meta}\n"
                     f"Notes:\n{notes}\n"
                 )
-            log.info(f"Metadata saved to {meta_filepath}")
+            log.info(f"Metadata saved to {meta_fp}")
 
-            # ─── Flip UI state to “recording” ────────────────
+            # Flip UI into “recording”
             self._is_recording = True
             self.start_trial_action.setEnabled(False)
             self.start_trial_action.setIcon(self.icon_recording_active)
             self.stop_trial_action.setEnabled(True)
             self.plot_w.clear_plot()
             self.statusBar().showMessage(f"Recording Started: {trial_name}", 0)
+
         except Exception as e:
             log.error("Failed to start PC recording process", exc_info=True)
             QMessageBox.critical(
