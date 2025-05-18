@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QDockWidget,
     QWidget,
-    QLabel,  # ← for status widgets
+    QLabel,
     QTextEdit,
     QVBoxLayout,
     QSplitter,
@@ -21,14 +21,14 @@ from PyQt5.QtWidgets import (
     QDialogButtonBox,
     QSizePolicy,
     QFileDialog,
-    QMessageBox,  # ← for warning/info dialogs
+    QMessageBox,
 )
 from PyQt5.QtCore import (
     Qt,
     QTimer,
     pyqtSlot,
     QDateTime,
-    QSize,  # ← for setIconSize
+    QSize,
 )
 from PyQt5.QtGui import QIcon, QKeySequence
 

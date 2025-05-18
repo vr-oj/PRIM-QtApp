@@ -1,6 +1,6 @@
 import logging
 import imagingcontrol4 as ic4
-from PyQt5.QtCore import QThread, pyqtSignal, QMutex
+from PyQt5.QtCore import QThread, pyqtSignal, QMutex, QMutexLocker, pyqtSlot
 from PyQt5.QtGui import QImage
 from imagingcontrol4.properties import PropInteger
 
@@ -26,7 +26,7 @@ class SDKCameraThread(QThread):
         self._stop_requested = False
         self.target_fps = target_fps
 
-        # capture settings
+        # desired settings
         self.desired_width = width
         self.desired_height = height
         self.desired_pixel_format = pixel_format
@@ -36,12 +36,30 @@ class SDKCameraThread(QThread):
         # pending updates
         self._pending_exposure = None
         self._pending_gain = None
+        self._pending_brightness = None
+        self._pending_auto_exposure = None
 
+        self.pm = None  # will hold property map after open
+
+    @pyqtSlot(int)
     def update_exposure(self, new_exp_us: int):
-        self._pending_exposure = new_exp_us
+        with QMutexLocker(self._mutex):
+            self._pending_exposure = new_exp_us
 
+    @pyqtSlot(int)
     def update_gain(self, new_gain: int):
-        self._pending_gain = new_gain
+        with QMutexLocker(self._mutex):
+            self._pending_gain = new_gain
+
+    @pyqtSlot(int)
+    def update_brightness(self, new_value: int):
+        with QMutexLocker(self._mutex):
+            self._pending_brightness = new_value
+
+    @pyqtSlot(bool)
+    def update_auto_exposure(self, enable_auto: bool):
+        with QMutexLocker(self._mutex):
+            self._pending_auto_exposure = enable_auto
 
     def run(self):
         self._stop_requested = False
@@ -61,6 +79,7 @@ class SDKCameraThread(QThread):
             grabber.device_open(dev)
             log.info("Camera opened.")
             pm = grabber.device_property_map
+            self.pm = pm
 
             # enumerate resolutions
             try:
@@ -72,7 +91,7 @@ class SDKCameraThread(QThread):
                     modes = [f"{w}x{h}" for w in widths for h in heights]
                     self.camera_resolutions_available.emit(modes)
             except Exception as e:
-                log.warning(f"Couldn’t enumerate resolutions: {e}")
+                log.warning(f"Couldn't enumerate resolutions: {e}")
 
             # configure free-run
             for pid, val in (
@@ -82,7 +101,7 @@ class SDKCameraThread(QThread):
                 try:
                     pm.set_value(pid, val)
                 except ic4.IC4Exception as e:
-                    log.warning(f"Couldn’t set {pid.name}: {e}")
+                    log.warning(f"Couldn't set {pid.name}: {e}")
 
             # set pixel format, size, exposure
             fmt = pm.get_value_str(ic4.PropId.PIXEL_FORMAT)
@@ -129,6 +148,29 @@ class SDKCameraThread(QThread):
                         log.warning(f"Failed to set gain: {e}")
                     finally:
                         self._pending_gain = None
+
+                # apply pending brightness
+                if self._pending_brightness is not None:
+                    try:
+                        pm.set_value(ic4.PropId.BRIGHTNESS, self._pending_brightness)
+                        log.info(f"Brightness set to {self._pending_brightness}")
+                    except ic4.IC4Exception as e:
+                        log.warning(f"Failed to set brightness: {e}")
+                    finally:
+                        self._pending_brightness = None
+
+                # apply pending auto-exposure
+                if self._pending_auto_exposure is not None:
+                    try:
+                        val = "On" if self._pending_auto_exposure else "Off"
+                        pm.set_value(ic4.PropId.AUTO_EXPOSURE, val)
+                        log.info(
+                            f"Auto Exposure {'enabled' if self._pending_auto_exposure else 'disabled'}"
+                        )
+                    except ic4.IC4Exception as e:
+                        log.warning(f"Failed to toggle auto-exposure: {e}")
+                    finally:
+                        self._pending_auto_exposure = None
 
                 try:
                     timeout = max(int(1000 / self.target_fps * 2), 100)
@@ -181,6 +223,5 @@ class SDKCameraThread(QThread):
             log.info("Camera thread finished.")
 
     def stop(self):
-        self._mutex.lock()
-        self._stop_requested = True
-        self._mutex.unlock()
+        with QMutexLocker(self._mutex):
+            self._stop_requested = True
