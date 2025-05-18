@@ -60,7 +60,7 @@ class QtCameraWidget(QWidget):
         # self.camera_resolutions_updated.emit([f"{w}x{h}"])
         return True
 
-    def _on_sdk_frame(self, qimg: QImage)
+    def _on_sdk_frame(self, qimg: QImage):
         # update display
         self._last_pixmap = QPixmap.fromImage(qimg)
         self._update_display()
