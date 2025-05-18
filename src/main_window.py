@@ -1125,8 +1125,8 @@ class MainWindow(QMainWindow):
         except ValueError as e:
             log.error(f"Invalid resolution string values: {resolution_str} - {e}")
 
-    @pyqtSlot(str, int)  # error_message, error_code
-    def _on_camera_error(self, error_message: str, error_code: int):
+    @pyqtSlot(str, str)  # error_message, error_code_str
+    def _on_camera_error(self, error_message: str, error_code_str: str):
         log.error(f"Camera Error in MainWindow: {error_message} (Code: {error_code})")
         # Display in status bar or a non-modal notification if preferred over QMessageBox
         self.statusBar().showMessage(f"Camera Error: {error_message}", 5000)
