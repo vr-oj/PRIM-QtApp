@@ -254,6 +254,9 @@ class MainWindow(QMainWindow):
             self.top_ctrl.update_camera_resolutions
         )
         self.qt_cam.camera_error.connect(self._on_camera_error)
+        self.qt_cam.camera_properties_updated.connect(
+            self.top_ctrl.update_camera_ui_from_properties
+        )
 
     def _adjust_splitter(self):
         # relies on stretch factors set in _build_central

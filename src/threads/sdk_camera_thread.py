@@ -1,8 +1,9 @@
 import logging
 import imagingcontrol4 as ic4
-from PyQt5.QtCore import QThread, pyqtSignal, QMutex, QMutexLocker, pyqtSlot
+from PyQt5.QtCore import QThread, pyqtSignal, QMutex
 from PyQt5.QtGui import QImage
 from imagingcontrol4.properties import PropInteger
+from imagingcontrol4 import PropId
 
 log = logging.getLogger(__name__)
 
@@ -11,6 +12,7 @@ class SDKCameraThread(QThread):
     frame_ready = pyqtSignal(QImage, object)
     camera_error = pyqtSignal(str, str)
     camera_resolutions_available = pyqtSignal(list)
+    camera_properties_available = pyqtSignal(dict)  # <-- new
 
     def __init__(
         self,
@@ -26,7 +28,7 @@ class SDKCameraThread(QThread):
         self._stop_requested = False
         self.target_fps = target_fps
 
-        # desired settings
+        # capture settings
         self.desired_width = width
         self.desired_height = height
         self.desired_pixel_format = pixel_format
@@ -36,30 +38,12 @@ class SDKCameraThread(QThread):
         # pending updates
         self._pending_exposure = None
         self._pending_gain = None
-        self._pending_brightness = None
-        self._pending_auto_exposure = None
 
-        self.pm = None  # will hold property map after open
-
-    @pyqtSlot(int)
     def update_exposure(self, new_exp_us: int):
-        with QMutexLocker(self._mutex):
-            self._pending_exposure = new_exp_us
+        self._pending_exposure = new_exp_us
 
-    @pyqtSlot(int)
     def update_gain(self, new_gain: int):
-        with QMutexLocker(self._mutex):
-            self._pending_gain = new_gain
-
-    @pyqtSlot(int)
-    def update_brightness(self, new_value: int):
-        with QMutexLocker(self._mutex):
-            self._pending_brightness = new_value
-
-    @pyqtSlot(bool)
-    def update_auto_exposure(self, enable_auto: bool):
-        with QMutexLocker(self._mutex):
-            self._pending_auto_exposure = enable_auto
+        self._pending_gain = new_gain
 
     def run(self):
         self._stop_requested = False
@@ -69,51 +53,104 @@ class SDKCameraThread(QThread):
         grabber = None
 
         try:
+            # 1) discover & open
             devices = ic4.DeviceEnum.devices()
             if not devices:
                 raise RuntimeError("No TIS cameras found")
             dev = devices[0]
-            log.info(f"Using {dev.model_name} (S/N {dev.serial})")
-
             grabber = ic4.Grabber()
             grabber.device_open(dev)
             log.info("Camera opened.")
             pm = grabber.device_property_map
-            self.pm = pm
 
-            # enumerate resolutions
+            # 2) enumerate & emit resolutions
             try:
-                wprop = pm.find(ic4.PropId.WIDTH)
-                hprop = pm.find(ic4.PropId.HEIGHT)
+                wprop = pm.find(PropId.WIDTH)
+                hprop = pm.find(PropId.HEIGHT)
                 if isinstance(wprop, PropInteger) and isinstance(hprop, PropInteger):
                     widths = range(wprop.minimum, wprop.maximum + 1, wprop.increment)
                     heights = range(hprop.minimum, hprop.maximum + 1, hprop.increment)
                     modes = [f"{w}x{h}" for w in widths for h in heights]
                     self.camera_resolutions_available.emit(modes)
             except Exception as e:
-                log.warning(f"Couldn't enumerate resolutions: {e}")
+                log.warning(f"Couldn’t enumerate resolutions: {e}")
 
-            # configure free-run
+            # 3) now gather *all* control props
+            props = {}
+            for name, pid in (
+                ("exposure", PropId.EXPOSURE_TIME),
+                ("gain", PropId.GAIN),
+                ("brightness", PropId.BRIGHTNESS),
+            ):
+                try:
+                    p = pm.find(pid)
+                    if isinstance(p, PropInteger):
+                        val = pm.get_value(pid)
+                        entry = {
+                            "enabled": True,
+                            "min": p.minimum,
+                            "max": p.maximum,
+                            "value": val,
+                        }
+                    else:
+                        entry = {"enabled": False, "min": 0, "max": 0, "value": 0}
+                except Exception:
+                    entry = {"enabled": False, "min": 0, "max": 0, "value": 0}
+
+                # auto‐exposure only for exposure
+                if name == "exposure":
+                    try:
+                        ae = pm.get_value_str(PropId.AUTO_EXPOSURE)
+                        entry["is_auto_on"] = ae.lower() in ("on", "true", "1")
+                    except Exception:
+                        entry["is_auto_on"] = False
+
+                props[name] = entry
+
+            # ROI
+            try:
+                rx = pm.get_value(PropId.REGION_X)
+                ry = pm.get_value(PropId.REGION_Y)
+                rw = pm.get_value(PropId.REGION_WIDTH)
+                rh = pm.get_value(PropId.REGION_HEIGHT)
+                max_w = pm.find(PropId.REGION_WIDTH).maximum
+                max_h = pm.find(PropId.REGION_HEIGHT).maximum
+                roi = {
+                    "x": rx,
+                    "y": ry,
+                    "w": rw,
+                    "h": rh,
+                    "max_w": max_w,
+                    "max_h": max_h,
+                }
+            except Exception:
+                roi = {"x": 0, "y": 0, "w": 0, "h": 0, "max_w": 0, "max_h": 0}
+
+            all_props = {"controls": props, "roi": roi}
+            self.camera_properties_available.emit(all_props)  # <-- emit
+
+            # 4) configure free-run
             for pid, val in (
-                (ic4.PropId.ACQUISITION_MODE, "Continuous"),
-                (ic4.PropId.TRIGGER_MODE, "Off"),
+                (PropId.ACQUISITION_MODE, "Continuous"),
+                (PropId.TRIGGER_MODE, "Off"),
             ):
                 try:
                     pm.set_value(pid, val)
                 except ic4.IC4Exception as e:
-                    log.warning(f"Couldn't set {pid.name}: {e}")
+                    log.warning(f"Couldn’t set {pid.name}: {e}")
 
-            # set pixel format, size, exposure
-            fmt = pm.get_value_str(ic4.PropId.PIXEL_FORMAT)
+            # 5) set pixel format, size, exposure
+            fmt = pm.get_value_str(PropId.PIXEL_FORMAT)
             if fmt != self.desired_pixel_format:
-                pm.set_value(ic4.PropId.PIXEL_FORMAT, self.desired_pixel_format)
+                pm.set_value(PropId.PIXEL_FORMAT, self.desired_pixel_format)
             for pid, v in (
-                (ic4.PropId.WIDTH, self.desired_width),
-                (ic4.PropId.HEIGHT, self.desired_height),
-                (ic4.PropId.EXPOSURE_TIME, self.desired_exposure),
+                (PropId.WIDTH, self.desired_width),
+                (PropId.HEIGHT, self.desired_height),
+                (PropId.EXPOSURE_TIME, self.desired_exposure),
             ):
                 pm.set_value(pid, v)
 
+            # 6) start streaming…
             sink = ic4.SnapSink()
             grabber.stream_setup(
                 sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
@@ -223,5 +260,6 @@ class SDKCameraThread(QThread):
             log.info("Camera thread finished.")
 
     def stop(self):
-        with QMutexLocker(self._mutex):
-            self._stop_requested = True
+        self._mutex.lock()
+        self._stop_requested = True
+        self._mutex.unlock()
