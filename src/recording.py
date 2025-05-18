@@ -1,15 +1,17 @@
 import os, time, csv, threading, logging, imageio
+
 try:
     from pycromanager import Core
+
     use_mm = True
     core = Core()
 except Exception:
     use_mm = False
 
 if use_mm:
-    # start ZMQ-based camera_thread
+    pass  # start ZMQ-based camera_thread
 else:
-    # start cv2.VideoCapture-based camera_thread
+    pass  # start cv2.VideoCapture-based camera_thread
 
 
 log = logging.getLogger(__name__)
