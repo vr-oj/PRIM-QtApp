@@ -1,8 +1,10 @@
 import logging
+
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy
 from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot
 from PyQt5.QtGui import QImage, QPixmap, QFont
-from .sdk_camera_thread import SDKCameraThread
+
+from threads.sdk_camera_thread import SDKCameraThread
 
 log = logging.getLogger(__name__)
 

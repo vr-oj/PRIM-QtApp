@@ -1,3 +1,5 @@
+import logging
+
 from PyQt5.QtWidgets import (
     QWidget,
     QGroupBox,
@@ -7,6 +9,11 @@ from PyQt5.QtWidgets import (
     QLabel,
 )
 from PyQt5.QtCore import pyqtSignal
+
+from control_panels.camera_control_panel import CameraControlPanel
+from control_panels.plot_control_panel import PlotControlPanel
+
+log = logging.getLogger(__name__)
 
 
 class TopControlPanel(QWidget):

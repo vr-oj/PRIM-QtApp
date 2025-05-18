@@ -1,13 +1,11 @@
 import os
-import logging
 import csv
-import traceback
+import logging
 
 from PyQt5.QtWidgets import (
     QMainWindow,
     QApplication,
     QMessageBox,
-    QStyleFactory,
     QDockWidget,
     QWidget,
     QVBoxLayout,
@@ -16,20 +14,13 @@ from PyQt5.QtWidgets import (
     QAction,
     QToolBar,
     QComboBox,
-    QFileDialog,
     QTextEdit,
     QLineEdit,
-    QPushButton,
     QDialog,
     QFormLayout,
     QDialogButtonBox,
-    QSpinBox,
-    QDoubleSpinBox,
     QSizePolicy,
-    QCheckBox,
-    QGroupBox,
-    QLabel,
-    QHBoxLayout,
+    QFileDialog,
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSlot, QDateTime, QUrl
 from PyQt5.QtGui import QIcon, QKeySequence

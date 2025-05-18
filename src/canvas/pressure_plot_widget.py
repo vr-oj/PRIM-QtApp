@@ -2,13 +2,7 @@ import os
 import time
 import logging
 
-from PyQt5.QtWidgets import (
-    QWidget,
-    QSizePolicy,
-    QVBoxLayout,
-    QMessageBox,
-    QFileDialog,
-)
+from PyQt5.QtWidgets import QWidget, QSizePolicy, QVBoxLayout, QMessageBox, QFileDialog
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 

@@ -1,8 +1,8 @@
 import logging
 import imagingcontrol4 as ic4
-from imagingcontrol4.properties import PropInteger
 from PyQt5.QtCore import QThread, pyqtSignal, QMutex
 from PyQt5.QtGui import QImage
+from imagingcontrol4.properties import PropInteger
 
 log = logging.getLogger(__name__)
 

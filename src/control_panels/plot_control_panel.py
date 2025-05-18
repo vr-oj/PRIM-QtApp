@@ -11,6 +11,8 @@ from PyQt5.QtCore import pyqtSignal
 
 from config import PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX
 
+log = __import__("logging").getLogger(__name__)
+
 
 class PlotControlPanel(QGroupBox):
     x_axis_limits_changed = pyqtSignal(float, float)
