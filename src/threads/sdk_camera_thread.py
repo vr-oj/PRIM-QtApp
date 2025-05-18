@@ -2,7 +2,7 @@ import logging
 import imagingcontrol4 as ic4
 from PyQt5.QtCore import QThread, pyqtSignal, QMutex
 from PyQt5.QtGui import QImage
-from imagingcontrol4.properties import PropInteger, PropBoolean
+from imagingcontrol4.properties import PropInteger, PropBoolean, PropFloat
 
 log = logging.getLogger(__name__)
 
@@ -89,9 +89,16 @@ class SDKCameraThread(QThread):
                     if isinstance(prop, PropInteger):
                         controls[name] = {
                             "enabled": True,
-                            "min": prop.minimum,
-                            "max": prop.maximum,
-                            "value": prop.get(),
+                            "min": int(prop.minimum),  # Ensure int
+                            "max": int(prop.maximum),  # Ensure int
+                            "value": int(prop.get()),  # Ensure int
+                        }
+                    elif isinstance(prop, PropFloat):  # <<< ADD THIS BLOCK
+                        controls[name] = {
+                            "enabled": True,
+                            "min": int(prop.minimum),  # Cast to int for QSlider
+                            "max": int(prop.maximum),  # Cast to int for QSlider
+                            "value": int(prop.get()),  # Cast to int for QSlider
                         }
                     elif name == "auto_exposure" and isinstance(prop, PropBoolean):
                         on = bool(prop.get())
@@ -102,8 +109,12 @@ class SDKCameraThread(QThread):
                             "value": on,
                             "is_auto_on": on,
                         }
-                except Exception:
-                    log.debug(f"Property {name} (PID {pid}) not available or failed.")
+                except (
+                    Exception
+                ) as e:  # Catching generic Exception is okay for robustness here
+                    log.debug(
+                        f"Property {name} (PID {pid}) not available or failed: {e}"
+                    )
 
             # Always try these
             try_prop("exposure", ic4.PropId.EXPOSURE_TIME)
