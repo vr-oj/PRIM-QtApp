@@ -115,8 +115,10 @@ class SDKCameraThread(QThread):
                             "min": 0,
                             "max": 1,
                         }
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning(
+                        f"Failed to get property {name} (ID: {pid}): {e}", exc_info=True
+                    )  # Log the error
 
             # always try exposure & gain
             try_prop("exposure", ic4.PropId.EXPOSURE_TIME)
