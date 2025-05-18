@@ -23,7 +23,7 @@ class SDKCameraThread(QThread):
         # Initialize the IC4 library
         ic4.Library.init()
 
-        # Enumerate connected TIS cameras
+        # 1) Enumerate connected TIS cameras
         cams = ic4.DeviceEnum.devices()
         if not cams:
             print("No TIS cameras found!")
@@ -32,19 +32,33 @@ class SDKCameraThread(QThread):
         info = cams[0]
         print(f"Using camera: {info.model_name} (S/N {info.serial})")
 
-        # Open camera and configure exposure
+        # 2) Open camera
         grabber = ic4.Grabber()
         grabber.device_open(info)
 
-        # 1) configure a known-good resolution & format
+        # 3) Grab the property map once
         pm = grabber.device_property_map
-        pm.set_value(ic4.PropId.WIDTH, 640)
-        pm.set_value(ic4.PropId.HEIGHT, 480)
-        pm.set_value(ic4.PropId.PIXEL_FORMAT, "Mono8")
-        # 2) set exposure
-        pm.set_value(ic4.PropId.EXPOSURE_TIME, self.exposure)
 
-        # 3) prepare the sink and start acquisition safely
+        # 4) Enumerate supported widths before setting anything
+        try:
+            entries = pm.get_entries(ic4.PropId.WIDTH)
+            print("Supported widths:", [e.value for e in entries])
+        except ic4.IC4Exception as e:
+            print("⚠️ Couldn’t enumerate widths:", e)
+
+        # 5) Safely set width, height, format, and exposure
+        for prop, val in (
+            (ic4.PropId.WIDTH, 640),
+            (ic4.PropId.HEIGHT, 480),
+            (ic4.PropId.PIXEL_FORMAT, "Mono8"),
+            (ic4.PropId.EXPOSURE_TIME, self.exposure),
+        ):
+            try:
+                pm.set_value(prop, val)
+            except ic4.IC4Exception as e:
+                print(f"⚠️ Couldn’t set {prop.name} to {val!r}: {e}")
+
+        # 6) Prepare the sink and start acquisition safely
         sink = ic4.SnapSink()
         try:
             grabber.stream_setup(
@@ -56,7 +70,7 @@ class SDKCameraThread(QThread):
             ic4.Library.exit()
             return
 
-        # Start the capture loop
+        # 7) Capture loop
         self._running = True
         while self._running:
             try:
@@ -72,11 +86,14 @@ class SDKCameraThread(QThread):
                 print("Error grabbing frame:", e)
                 break
 
-            # Throttle frame rate to avoid overwhelming the UI thread
+            # Throttle frame rate
             self.msleep(self._interval)
 
-        # Cleanup
-        grabber.stream_stop()
+        # 8) Cleanup
+        try:
+            grabber.stream_stop()
+        except Exception:
+            pass
         grabber.device_close()
         del img_buf, sink, grabber, info, cams
         ic4.Library.exit()
