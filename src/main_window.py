@@ -82,7 +82,7 @@ class MainWindow(QMainWindow):
         self._initial_control_state()
         self._connect_top_controls()
         self._connect_camera_widget()
-        QTimer.singleShot(100, self.top_ctrl.camera_controls.populate_camera_selector)
+        QTimer.singleShot(100, self.top_ctrl.camera_controls.populate_cameras)
 
     def _init_paths_and_icons(self):
         base = os.path.dirname(__file__)
