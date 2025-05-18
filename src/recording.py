@@ -1,5 +1,5 @@
 import os, time, csv, threading, logging
-from pycromanager import Bridge
+from pycromanager.bridge import Bridge
 
 log = logging.getLogger(__name__)
 
