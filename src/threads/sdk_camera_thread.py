@@ -35,11 +35,26 @@ class SDKCameraThread(QThread):
         # Open camera and configure exposure
         grabber = ic4.Grabber()
         grabber.device_open(info)
-        grabber.device_property_map.set_value(ic4.PropId.EXPOSURE_TIME, self.exposure)
 
-        # Set up a SnapSink for on-demand grabbing
+        # 1) configure a known-good resolution & format
+        pm = grabber.device_property_map
+        pm.set_value(ic4.PropId.WIDTH, 640)
+        pm.set_value(ic4.PropId.HEIGHT, 480)
+        pm.set_value(ic4.PropId.PIXEL_FORMAT, "Mono8")
+        # 2) set exposure
+        pm.set_value(ic4.PropId.EXPOSURE_TIME, self.exposure)
+
+        # 3) prepare the sink and start acquisition safely
         sink = ic4.SnapSink()
-        grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
+        try:
+            grabber.stream_setup(
+                sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
+            )
+        except ic4.IC4Exception as e:
+            print("Failed to start acquisition:", e)
+            grabber.device_close()
+            ic4.Library.exit()
+            return
 
         # Start the capture loop
         self._running = True
@@ -69,4 +84,7 @@ class SDKCameraThread(QThread):
     def stop(self):
         # Signal the loop to end and wait for thread exit
         self._running = False
-        self.wait()
+        try:
+            self.wait()
+        except RuntimeError:
+            pass
