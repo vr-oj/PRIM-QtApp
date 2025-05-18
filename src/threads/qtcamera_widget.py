@@ -27,6 +27,9 @@ class QtCameraWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # start with a sensible default resolution
+        self.default_width = 640
+        self.default_height = 480
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         # Preview label
@@ -121,9 +124,9 @@ class QtCameraWidget(QWidget):
         self._camera_thread = SDKCameraThread(
             exposure_us=self.default_exposure_us,
             target_fps=self.default_target_fps,
-            parent=None,  # Threads should not have a QObject parent if moved to QThread for better management
-            # Or, if parent=self, ensure thread is deleted before widget.
-            # For now, None, and manage with finished signal and deleteLater.
+            width=self.default_width,
+            height=self.default_height,
+            parent=None,
         )
         self._camera_thread.frame_ready.connect(self._on_sdk_frame_received)
         self._camera_thread.camera_error.connect(self._on_camera_thread_error)
@@ -131,6 +134,19 @@ class QtCameraWidget(QWidget):
             self.camera_resolutions_updated
         )
         self._camera_thread.start()  # Start the thread's run() method
+
+    def set_active_resolution(self, width: int, height: int):
+        """
+        Called when the user selects a new resolution (WxH).
+        We update our defaults and restart the camera thread.
+        """
+        self.default_width = width
+        self.default_height = height
+        # If a camera is already running, re-set it to restart the thread
+        if self._active_camera_id >= 0:
+            self.set_active_camera(
+                self._active_camera_id, self._active_camera_description
+            )
 
     @pyqtSlot(
         QImage, object

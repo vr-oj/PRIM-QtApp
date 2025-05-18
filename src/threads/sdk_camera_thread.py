@@ -11,16 +11,17 @@ class SDKCameraThread(QThread):
     camera_error = pyqtSignal(str, str)
     camera_resolutions_available = pyqtSignal(list)
 
-    def __init__(self, exposure_us=20000, target_fps=20, parent=None):
+    def __init__(
+        self, exposure_us=20000, target_fps=20, width=640, height=480, parent=None
+    ):
         super().__init__(parent)
         self.exposure_us = exposure_us
         self.target_fps = target_fps
         self._stop_requested = False
         self._mutex = QMutex()
-        # Desired capture settings
-        self.desired_width = 640
-        self.desired_height = 480
-        self.desired_pixel_format = "Mono8"
+        # Desired capture settings (now passed in)
+        self.desired_width = width
+        self.desired_height = height
 
     def run(self):
         self._stop_requested = False
