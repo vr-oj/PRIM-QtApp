@@ -1,5 +1,5 @@
-import os, time, csv, threading, logging
-from pycromanager.bridge import Bridge
+import os, time, csv, threading, logging, imageio
+from pycromanager import Core
 
 log = logging.getLogger(__name__)
 
@@ -33,13 +33,12 @@ class CSVRecorder:
 
 class MMRecorder:
     """
-    Uses pycromanager to grab frames and writes an AVI or multi-page TIFF.
+    Uses pycromanager Core to grab frames and writes an AVI or multi-page TIFF.
     """
 
     def __init__(self, out_path, fps, frame_size, video_ext="avi", video_codec="XVID"):
-        # start µManager
-        self.bridge = Bridge()
-        self.mmcore = self.bridge.get_core()
+        # Initialize connection to µManager via Pycro-Manager Core
+        self.mmcore = Core()  # proxies the CMMCore API directly
 
         # build output path & writer based on extension
         ext = video_ext.lower()
@@ -63,38 +62,45 @@ class MMRecorder:
         self.thread.start()
 
     def _acquire_loop(self):
-        # begin continuous grab
-        self.mmcore.startContinuousSequenceAcquisition(0)
+        # begin continuous grab (snake-case API)
+        self.mmcore.start_continuous_sequence_acquisition(0)
 
+        writer = None
         if self.ext == "avi":
             import cv2
 
             fourcc = cv2.VideoWriter_fourcc(*self.video_codec)
             writer = cv2.VideoWriter(self.out_path, fourcc, self.fps, self.frame_size)
-        else:  # tiff stack
-            import tifffile
-
-            writer = None  # we'll call tifffile.imwrite below
 
         try:
             while not self._stop_event.is_set():
-                tagged = self.bridge.get_tagged_image()
+                tagged = self.mmcore.get_tagged_image()
                 img = tagged.pix.reshape(self.frame_size[1], self.frame_size[0])
 
                 if self.ext == "avi":
-                    # convert mono→BGR if needed
-                    frame = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+                    # convert grayscale→BGR if needed
+                    import cv2
+
+                    frame = (
+                        cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if img.ndim == 2 else img
+                    )
                     writer.write(frame)
                 else:
+                    import tifffile
+
                     # multi-page TIFF append
                     tifffile.imwrite(self.out_path, img, append=True)
 
                 self.frame_count += 1
 
         finally:
-            if self.ext == "avi":
+            if writer:
                 writer.release()
-            self.mmcore.stopSequenceAcquisition()
+            # stop acquisition (snake-case API)
+            try:
+                self.mmcore.stop_sequence_acquisition()
+            except Exception:
+                pass
 
     def stop(self):
         if not self.is_recording:
