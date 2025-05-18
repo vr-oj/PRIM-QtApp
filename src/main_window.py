@@ -231,7 +231,7 @@ class MainWindow(QMainWindow):
     def _connect_top_controls(self):
         tc = self.top_ctrl
         tc.camera_selected.connect(self._on_camera_device_selected)
-        tc.resolution_selected.connect(self._on_camera_resolution_selected)
+        tc.resolution_selected.connect(self._on_resolution_selected)
         tc.exposure_changed.connect(lambda v: self.qt_cam.set_exposure(v))
         tc.gain_changed.connect(lambda v: self.qt_cam.set_gain(v))
         tc.brightness_changed.connect(lambda v: self.qt_cam.set_brightness(v))
