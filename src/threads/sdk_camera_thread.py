@@ -67,7 +67,36 @@ class SDKCameraThread(QThread):
             grabber.stream_setup(
                 sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
-            log.info("Acquisition started.")
+
+            # --- QUICK SANITY CHECK: try to grab one frame with a long timeout
+            try:
+                log.info("Attempting initial snap (2 s timeout)…")
+                buf0 = sink.snap_single(timeout_ms=2000)
+                frame0 = buf0.numpy_copy()
+                log.info(f"✅ Got first frame: shape={frame0.shape}")
+                # emit it to clear the “Connecting…” text right away
+                h0, w0 = frame0.shape[:2]
+                q0 = QImage(
+                    frame0.data,
+                    w0,
+                    h0,
+                    w0,
+                    (
+                        QImage.Format_Grayscale8
+                        if frame0.ndim == 2
+                        else QImage.Format_RGB888
+                    ),
+                )
+                self.frame_ready.emit(q0.copy(), frame0.copy())
+                del buf0
+            except ic4.IC4Exception as e0:
+                log.error(f"⛔ Initial snap failed: {e0.code} – {e0}")
+                # if it’s a timeout, we’ll still enter the loop below once
+                if e0.code != ic4.ErrorCode.Timeout:
+                    self.camera_error.emit(f"Init Snap Error: {e0}", str(e0.code))
+                    return
+
+            log.info("Acquisition started, entering continuous grab loop.")
 
             # 6) Capture loop
             while True:
