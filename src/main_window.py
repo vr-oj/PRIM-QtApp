@@ -212,6 +212,16 @@ class CameraControlPanel(QGroupBox):
         self.populate_camera_selector()
 
     def populate_camera_selector(self):
+        current_cam_id_before_populate = -1
+        if (
+            self.cam_selector.count() > 0
+            and self.cam_selector.itemData(self.cam_selector.currentIndex()) is not None
+        ):
+            current_cam_id_before_populate = self.cam_selector.itemData(
+                self.cam_selector.currentIndex()
+            ).get("id", -1)
+
+        self.cam_selector.blockSignals(True)  # <<<--- ADD THIS: Block signals
         self.cam_selector.clear()
         try:
             cams = QCameraInfo.availableCameras()
@@ -221,32 +231,44 @@ class CameraControlPanel(QGroupBox):
                         info.description() or f"Camera {i}",
                         {"id": i, "description": info.description() or f"Camera {i}"},
                     )
-                # Try to select default, if not, select first
-                default_cam_data = {
-                    "id": DEFAULT_CAMERA_INDEX,
-                    "description": "",
-                }  # Placeholder for findData
-                # This findData logic is tricky with complex dicts, simpler to iterate
-                found_default = False
-                for i in range(self.cam_selector.count()):
-                    if self.cam_selector.itemData(i)["id"] == DEFAULT_CAMERA_INDEX:
-                        self.cam_selector.setCurrentIndex(i)
-                        found_default = True
-                        break
-                if not found_default and self.cam_selector.count() > 0:
-                    self.cam_selector.setCurrentIndex(0)
 
-                if self.cam_selector.count() > 0:
-                    self._on_camera_selected_changed(
-                        self.cam_selector.currentIndex()
-                    )  # Emit for initial selection
-                else:
+                # Try to select default or previously selected, if not, select first
+                selected_idx = -1
+                # Attempt to re-select the previously active camera if it still exists
+                if current_cam_id_before_populate != -1:
+                    for i in range(self.cam_selector.count()):
+                        if (
+                            self.cam_selector.itemData(i)["id"]
+                            == current_cam_id_before_populate
+                        ):
+                            selected_idx = i
+                            break
+
+                if (
+                    selected_idx == -1
+                ):  # If previous camera not found or none was selected
+                    # Try to select the default camera index from config
+                    for i in range(self.cam_selector.count()):
+                        if self.cam_selector.itemData(i)["id"] == DEFAULT_CAMERA_INDEX:
+                            selected_idx = i
+                            break
+
+                if (
+                    selected_idx == -1 and self.cam_selector.count() > 0
+                ):  # Fallback to the first camera
+                    selected_idx = 0
+
+                if selected_idx != -1:
+                    self.cam_selector.setCurrentIndex(selected_idx)
+
+                if self.cam_selector.count() == 0:  # No cameras were actually added
                     self.cam_selector.addItem(
                         "No Qt cameras found",
                         {"id": -1, "description": "No Qt cameras found"},
-                    )  # Add item before disabling
+                    )
                     self.cam_selector.setEnabled(False)
-            else:
+
+            else:  # No QCameraInfo.availableCameras()
                 self.cam_selector.addItem(
                     "No Qt cameras found",
                     {"id": -1, "description": "No Qt cameras found"},
@@ -259,6 +281,26 @@ class CameraControlPanel(QGroupBox):
                 {"id": -1, "description": "Error listing cameras"},
             )
             self.cam_selector.setEnabled(False)
+        finally:
+            self.cam_selector.blockSignals(False)  # <<<--- ADD THIS: Unblock signals
+
+        # Now, emit the signal or call the handler once based on the final state
+        if self.cam_selector.currentIndex() >= 0:  # Check if a valid index is selected
+            # Ensure that the itemData is not None before accessing it.
+            cam_data = self.cam_selector.itemData(self.cam_selector.currentIndex())
+            if cam_data and cam_data["id"] != -1:
+                # This was previously called inside the 'if cams:' block,
+                # potentially multiple times or in conjunction with the signal.
+                # Now it's called once, after all setup.
+                self._on_camera_selected_changed(self.cam_selector.currentIndex())
+            elif (
+                cam_data and cam_data["id"] == -1
+            ):  # "No camera" or error item explicitly selected
+                self._on_camera_selected_changed(self.cam_selector.currentIndex())
+            # If cam_data is None (e.g. list is cleared and no item set), this will also be skipped,
+            # which is fine as _on_camera_selected_changed handles index < 0.
+        else:  # No item is selected, or list is empty after an error
+            self._on_camera_selected_changed(-1)  # Explicitly signal no camera
 
     def _emit_roi_change(self):
         # Only emit if the ROI group is enabled (i.e., camera is active and provides max dimensions)
