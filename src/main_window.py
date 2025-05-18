@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
         self._initial_control_state()
         self._connect_top_controls()
         self._connect_camera_widget()
+        # Populate camera list once UI is up
         QTimer.singleShot(100, self.top_ctrl.camera_controls.populate_cameras)
 
     def _init_paths_and_icons(self):
@@ -230,7 +231,7 @@ class MainWindow(QMainWindow):
     def _connect_top_controls(self):
         tc = self.top_ctrl
         tc.camera_selected.connect(self._on_camera_device_selected)
-        tc.resolution_selected.connect(self._on_resolution_selected)
+        tc.resolution_selected.connect(self._on_camera_resolution_selected)
         tc.exposure_changed.connect(lambda v: self.qt_cam.set_exposure(v))
         tc.gain_changed.connect(lambda v: self.qt_cam.set_gain(v))
         tc.brightness_changed.connect(lambda v: self.qt_cam.set_brightness(v))
@@ -253,10 +254,11 @@ class MainWindow(QMainWindow):
         self.qt_cam.camera_resolutions_updated.connect(
             self.top_ctrl.update_camera_resolutions
         )
-        self.qt_cam.camera_error.connect(self._on_camera_error)
+        # NEW: wire up control ranges & values to UI
         self.qt_cam.camera_properties_updated.connect(
             self.top_ctrl.update_camera_ui_from_properties
         )
+        self.qt_cam.camera_error.connect(self._on_camera_error)
 
     def _adjust_splitter(self):
         # relies on stretch factors set in _build_central
