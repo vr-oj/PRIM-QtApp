@@ -127,8 +127,9 @@ class QtCameraWidget(QWidget):
         )
         self._camera_thread.frame_ready.connect(self._on_sdk_frame_received)
         self._camera_thread.camera_error.connect(self._on_camera_thread_error)
-        # self._camera_thread.camera_resolutions_available.connect(self.camera_resolutions_updated) # If SDK thread emits this
-
+        self._camera_thread.camera_resolutions_available.connect(
+            self.camera_resolutions_updated
+        )
         self._camera_thread.start()  # Start the thread's run() method
 
     @pyqtSlot(

@@ -9,6 +9,7 @@ log = logging.getLogger(__name__)
 class SDKCameraThread(QThread):
     frame_ready = pyqtSignal(QImage, object)
     camera_error = pyqtSignal(str, str)
+    camera_resolutions_available = pyqtSignal(list)
 
     def __init__(self, exposure_us=20000, target_fps=20, parent=None):
         super().__init__(parent)
@@ -40,6 +41,25 @@ class SDKCameraThread(QThread):
             grabber.device_open(dev)
             log.info("Camera opened.")
             pm = grabber.device_property_map
+            # ── enumerate valid widths & heights ───────────────────
+            try:
+                wprop = pm.find(ic4.PropId.WIDTH)
+                hprop = pm.find(ic4.PropId.HEIGHT)
+                # only if they’re integer‐type props
+                from imagingcontrol4.properties import PropInteger
+
+                if isinstance(wprop, PropInteger) and isinstance(hprop, PropInteger):
+                    widths = list(
+                        range(wprop.minimum, wprop.maximum + 1, wprop.increment)
+                    )
+                    heights = list(
+                        range(hprop.minimum, hprop.maximum + 1, hprop.increment)
+                    )
+                    # cross‐product into "WxH" strings
+                    modes = [f"{w}x{h}" for w in widths for h in heights]
+                    self.camera_resolutions_available.emit(modes)
+            except Exception as e:
+                log.warning(f"Couldn’t enumerate resolutions: {e}")
 
             # 3) Configure free-run
             for pid, val in (

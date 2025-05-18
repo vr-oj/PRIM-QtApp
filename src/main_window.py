@@ -689,10 +689,18 @@ class TopControlPanel(QWidget):
         self.time_lbl.setText(f"{t_dev:.2f}")
         self.pres_lbl.setText(f"{p_dev:.2f} mmHg")
 
-    def update_camera_resolutions(
-        self, res_list
-    ):  # res_list is list of strings "WIDTHxHEIGHT"
-        self.camera_controls.update_resolutions(res_list)
+    def update_camera_resolutions(self, modes: list):
+        """
+        Populate the resolution dropdown with the given list of "WIDTHxHEIGHT" strings.
+        """
+        combo = self.resolution_combo  # adjust if named differently
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("Select…", "")  # optional placeholder
+        for mode in modes:
+            combo.addItem(mode, mode)
+        combo.setEnabled(bool(modes))
+        combo.blockSignals(False)
 
 
 class PressurePlotWidget(QWidget):
