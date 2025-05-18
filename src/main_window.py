@@ -1391,19 +1391,16 @@ class MainWindow(QMainWindow):
             )
             return
 
-        if not self.qt_cam or not self.qt_cam.cap or not self.qt_cam.cap.isOpened():
-            if getattr(self.qt_cam, "camera_id", -1) == -1:
-                QMessageBox.warning(
-                    self,
-                    "No Camera Selected",
-                    "Please select a camera device to start recording.",
-                )
-            else:
-                QMessageBox.warning(
-                    self,
-                    "Camera Not Ready",
-                    "Camera is not active or failed to open. Cannot start recording.",
-                )
+        if not (
+            self.qt_cam
+            and self.qt_cam._camera_thread
+            and self.qt_cam._camera_thread.isRunning()
+        ):
+            QMessageBox.warning(
+                self,
+                "Camera Not Ready",
+                "Camera is not active or failed to open. Cannot start recording.",
+            )
             return
 
         # ─── Trial Info Dialog ─────────────────────────────
@@ -1457,15 +1454,11 @@ class MainWindow(QMainWindow):
 
         base_save_path = os.path.join(trial_folder, folder)
 
-        # ─── Determine frame size ────────────────────────────
-        fw, fh = DEFAULT_FRAME_SIZE
-        res = (
-            self.qt_cam.get_current_resolution()
-            if hasattr(self.qt_cam, "get_current_resolution")
-            else QSize()
-        )
-        if res and not res.isEmpty():
-            fw, fh = res.width(), res.height()
+        # ─── Determine frame size from active camera thread ─────────────────
+        try:
+            fw, fh = self.qt_cam._camera_thread.frame_size
+        except Exception:
+            fw, fh = DEFAULT_FRAME_SIZE
         log.info(f"Starting trial recording. Frame size={fw}x{fh}, FPS={DEFAULT_FPS}")
 
         try:
