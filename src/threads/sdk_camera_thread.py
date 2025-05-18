@@ -98,7 +98,11 @@ class SDKCameraThread(QThread):
             def try_prop(name, pid):
                 try:
                     prop = pm.find(pid)
-                    # integer-valued
+                    # ADD THIS DEBUG LOG:
+                    log.debug(
+                        f"For property '{name}' (ID: {str(pid)}), found prop: {prop} of type {type(prop)}"
+                    )
+
                     if isinstance(prop, PropInteger):
                         controls[name] = {
                             "enabled": True,
@@ -106,7 +110,6 @@ class SDKCameraThread(QThread):
                             "max": prop.maximum,
                             "value": prop.get(),
                         }
-                    # boolean-valued (auto_exposure)
                     elif name == "auto_exposure" and isinstance(prop, PropBoolean):
                         controls[name] = {
                             "enabled": True,
@@ -115,10 +118,16 @@ class SDKCameraThread(QThread):
                             "min": 0,
                             "max": 1,
                         }
-                except Exception as e:
+                    else:  # ADD THIS ELSE BLOCK
+                        log.warning(
+                            f"Property '{name}' (ID: {str(pid)}) is of unexpected type: {type(prop)} or not processed correctly. Prop value: {prop}"
+                        )
+
+                except Exception as e:  # ENSURE THIS MODIFICATION IS PRESENT
                     log.warning(
-                        f"Failed to get property {name} (ID: {pid}): {e}", exc_info=True
-                    )  # Log the error
+                        f"Exception getting property {name} (ID: {str(pid)}): {e}",
+                        exc_info=True,
+                    )
 
             # always try exposure & gain
             try_prop("exposure", ic4.PropId.EXPOSURE_TIME)
@@ -133,6 +142,9 @@ class SDKCameraThread(QThread):
             # placeholder ROI
             roi = {"max_w": 0, "max_h": 0, "x": 0, "y": 0, "w": 0, "h": 0}
 
+            log.info(
+                f"Emitting camera_properties_available: controls={controls}, roi={roi}"
+            )
             self.camera_properties_available.emit({"controls": controls, "roi": roi})
 
             # ─── configure free-run mode ────────────────────────

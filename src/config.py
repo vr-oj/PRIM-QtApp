@@ -30,7 +30,7 @@ and allows recording of this data.</p>
 """
 
 # ─── Logging ────────────────────────────────────────────────────────────────────
-LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR
+LOG_LEVEL = "DEBUG"  # DEBUG, INFO, WARNING, ERROR
 
 # ─── Plotting ──────────────────────────────────────────────────────────────────
 PLOT_MAX_POINTS = 1000  # Max points to keep in live plot
