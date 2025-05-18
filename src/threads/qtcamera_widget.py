@@ -16,6 +16,7 @@ class QtCameraWidget(QWidget):
 
     frame_ready = pyqtSignal(QImage, object)
     camera_resolutions_updated = pyqtSignal(list)
+    camera_properties_updated = pyqtSignal(dict)
     camera_error = pyqtSignal(str, str)
 
     def __init__(self, parent=None):
@@ -96,6 +97,7 @@ class QtCameraWidget(QWidget):
         thread.frame_ready.connect(self._on_sdk_frame_received)
         thread.camera_error.connect(self._on_camera_thread_error)
         thread.camera_resolutions_available.connect(self.camera_resolutions_updated)
+        thread.camera_properties_available.connect(self.camera_properties_updated)
         thread.camera_properties_available.connect(self.camera_properties_updated)
         thread.start()
         self._camera_thread = thread
