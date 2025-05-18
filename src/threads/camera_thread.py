@@ -1,3 +1,4 @@
+import threading, cv2
 from pycromanager import Core
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
