@@ -12,7 +12,13 @@ class SDKCameraThread(QThread):
     camera_resolutions_available = pyqtSignal(list)
 
     def __init__(
-        self, exposure_us=20000, target_fps=20, width=640, height=480, parent=None
+        self,
+        exposure_us=20000,
+        target_fps=20,
+        width=640,
+        height=480,
+        pixel_format="Mono8",
+        parent=None,
     ):
         super().__init__(parent)
         self.exposure_us = exposure_us
@@ -22,6 +28,7 @@ class SDKCameraThread(QThread):
         # Desired capture settings (now passed in)
         self.desired_width = width
         self.desired_height = height
+        self.desired_pixel_format = pixel_format
 
     def run(self):
         self._stop_requested = False

@@ -126,6 +126,7 @@ class QtCameraWidget(QWidget):
             target_fps=self.default_target_fps,
             width=self.default_width,
             height=self.default_height,
+            pixel_format=self.default_pixel_format,
             parent=None,
         )
         self._camera_thread.frame_ready.connect(self._on_sdk_frame_received)
