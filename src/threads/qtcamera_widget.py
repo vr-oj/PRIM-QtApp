@@ -104,7 +104,7 @@ class QtCameraWidget(QWidget):
         thread.frame_ready.connect(self._on_sdk_frame_received)
         thread.camera_error.connect(self._on_camera_thread_error)
         thread.camera_resolutions_available.connect(self.camera_resolutions_updated)
-        thread.camera_properties_available.connect(self.camera_properties_updated)
+        thread.camera_properties_updated.connect(self.camera_properties_updated)
         thread.start()
         self._camera_thread = thread
 
