@@ -255,7 +255,7 @@ class MainWindow(QMainWindow):
             self.top_ctrl.update_camera_resolutions
         )
         # NEW: wire up control ranges & values to UI
-        self.qt_cam.camera_properties_updated.connect(
+        self.qt_cam.camera_properties_available.connect(
             self.top_ctrl.update_camera_ui_from_properties
         )
         self.qt_cam.camera_error.connect(self._on_camera_error)
