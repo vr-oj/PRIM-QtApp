@@ -3,6 +3,7 @@ import csv
 import logging
 
 from PyQt5.QtWidgets import (
+    QApplication,
     QMainWindow,
     QDockWidget,
     QWidget,
