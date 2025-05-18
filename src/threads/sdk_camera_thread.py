@@ -11,9 +11,12 @@ class SDKCameraThread(QThread):
 
     frame_ready = pyqtSignal(QImage)
 
-    def __init__(self, exposure=20000, parent=None):
+    def __init__(self, exposure=20000, fps=20, parent=None):
         super().__init__(parent)
         self.exposure = exposure
+        self.fps = fps
+        # interval between frames in milliseconds
+        self._interval = int(1000 / self.fps)
         self._running = False
 
     def run(self):
@@ -29,7 +32,7 @@ class SDKCameraThread(QThread):
         info = cams[0]
         print(f"Using camera: {info.model_name} (S/N {info.serial})")
 
-        # Open camera
+        # Open camera and configure exposure
         grabber = ic4.Grabber()
         grabber.device_open(info)
         grabber.device_property_map.set_value(ic4.PropId.EXPOSURE_TIME, self.exposure)
@@ -38,6 +41,7 @@ class SDKCameraThread(QThread):
         sink = ic4.SnapSink()
         grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
 
+        # Start the capture loop
         self._running = True
         while self._running:
             try:
@@ -52,6 +56,9 @@ class SDKCameraThread(QThread):
             except Exception as e:
                 print("Error grabbing frame:", e)
                 break
+
+            # Throttle frame rate to avoid overwhelming the UI thread
+            self.msleep(self._interval)
 
         # Cleanup
         grabber.stream_stop()
