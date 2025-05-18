@@ -691,12 +691,13 @@ class TopControlPanel(QWidget):
 
     def update_camera_resolutions(self, modes: list):
         """
-        Populate the resolution dropdown with the given list of "WIDTHxHEIGHT" strings.
+        Populate the resolution dropdown (res_selector) in the CameraControlPanel
+        with the given list of "WIDTHxHEIGHT" strings.
         """
-        combo = self.resolution_combo  # adjust if named differently
+        combo = self.camera_controls.res_selector
         combo.blockSignals(True)
         combo.clear()
-        combo.addItem("Select…", "")  # optional placeholder
+        combo.addItem("Select…", "")
         for mode in modes:
             combo.addItem(mode, mode)
         combo.setEnabled(bool(modes))
