@@ -1127,7 +1127,9 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str, str)  # error_message, error_code_str
     def _on_camera_error(self, error_message: str, error_code_str: str):
-        log.error(f"Camera Error in MainWindow: {error_message} (Code: {error_code})")
+        log.error(
+            f"Camera Error in MainWindow: {error_message} (Code: {error_code_str})"
+        )
         # Display in status bar or a non-modal notification if preferred over QMessageBox
         self.statusBar().showMessage(f"Camera Error: {error_message}", 5000)
         # Potentially disable camera-dependent UI elements

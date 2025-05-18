@@ -1,5 +1,4 @@
 import logging
-
 import imagingcontrol4 as ic4
 from PyQt5.QtCore import QThread, pyqtSignal, QMutex
 from PyQt5.QtGui import QImage
@@ -15,9 +14,9 @@ class SDKCameraThread(QThread):
         super().__init__(parent)
         self.exposure_us = exposure_us
         self.target_fps = target_fps
-        self._running_mutex = QMutex()
         self._stop_requested = False
-
+        self._mutex = QMutex()
+        # Desired capture settings
         self.desired_width = 640
         self.desired_height = 480
         self.desired_pixel_format = "Mono8"
@@ -25,24 +24,24 @@ class SDKCameraThread(QThread):
     def run(self):
         self._stop_requested = False
         log.info(
-            f"SDKCameraThread started (FPS={self.target_fps}, Exp={self.exposure_us}µs)"
+            f"Camera thread start (FPS={self.target_fps}, Exp={self.exposure_us}µs)"
         )
 
         try:
-            ic4.Library.init()
-
+            # 1) Discover camera
             devices = ic4.DeviceEnum.devices()
             if not devices:
                 raise RuntimeError("No TIS cameras found")
-            dev_info = devices[0]
-            log.info(f"Using camera: {dev_info.model_name} (S/N {dev_info.serial})")
+            dev = devices[0]
+            log.info(f"Using {dev.model_name} (S/N {dev.serial})")
 
+            # 2) Open
             grabber = ic4.Grabber()
-            grabber.device_open(dev_info)
+            grabber.device_open(dev)
             log.info("Camera opened.")
             pm = grabber.device_property_map
 
-            # Continuous free‐run, no triggers
+            # 3) Configure free-run
             for pid, val in (
                 (ic4.PropId.ACQUISITION_MODE, "Continuous"),
                 (ic4.PropId.TRIGGER_MODE, "Off"),
@@ -50,37 +49,41 @@ class SDKCameraThread(QThread):
                 try:
                     pm.set_value(pid, val)
                 except ic4.IC4Exception as e:
-                    log.warning(f"Couldn’t set {pid}: {e}")
+                    log.warning(f"Couldn’t set {pid.name}: {e}")
 
-            # Pixel format, size, exposure
-            current_fmt = pm.get_value_str(ic4.PropId.PIXEL_FORMAT)
-            if current_fmt != self.desired_pixel_format:
+            # 4) Pixel format, size, exposure
+            fmt = pm.get_value_str(ic4.PropId.PIXEL_FORMAT)
+            if fmt != self.desired_pixel_format:
                 pm.set_value(ic4.PropId.PIXEL_FORMAT, self.desired_pixel_format)
-                log.info(f"Pixel format → {self.desired_pixel_format}")
-
-            for pid, val in (
+            for pid, v in (
                 (ic4.PropId.WIDTH, self.desired_width),
                 (ic4.PropId.HEIGHT, self.desired_height),
                 (ic4.PropId.EXPOSURE_TIME, self.exposure_us),
             ):
-                pm.set_value(pid, val)
-                log.info(f"{pid.name} → {val}")
+                pm.set_value(pid, v)
 
+            # 5) Start streaming
             sink = ic4.SnapSink()
             grabber.stream_setup(
                 sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
             log.info("Acquisition started.")
 
-            # Main loop
-            while not self._stop_requested:
+            # 6) Capture loop
+            while True:
+                self._mutex.lock()
+                stop = self._stop_requested
+                self._mutex.unlock()
+                if stop:
+                    break
+
                 try:
-                    to_ms = max(int(1000 / self.target_fps * 2), 100)
-                    buf = sink.snap_single(timeout_ms=to_ms)
+                    timeout = max(int(1000 / self.target_fps * 2), 100)
+                    buf = sink.snap_single(timeout_ms=timeout)
                     frame = buf.numpy_copy()
                     h, w = frame.shape[:2]
-                    fmt = pm.get_value_str(ic4.PropId.PIXEL_FORMAT)
 
+                    fmt = pm.get_value_str(ic4.PropId.PIXEL_FORMAT)
                     if fmt in ("Mono8", "Y800") and frame.ndim == 2:
                         img = QImage(frame.data, w, h, w, QImage.Format_Grayscale8)
                     elif (
@@ -90,51 +93,41 @@ class SDKCameraThread(QThread):
                     ):
                         bpl = w * 3
                         if fmt == "RGB8":
-                            qfmt = QImage.Format_RGB888
-                            img = QImage(frame.data, w, h, bpl, qfmt)
+                            img = QImage(frame.data, w, h, bpl, QImage.Format_RGB888)
                         else:
-                            # Qt versions <5.10 may lack Format_BGR888
-                            if hasattr(QImage, "Format_BGR888"):
-                                img = QImage(
-                                    frame.data, w, h, bpl, QImage.Format_BGR888
-                                )
-                            else:
-                                conv = frame[..., ::-1].copy()
-                                img = QImage(conv.data, w, h, bpl, QImage.Format_RGB888)
+                            # fallback if no Format_BGR888
+                            conv = frame[..., ::-1].copy()
+                            img = QImage(conv.data, w, h, bpl, QImage.Format_RGB888)
                     else:
-                        log.warning(f"Unsupported format {fmt} or shape {frame.shape}")
                         continue
 
                     self.frame_ready.emit(img.copy(), frame.copy())
                     del buf
 
-                except ic4.IC4Exception as ic_err:
-                    if ic_err.code == ic4.ErrorCode.Timeout:
+                except ic4.IC4Exception as snap_err:
+                    if snap_err.code == ic4.ErrorCode.Timeout:
                         continue
-                    msg = f"Snap Error: {ic_err}"
-                    log.error(msg)
-                    self.camera_error.emit(msg, str(ic_err.code))
+                    self.camera_error.emit(
+                        f"Snap Error: {snap_err}", str(snap_err.code)
+                    )
                     break
 
         except Exception as e:
-            msg = str(e)
-            log.error(f"Camera thread error: {msg}", exc_info=True)
-            self.camera_error.emit(msg, "THREAD_ERROR")
+            log.error("Camera thread error", exc_info=True)
+            self.camera_error.emit(str(e), "THREAD_ERROR")
 
         finally:
-            # Clean up
+            # always stop and close
             try:
                 if grabber and grabber.is_streaming:
                     grabber.stream_stop()
                 if grabber and grabber.is_device_open:
                     grabber.device_close()
-            except Exception as cleanup_err:
-                log.warning(f"Cleanup error: {cleanup_err}")
-            ic4.Library.exit()
-            log.info("SDKCameraThread finished.")
+            except Exception as cleanup:
+                log.warning(f"Cleanup failed: {cleanup}")
+            log.info("Camera thread finished.")
 
     def stop(self):
-        log.info("Stop requested for camera thread.")
-        self._running_mutex.lock()
+        self._mutex.lock()
         self._stop_requested = True
-        self._running_mutex.unlock()
+        self._mutex.unlock()
