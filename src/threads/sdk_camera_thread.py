@@ -50,7 +50,7 @@ class SDKCameraThread(QThread):
 
         # 6) Safely set desired properties
         for prop, val in (
-            (ic4.PropId.WIDTH, 640),  # replace 640 if not supported
+            (ic4.PropId.WIDTH, 640),
             (ic4.PropId.HEIGHT, 480),
             (ic4.PropId.PIXEL_FORMAT, "Mono8"),
             (ic4.PropId.EXPOSURE_TIME, self.exposure),
@@ -58,7 +58,9 @@ class SDKCameraThread(QThread):
             try:
                 pm.set_value(prop, val)
             except ic4.IC4Exception as e:
-                print(f"⚠️ Couldn’t set {prop.name} to {val!r}: {e}")
+                # some props may not be enum.PropId, so guard .name
+                name = getattr(prop, "name", str(prop))
+                print(f"⚠️ Couldn’t set {name} to {val!r}: {e}")
 
         # 7) Start acquisition
         sink = ic4.SnapSink()
