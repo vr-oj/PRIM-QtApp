@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QFileDialog,
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSlot, QDateTime, QUrl
+from PyQt5.QtCore import Qt, QTimer, pyqtSlot, QDateTime, QUrl, QSize
 from PyQt5.QtGui import QIcon, QKeySequence
 from PyQt5.QtMultimedia import QCameraInfo
 
@@ -180,7 +180,7 @@ class MainWindow(QMainWindow):
         help_m.addAction("About &Qt", QApplication.instance().aboutQt)
 
     def _build_toolbar(self):
-        tb = QToolBar("Main")
+        tb = QToolBar("Main Controls")
         tb.setIconSize(Qt.QSize(20, 20))
         self.addToolBar(Qt.TopToolBarArea, tb)
 
