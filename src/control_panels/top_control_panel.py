@@ -74,6 +74,7 @@ class TopControlPanel(QWidget):
         pc.export_plot_image_requested.connect(self.export_plot_image_requested)
 
     def update_camera_ui_from_properties(self, props):
+        log.debug(f"update_camera_ui_from_properties: controls={props.get('controls')}")
         controls = props.get("controls", {})
         # Enable Adjustments tab if any control enabled
         adjustments_enabled = any(

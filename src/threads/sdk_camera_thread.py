@@ -34,13 +34,11 @@ class SDKCameraThread(QThread):
         self.desired_pixel_format = pixel_format
         self.desired_exposure = exposure_us
         self.desired_gain = None
-        self.desired_brightness = None
         self.desired_auto_exposure = None
 
         # Pending updates from the UI
         self._pending_exposure = None
         self._pending_gain = None
-        self._pending_brightness = None
         self._pending_auto_exposure = None
 
     def update_exposure(self, new_exp_us: int):
@@ -48,9 +46,6 @@ class SDKCameraThread(QThread):
 
     def update_gain(self, new_gain: int):
         self._pending_gain = new_gain
-
-    def update_brightness(self, new_brightness: int):
-        self._pending_brightness = new_brightness
 
     def update_auto_exposure(self, enable: bool):
         self._pending_auto_exposure = enable
@@ -98,14 +93,14 @@ class SDKCameraThread(QThread):
                             "max": prop.maximum,
                             "value": prop.get(),
                         }
-                    elif isinstance(prop, PropBoolean) and name == "auto_exposure":
+                    elif name == "auto_exposure" and isinstance(prop, PropBoolean):
                         on = bool(prop.get())
                         controls[name] = {
                             "enabled": True,
-                            "value": on,
-                            "is_auto_on": on,
                             "min": 0,
                             "max": 1,
+                            "value": on,
+                            "is_auto_on": on,
                         }
                 except Exception:
                     log.debug(f"Property {name} (PID {pid}) not available or failed.")
@@ -113,11 +108,9 @@ class SDKCameraThread(QThread):
             # Always try these
             try_prop("exposure", ic4.PropId.EXPOSURE_TIME)
             try_prop("gain", ic4.PropId.GAIN)
-            # Optional
-            if hasattr(ic4.PropId, "BRIGHTNESS"):
-                try_prop("brightness", ic4.PropId.BRIGHTNESS)
-            if hasattr(ic4.PropId, "AUTO_EXPOSURE"):
-                try_prop("auto_exposure", ic4.PropId.AUTO_EXPOSURE)
+            # auto-exposure uses EXPOSURE_AUTO
+            if hasattr(ic4.PropId, "EXPOSURE_AUTO"):
+                try_prop("auto_exposure", ic4.PropId.EXPOSURE_AUTO)
 
             # ROI defaults (you could enumerate sensor size if needed)
             roi = {"max_w": 0, "max_h": 0, "x": 0, "y": 0, "w": 0, "h": 0}
@@ -171,22 +164,13 @@ class SDKCameraThread(QThread):
                         pass
                     self._pending_gain = None
 
-                if self._pending_brightness is not None and hasattr(
-                    ic4.PropId, "BRIGHTNESS"
-                ):
-                    try:
-                        pm.set_value(ic4.PropId.BRIGHTNESS, self._pending_brightness)
-                        self.desired_brightness = self._pending_brightness
-                    except Exception:
-                        pass
-                    self._pending_brightness = None
-
                 if self._pending_auto_exposure is not None and hasattr(
-                    ic4.PropId, "AUTO_EXPOSURE"
+                    ic4.PropId, "EXPOSURE_AUTO"
                 ):
                     try:
-                        val = "On" if self._pending_auto_exposure else "Off"
-                        pm.set_value(ic4.PropId.AUTO_EXPOSURE, val)
+                        pm.set_value(
+                            ic4.PropId.EXPOSURE_AUTO, int(self._pending_auto_exposure)
+                        )
                         self.desired_auto_exposure = self._pending_auto_exposure
                     except Exception:
                         pass
