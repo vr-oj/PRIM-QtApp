@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 
 class QtCameraWidget(QWidget):
     """
-    Displays live camera feed via SDKCameraThread and emits frames.
+    Displays live camera feed via SDKCameraThread and emits frames and camera properties.
     """
 
     frame_ready = pyqtSignal(QImage, object)
@@ -21,14 +21,14 @@ class QtCameraWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Default capture parameters
+
+        # defaults
         self.default_width = 640
         self.default_height = 480
         self.default_pixel_format = "Mono8"
         self.default_exposure_us = 20000
         self.default_target_fps = 20
 
-        # New defaults for gain/brightness/auto/ROI
         self.default_gain = 0
         self.default_brightness = 0
         self.default_auto_exposure = False
@@ -39,6 +39,7 @@ class QtCameraWidget(QWidget):
         self._active_camera_id = -1
         self._active_camera_description = ""
 
+        # viewfinder
         self.viewfinder = QLabel("Camera Disconnected", self)
         self.viewfinder.setAlignment(Qt.AlignCenter)
         font = QFont()
@@ -60,6 +61,12 @@ class QtCameraWidget(QWidget):
                 self._camera_thread.frame_ready.disconnect(self._on_sdk_frame_received)
                 self._camera_thread.camera_error.disconnect(
                     self._on_camera_thread_error
+                )
+                self._camera_thread.camera_resolutions_available.disconnect(
+                    self.camera_resolutions_updated
+                )
+                self._camera_thread.camera_properties_available.disconnect(
+                    self.camera_properties_updated
                 )
             except TypeError:
                 pass
@@ -111,7 +118,7 @@ class QtCameraWidget(QWidget):
 
     @pyqtSlot(int)
     def set_exposure(self, exposure_us: int):
-        """Dynamically request an exposure change."""
+        """Queue an exposure change."""
         log.info(f"Queuing exposure change: {exposure_us}")
         self.default_exposure_us = exposure_us
         if self._camera_thread and self._camera_thread.isRunning():
@@ -119,7 +126,7 @@ class QtCameraWidget(QWidget):
 
     @pyqtSlot(int)
     def set_gain(self, gain: int):
-        """Dynamically request a gain change."""
+        """Queue a gain change."""
         log.info(f"Queuing gain change: {gain}")
         self.default_gain = gain
         if self._camera_thread and self._camera_thread.isRunning():
@@ -127,23 +134,32 @@ class QtCameraWidget(QWidget):
 
     @pyqtSlot(int)
     def set_brightness(self, brightness: int):
-        """Dynamically request a brightness change."""
+        """Queue a brightness change (if supported)."""
         log.info(f"Queuing brightness change: {brightness}")
         self.default_brightness = brightness
-        if self._camera_thread and self._camera_thread.isRunning():
+        # only call into thread if it implements update_brightness
+        if (
+            self._camera_thread
+            and self._camera_thread.isRunning()
+            and hasattr(self._camera_thread, "update_brightness")
+        ):
             self._camera_thread.update_brightness(brightness)
 
     @pyqtSlot(bool)
     def set_auto_exposure(self, enable_auto: bool):
-        """Toggle auto-exposure mode."""
-        log.info(f"Queuing auto-exposure toggle: {enable_auto}")
+        """Queue an auto‐exposure toggle (if supported)."""
+        log.info(f"Queuing auto‐exposure toggle: {enable_auto}")
         self.default_auto_exposure = enable_auto
-        if self._camera_thread and self._camera_thread.isRunning():
+        if (
+            self._camera_thread
+            and self._camera_thread.isRunning()
+            and hasattr(self._camera_thread, "update_auto_exposure")
+        ):
             self._camera_thread.update_auto_exposure(enable_auto)
 
     @pyqtSlot(int, int, int, int)
     def set_software_roi(self, x: int, y: int, w: int, h: int):
-        """Apply a software ROI (or store for next start)."""
+        """Apply or queue a software ROI."""
         log.info(f"Queuing ROI: x={x}, y={y}, w={w}, h={h}")
         self._default_roi = (x, y, w, h)
         if self._camera_thread and self._camera_thread.isRunning():
@@ -154,7 +170,7 @@ class QtCameraWidget(QWidget):
 
     @pyqtSlot()
     def reset_roi_to_default(self):
-        """Reset ROI back to full‐frame."""
+        """Reset ROI back to full frame."""
         self.set_software_roi(0, 0, 0, 0)
         if self._active_camera_id >= 0:
             self.set_active_camera(
@@ -173,7 +189,7 @@ class QtCameraWidget(QWidget):
     def _on_camera_thread_error(self, message: str, code: str):
         log.error(f"Camera error: {message} ({code})")
         self.viewfinder.setText(
-            f"Camera Error: {message[:60]}{'...' if len(message)>60 else ''}"
+            f"Camera Error: {message[:60]}{'...' if len(message) > 60 else ''}"
         )
         self.camera_error.emit(message, code)
         if self._camera_thread and self.sender() == self._camera_thread:
