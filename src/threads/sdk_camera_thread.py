@@ -74,19 +74,21 @@ class SDKCameraThread(QThread):
                 buf0 = sink.snap_single(timeout_ms=2000)
                 frame0 = buf0.numpy_copy()
                 log.info(f"✅ Got first frame: shape={frame0.shape}")
-                # emit it to clear the “Connecting…” text right away
+                # emit it to clear “Connecting…” immediately, treating 1-channel as mono
                 h0, w0 = frame0.shape[:2]
-                q0 = QImage(
-                    frame0.data,
-                    w0,
-                    h0,
-                    w0,
-                    (
-                        QImage.Format_Grayscale8
-                        if frame0.ndim == 2
-                        else QImage.Format_RGB888
-                    ),
-                )
+                if frame0.ndim == 2:
+                    fmt0 = QImage.Format_Grayscale8
+                    bpl0 = w0
+                    data0 = frame0.data
+                elif frame0.ndim == 3 and frame0.shape[2] == 1:
+                    fmt0 = QImage.Format_Grayscale8
+                    bpl0 = w0
+                    data0 = frame0[..., 0].data
+                else:
+                    fmt0 = QImage.Format_RGB888
+                    bpl0 = w0 * 3
+                    data0 = frame0.data
+                q0 = QImage(data0, w0, h0, bpl0, fmt0)
                 self.frame_ready.emit(q0.copy(), frame0.copy())
                 del buf0
             except ic4.IC4Exception as e0:
@@ -113,8 +115,11 @@ class SDKCameraThread(QThread):
                     h, w = frame.shape[:2]
 
                     fmt = pm.get_value_str(ic4.PropId.PIXEL_FORMAT)
-                    if fmt in ("Mono8", "Y800") and frame.ndim == 2:
-                        img = QImage(frame.data, w, h, w, QImage.Format_Grayscale8)
+                    # monochrome two-dim or 3-dim with channel=1
+                    if frame.ndim == 2 or (frame.ndim == 3 and frame.shape[2] == 1):
+                        gray = frame if frame.ndim == 2 else frame[..., 0]
+                        img = QImage(gray.data, w, h, w, QImage.Format_Grayscale8)
+                    # packed RGB/BGR
                     elif (
                         fmt in ("RGB8", "BGR8")
                         and frame.ndim == 3
