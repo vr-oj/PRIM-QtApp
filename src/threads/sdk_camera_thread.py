@@ -11,11 +11,10 @@ from imagingcontrol4.properties import (
     PropFloat,
     PropEnumeration,
 )
-from config import DEFAULT_FRAME_SIZE
 
 log = logging.getLogger(__name__)
 
-# camera‐property names
+# camera-property names
 PROP_WIDTH = "Width"
 PROP_HEIGHT = "Height"
 PROP_PIXEL_FORMAT = "PixelFormat"
@@ -44,9 +43,16 @@ class DummySinkListener:
 
 
 class SDKCameraThread(QThread):
+    # emitted whenever a new frame is ready: (QImage copy, raw_buffer)
     frame_ready = pyqtSignal(QImage, object)
+
+    # emitted once after opening, with a list of resolution strings
     camera_resolutions_available = pyqtSignal(list)
+
+    # emitted whenever exposure/gain/ROI props change, to repopulate your UI
     camera_properties_updated = pyqtSignal(dict)
+
+    # emitted on any camera error: (message, code)
     camera_error = pyqtSignal(str, str)
 
     def __init__(
@@ -59,36 +65,38 @@ class SDKCameraThread(QThread):
         parent=None,
     ):
         super().__init__(parent)
-        self._stop_requested = False
+
+        # user-requested parameters (we keep them for signature compatibility)
         self.device_info = device_info
         self.target_fps = target_fps
-
-        # retain these for signature compatibility (we ignore them later)
         self.desired_width = desired_width
         self.desired_height = desired_height
         self.desired_pixel_format_str = desired_pixel_format
 
-        # pending property updates
+        # internal flags & throttling
+        self._stop_requested = False
         self._pending_exposure_us = None
         self._pending_gain_db = None
         self._pending_auto_exposure = None
         self._pending_roi = None
 
-        # throttle applying camera‐properties (sec)
+        # debounce apply interval
         self._prop_throttle_interval = 0.1
         self._last_prop_apply_time = 0.0
 
-        # runtime state
+        # runtime objects
         self.grabber = None
         self.sink = None
         self.pm = None
         self.actual_qimage_format = QImage.Format_Invalid
 
+        # listener for QueueSink
         self.dummy_listener = DummySinkListener()
 
     def request_stop(self):
         self._stop_requested = True
 
+    # these are called from the GUI thread
     def update_exposure(self, exp_us: int):
         self._pending_exposure_us = float(exp_us)
 
@@ -121,28 +129,14 @@ class SDKCameraThread(QThread):
 
     def _apply_pending_properties(self):
         now = time.monotonic()
-        # only if something changed and our 0.1 s debounce has elapsed
         if now - self._last_prop_apply_time < self._prop_throttle_interval:
             return
-
-        any_pending = any(
-            x is not None
-            for x in (
-                self._pending_auto_exposure,
-                self._pending_exposure_us,
-                self._pending_gain_db,
-                self._pending_roi,
-            )
-        )
-        if not any_pending:
-            return
-
         self._last_prop_apply_time = now
 
         if not (self.pm and self.grabber and self.grabber.is_device_open):
             return
 
-        # auto exposure toggle
+        # auto-exposure toggle
         if self._pending_auto_exposure is not None:
             pa = self.pm.find(PROP_EXPOSURE_AUTO)
             if pa and pa.is_available:
@@ -156,6 +150,7 @@ class SDKCameraThread(QThread):
                     ),
                 )
                 if not self._pending_auto_exposure:
+                    # force properties update immediately
                     self._emit_camera_properties()
             self._pending_auto_exposure = None
 
@@ -164,8 +159,8 @@ class SDKCameraThread(QThread):
             pa = self.pm.find(PROP_EXPOSURE_AUTO)
             auto_on = False
             if pa and pa.is_available:
-                v = pa.value
-                auto_on = (v != "Off") if isinstance(v, str) else bool(v)
+                av = pa.value
+                auto_on = (av != "Off") if isinstance(av, str) else bool(av)
             if not auto_on:
                 self._set_property_value(PROP_EXPOSURE_TIME, self._pending_exposure_us)
             self._pending_exposure_us = None
@@ -175,7 +170,7 @@ class SDKCameraThread(QThread):
             self._set_property_value(PROP_GAIN, self._pending_gain_db)
             self._pending_gain_db = None
 
-        # ROI (offset)
+        # ROI offsets
         if self._pending_roi is not None:
             x, y, w, h = self._pending_roi
             if (w, h) == (0, 0):
@@ -191,62 +186,59 @@ class SDKCameraThread(QThread):
             self.camera_properties_updated.emit({})
             return
 
-        d = {"controls": {}, "roi": {}}
+        info = {"controls": {}, "roi": {}}
 
         # exposure & gain
         for key, (pv, pa) in {
             "exposure": (PROP_EXPOSURE_TIME, PROP_EXPOSURE_AUTO),
             "gain": (PROP_GAIN, None),
         }.items():
-            info = {"enabled": False, "value": 0, "min": 0, "max": 0}
+            ctrl = {"enabled": False, "value": 0, "min": 0, "max": 0}
             try:
-                prop = self.pm.find(pv)
-                if prop and prop.is_available:
-                    info["enabled"] = self._is_prop_writable(prop)
-                    if isinstance(prop, (PropInteger, PropFloat)):
-                        info.update(
-                            min=prop.minimum, max=prop.maximum, value=prop.value
-                        )
-                    elif isinstance(prop, PropEnumeration):
-                        info.update(
-                            options=[e.name for e in prop.entries], value=prop.value
-                        )
+                p = self.pm.find(pv)
+                if p and p.is_available:
+                    ctrl["enabled"] = self._is_prop_writable(p)
+                    if isinstance(p, (PropInteger, PropFloat)):
+                        ctrl.update(min=p.minimum, max=p.maximum, value=p.value)
+                    elif isinstance(p, PropEnumeration):
+                        ctrl.update(options=[e.name for e in p.entries], value=p.value)
                     if pa:
-                        pa_prop = self.pm.find(pa)
-                        if pa_prop and pa_prop.is_available:
-                            av = pa_prop.value
+                        pap = self.pm.find(pa)
+                        if pap and pap.is_available:
+                            av = pap.value
                             is_auto = (av != "Off") if isinstance(av, str) else bool(av)
-                            info["auto_available"] = True
-                            info["is_auto_on"] = is_auto
+                            ctrl["auto_available"] = True
+                            ctrl["is_auto_on"] = is_auto
                             if key == "exposure" and is_auto:
-                                info["enabled"] = False
+                                ctrl["enabled"] = False
             except Exception:
                 pass
-            d["controls"][key] = info
+            info["controls"][key] = ctrl
 
-        # ROI
+        # ROI state
         try:
             roi = {}
-            for k, nm in [
+            for label, pname in [
                 ("w", PROP_WIDTH),
                 ("h", PROP_HEIGHT),
                 ("x", PROP_OFFSET_X),
                 ("y", PROP_OFFSET_Y),
             ]:
-                p = self.pm.find(nm)
-                roi[k] = p.value
+                p = self.pm.find(pname)
+                roi[label] = p.value
                 if hasattr(p, "maximum"):
-                    roi["max_" + k] = p.maximum
-            d["roi"] = roi
+                    roi[f"max_{label}"] = p.maximum
+            info["roi"] = roi
         except Exception:
             pass
 
-        self.camera_properties_updated.emit(d)
+        self.camera_properties_updated.emit(info)
 
     def _emit_available_resolutions(self):
         if not self.pm:
             self.camera_resolutions_available.emit([])
             return
+
         try:
             w = self.pm.find(PROP_WIDTH).value
             h = self.pm.find(PROP_HEIGHT).value
@@ -273,9 +265,9 @@ class SDKCameraThread(QThread):
             self.pm = self.grabber.device_property_map
             log.info(f"Opened {self.device_info.model_name}")
 
-            # ── initial setup ─────────────────────────────────
+            # ── initial setup: force full-sensor Mono8, clear ROI ──
             try:
-                # force Mono8
+                # pixel format
                 pfp = self.pm.find(PROP_PIXEL_FORMAT)
                 cur_pf = pfp.value
                 want_pf = "Mono 8"
@@ -287,13 +279,15 @@ class SDKCameraThread(QThread):
                         self._set_property_value(PROP_PIXEL_FORMAT, want_pf)
                 self.actual_qimage_format = QImage.Format_Grayscale8
 
-                # set full‐sensor size and clear any ROI
+                # full sensor size
                 wp = self.pm.find(PROP_WIDTH)
                 hp = self.pm.find(PROP_HEIGHT)
                 if self._is_prop_writable(wp):
                     self._set_property_value(PROP_WIDTH, wp.maximum)
                 if self._is_prop_writable(hp):
                     self._set_property_value(PROP_HEIGHT, hp.maximum)
+
+                # reset offsets
                 self._set_property_value(PROP_OFFSET_X, 0)
                 self._set_property_value(PROP_OFFSET_Y, 0)
 
@@ -301,27 +295,28 @@ class SDKCameraThread(QThread):
                     f"Res: {wp.value}×{hp.value}, PF={self.pm.find(PROP_PIXEL_FORMAT).value}"
                 )
 
-                # streaming params
+                # continuous streaming
                 self._set_property_value(PROP_ACQUISITION_MODE, "Continuous")
                 self._set_property_value(PROP_TRIGGER_MODE, "Off")
                 self._set_property_value(
                     PROP_ACQUISITION_FRAME_RATE, float(self.target_fps)
                 )
             except Exception as e:
-                log.error("Config failed", exc_info=True)
+                log.error("Initial config failed", exc_info=True)
                 self.camera_error.emit(f"Config: {e}", type(e).__name__)
                 return
 
-            # initial UI push
+            # push initial state to UI
             self._apply_pending_properties()
             self._emit_available_resolutions()
             self._emit_camera_properties()
 
-            # build sink & start
+            # start sink + streaming
             self.sink = ic4.QueueSink(self.dummy_listener)
             if hasattr(self.sink, "accept_incomplete_frames"):
                 self.sink.accept_incomplete_frames = False
             log.info("QueueSink created")
+
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
@@ -331,10 +326,9 @@ class SDKCameraThread(QThread):
             no_data_count = 0
 
             while not self._stop_requested:
-                # apply any slider changes (debounced)
+                # debounce & apply any pending exposure/gain/etc
                 self._apply_pending_properties()
 
-                # grab next frame
                 try:
                     buf = self.sink.pop_output_buffer()
                 except ic4.IC4Exception as ex:
