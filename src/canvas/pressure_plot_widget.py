@@ -8,8 +8,6 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
 from config import PLOT_MAX_POINTS, PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX
 
-log = logging.getLogger(__name__)
-
 
 class PressurePlotWidget(QWidget):
     def __init__(self, parent=None):

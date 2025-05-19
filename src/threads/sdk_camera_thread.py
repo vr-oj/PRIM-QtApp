@@ -13,7 +13,15 @@ log = logging.getLogger(__name__)
 
 
 class SDKCameraThread(QThread):
+    """
+    Thread handling TIS SDK camera grab and emitting frames, resolutions, and properties.
+    """
+
+    # Signals for frame delivery, errors, resolutions, and properties
     frame_ready = pyqtSignal(QImage, object)
+    camera_resolutions_available = pyqtSignal(list)
+    camera_properties_updated = pyqtSignal(dict)
+    camera_error = pyqtSignal(str, str)
 
     def __init__(
         self,
@@ -58,12 +66,11 @@ class SDKCameraThread(QThread):
             # ─── Enumerate and open camera ─────────────────────────
             devices = ic4.DeviceEnum.devices()
             if not devices:
-                log.error("No TIS cameras found! Please connect a camera.")
                 raise RuntimeError("No TIS cameras found - please connect a camera.")
             # List all found devices
             for idx, dev in enumerate(devices):
                 log.info(f"Camera device {idx}: {dev.model_name} (S/N {dev.serial})")
-            # Select the first device by default (or customize index as needed)
+            # Select the first device by default
             selected_idx = 0
             dev = devices[selected_idx]
             log.info(
@@ -81,7 +88,6 @@ class SDKCameraThread(QThread):
             def try_prop(name, pid):
                 try:
                     prop = pm.find(pid)
-                    log.debug(f"Found prop {name}: {prop} ({type(prop)})")
                     if isinstance(prop, PropInteger):
                         controls[name] = {
                             "enabled": True,
@@ -116,16 +122,24 @@ class SDKCameraThread(QThread):
             try_prop("gain", ic4.PropId.GAIN)
             try_prop("auto_exposure", ic4.PropId.EXPOSURE_AUTO)
 
-            # Apply desired settings
+            # Emit available resolutions and properties to UI
+            try:
+                cur_w = pm.get_value(ic4.PropId.WIDTH)
+                cur_h = pm.get_value(ic4.PropId.HEIGHT)
+                self.camera_resolutions_available.emit([(cur_w, cur_h)])
+            except Exception:
+                pass
+            self.camera_properties_updated.emit(controls)
+
+            # ─── Apply desired settings ────────────────────────────
             if self.desired_width and "width" in controls:
                 pm.set_value(ic4.PropId.WIDTH, self.desired_width)
             if self.desired_height and "height" in controls:
                 pm.set_value(ic4.PropId.HEIGHT, self.desired_height)
             if self.desired_exposure and "exposure" in controls:
                 pm.set_value(ic4.PropId.EXPOSURE, self.desired_exposure)
-            # Gain and auto-exposure apply via pending updates in loop
 
-            # ─── Start acquisition loop ────────────────────────────
+            # Start acquisition
             grabber.stream_start()
             import time
 
@@ -137,18 +151,15 @@ class SDKCameraThread(QThread):
                     break
                 self._mutex.unlock()
 
-                # Update pending settings
+                # Apply any pending UI updates
                 if self._pending_exposure is not None:
                     pm.set_value(ic4.PropId.EXPOSURE, self._pending_exposure)
-                    self.desired_exposure = self._pending_exposure
                     self._pending_exposure = None
                 if self._pending_gain is not None:
                     pm.set_value(ic4.PropId.GAIN, self._pending_gain)
-                    self.desired_gain = self._pending_gain
                     self._pending_gain = None
                 if self._pending_auto_exposure is not None:
                     pm.set_value(ic4.PropId.EXPOSURE_AUTO, self._pending_auto_exposure)
-                    self.desired_auto_exposure = self._pending_auto_exposure
                     self._pending_auto_exposure = None
 
                 # Snap a frame
@@ -157,7 +168,6 @@ class SDKCameraThread(QThread):
                     img = result.image
                     frame = img.as_bytearray()
                     qimg = QImage(frame, img.width, img.height, QImage.Format_Indexed8)
-                    # Emit both QImage and raw array
                     self.frame_ready.emit(qimg.copy(), frame.copy())
                 else:
                     log.warning("Frame grab timeout or error.")
@@ -171,8 +181,13 @@ class SDKCameraThread(QThread):
 
         except Exception as e:
             log.exception(f"Error in SDKCameraThread: {e}")
+            # Notify UI of the camera error
+            try:
+                self.camera_error.emit(str(e), type(e).__name__)
+            except Exception:
+                pass
         finally:
-            # Clean up
+            # Clean up SDK resources
             if grabber:
                 try:
                     if grabber.is_streaming:
