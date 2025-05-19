@@ -26,7 +26,7 @@ PROP_OFFSET_X = "OffsetX"
 PROP_OFFSET_Y = "OffsetY"
 PROP_ACQUISITION_FRAME_RATE = "AcquisitionFrameRate"
 PROP_ACQUISITION_MODE = "AcquisitionMode"
-PROP_TRIGGER_MODE = "TriggerMode"  # Added for disabling trigger
+PROP_TRIGGER_MODE = "TriggerMode"
 
 
 class DummySinkListener:
@@ -121,7 +121,6 @@ class SDKCameraThread(QThread):
                 log.warning(
                     f"Property {prop.name} found but not writable (is_readonly={getattr(prop, 'is_readonly', 'N/A')})."
                 )
-            # else: log.debug(f"Property {prop_name} not found or not available for setting.") # Can be too verbose
         except ic4.IC4Exception as e:
             log.warning(f"IC4Exception setting {prop_name} to {value_to_set}: {e}")
         except AttributeError as e:
@@ -238,7 +237,7 @@ class SDKCameraThread(QThread):
                         except AttributeError:
                             p_info["options"] = [
                                 str(entry) for entry in prop_val.entries
-                            ]  # Fallback for entry name
+                            ]
                         p_info["value"] = prop_val.value
                     if auto_prop_name:
                         prop_auto = self.pm.find(auto_prop_name)
@@ -331,8 +330,9 @@ class SDKCameraThread(QThread):
             log.info(f"Device opened: {self.device_info.model_name}")
             self.pm = self.grabber.device_property_map
 
-            # --- Pixel Format ---
+            # --- Configure critical properties BEFORE stream_setup ---
             try:
+                # Pixel Format
                 current_pf_prop = self.pm.find(PROP_PIXEL_FORMAT)
                 if not (current_pf_prop and current_pf_prop.is_available):
                     raise RuntimeError(f"'{PROP_PIXEL_FORMAT}' not available.")
@@ -383,13 +383,8 @@ class SDKCameraThread(QThread):
                     raise RuntimeError(
                         f"Final format {self.current_pixel_format_name} is not Mono8."
                     )
-            except Exception as e:
-                log.error(f"Pixel format setup error: {e}", exc_info=True)
-                self.camera_error.emit(f"Pixel Format Error: {e}", type(e).__name__)
-                return
 
-            # --- Width/Height ---
-            try:
+                # Width/Height
                 prop_w, prop_h = self.pm.find(PROP_WIDTH), self.pm.find(PROP_HEIGHT)
                 if self.desired_width is not None and self._is_prop_writable(prop_w):
                     self._set_property_value(PROP_WIDTH, self.desired_width)
@@ -409,19 +404,13 @@ class SDKCameraThread(QThread):
                 log.info(
                     f"Actual camera resolution: {self.current_frame_width}x{self.current_frame_height}"
                 )
-            except Exception as e:
-                log.warning(f"Error setting/getting W/H: {e}", exc_info=True)
-                self.current_frame_width, self.current_frame_height = DEFAULT_FRAME_SIZE
 
-            # --- Acquisition Mode & FrameRate ---
-            try:
+                # Acquisition Mode & FrameRate & TriggerMode
                 log.info(
-                    f"Attempting to set AcquisitionMode to Continuous and TriggerMode to Off."
+                    f"Setting AcquisitionMode=Continuous, TriggerMode=Off, FPS={self.target_fps}"
                 )
                 self._set_property_value(PROP_ACQUISITION_MODE, "Continuous")
-                self._set_property_value(
-                    PROP_TRIGGER_MODE, "Off"
-                )  # Explicitly turn trigger off
+                self._set_property_value(PROP_TRIGGER_MODE, "Off")
 
                 prop_fps = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
                 if self._is_prop_writable(prop_fps):
@@ -429,16 +418,20 @@ class SDKCameraThread(QThread):
                         PROP_ACQUISITION_FRAME_RATE, float(self.target_fps)
                     )
                     log.info(
-                        f"Set {PROP_ACQUISITION_FRAME_RATE} to {self.target_fps}, actual: {prop_fps.value if prop_fps and prop_fps.is_available else 'N/A'}"
+                        f"Set {PROP_ACQUISITION_FRAME_RATE}, actual: {prop_fps.value if prop_fps and prop_fps.is_available else 'N/A'}"
                     )
                 elif prop_fps and prop_fps.is_available:
                     log.warning(f"'{PROP_ACQUISITION_FRAME_RATE}' not writable.")
                 else:
                     log.warning(f"'{PROP_ACQUISITION_FRAME_RATE}' not available.")
+
             except Exception as e:
-                log.warning(
-                    f"Error setting AcqMode/Trigger/FrameRate: {e}", exc_info=True
+                log.error(
+                    f"Critical property setup error (PixelFormat/W/H/AcqMode/Trigger/FPS): {e}",
+                    exc_info=True,
                 )
+                self.camera_error.emit(f"Camera Config Error: {e}", type(e).__name__)
+                return
 
             self._apply_pending_properties()
             self._emit_available_resolutions()
@@ -452,16 +445,17 @@ class SDKCameraThread(QThread):
                     log.warning(f"Could not set accept_incomplete_frames: {e}")
             log.info("QueueSink created.")
 
+            log.info("Pausing briefly before stream_setup with ACQUISITION_START...")
+            time.sleep(0.2)
+
+            # CHANGED: Use ACQUISITION_START directly in stream_setup
             self.grabber.stream_setup(
-                self.sink, setup_option=ic4.StreamSetupOption.DEFER_ACQUISITION_START
+                self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
-            log.info("Stream setup deferred.")
-
-            log.info("Pausing briefly before acquisition_start...")
-            time.sleep(0.2)  # Increased delay slightly to 0.2s
-
-            self.grabber.acquisition_start()
-            log.info("Acquisition started explicitly.")
+            log.info(
+                "Stream setup with ACQUISITION_START attempted, and acquisition should be starting."
+            )
+            # REMOVED: self.grabber.acquisition_start()
 
             last_frame_time = time.monotonic()
             while not self._stop_requested:
@@ -506,33 +500,29 @@ class SDKCameraThread(QThread):
         finally:
             log.info("SDKCameraThread run() finishing...")
             if self.grabber:
-                # Check if streaming before trying to stop
                 is_streaming_flag = False
                 try:
                     is_streaming_flag = self.grabber.is_streaming
                 except:
-                    pass  # Avoid error if grabber state is weird
-
+                    pass
                 if is_streaming_flag:
                     try:
                         self.grabber.stream_stop()
                         log.info("Stream stopped.")
                     except Exception as e:
                         log.error(f"Error stopping stream: {e}")
-
                 is_open_flag = False
                 try:
                     is_open_flag = self.grabber.is_device_open
                 except:
                     pass
-
                 if is_open_flag:
                     try:
                         self.grabber.device_close()
                         log.info("Device closed.")
                     except Exception as e:
                         log.error(f"Error closing device: {e}")
-            self.grabber, self.sink, self.pm = None, None, None  # Clear resources
+            self.grabber, self.sink, self.pm = None, None, None
             log.info(
                 f"SDKCameraThread ({self.device_info.model_name if self.device_info else 'N/A'}) fully stopped."
             )
