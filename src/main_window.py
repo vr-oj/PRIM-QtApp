@@ -360,186 +360,67 @@ class MainWindow(QMainWindow):
 
     def _start_pc_recording(self):
         if not (self._serial_thread and self._serial_thread.isRunning()):
-            QMessageBox.warning(self, "Not Connected", "Connect PRIM device first.")
+            QMessageBox.warning(self, "Not Connected", "Connect PRIM first.")
             return
         if not (self.qt_cam._camera_thread and self.qt_cam._camera_thread.isRunning()):
-            QMessageBox.warning(
-                self, "Camera Not Ready", "Ensure camera is active first."
-            )
-            return
-        if self._is_recording:
-            QMessageBox.information(
-                self, "Already Recording", "Recording is already in progress."
-            )
+            QMessageBox.warning(self, "Camera Not Ready", "Open camera first.")
             return
 
         dlg = QDialog(self)
-        dlg.setWindowTitle("Start New Recording Session")
+        dlg.setWindowTitle("Start Recording")
         form = QFormLayout(dlg)
-
-        # Corrected QDateTime formatting
-        default_session_name = (
+        name = QLineEdit(
             f"Session_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')}"
         )
-        name_edit = QLineEdit(default_session_name)
-        name_edit.setPlaceholderText("Enter session name")
-        form.addRow("Session Name:", name_edit)
-
-        operator_edit = QLineEdit()
-        operator_edit.setPlaceholderText("Enter operator name (optional)")
-        form.addRow("Operator:", operator_edit)
-
-        notes_edit = QTextEdit()
-        notes_edit.setFixedHeight(70)
-        notes_edit.setPlaceholderText("Enter session notes (optional)")
-        form.addRow("Notes:", notes_edit)
-
+        form.addRow("Session Name:", name)
+        operator = QLineEdit()
+        form.addRow("Operator:", operator)
+        notes = QTextEdit()
+        notes.setFixedHeight(70)
+        form.addRow("Notes:", notes)
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(dlg.accept)
         btns.rejected.connect(dlg.reject)
         form.addRow(btns)
-
         if dlg.exec_() != QDialog.Accepted:
             return
 
-        trial_name = name_edit.text().strip()
-        if not trial_name:  # Use placeholder if text is empty after stripping
-            trial_name = name_edit.placeholderText().strip()
-        if (
-            not trial_name
-        ):  # Fallback if placeholder was also empty (should not happen with default)
-            trial_name = f"Session_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss_fallback')}"
+        trial_name = name.text().strip() or name.placeholderText()
+        folder = os.path.join(PRIM_RESULTS_DIR, trial_name.replace(" ", "_"))
+        os.makedirs(folder, exist_ok=True)
+        basepath = os.path.join(folder, trial_name)
 
-        # Create folder for this specific trial_name
-        # Replace spaces and colons (if any from a bad manual entry) to make valid folder names
-        safe_trial_name_for_folder = trial_name.replace(" ", "_").replace(":", "-")
-        session_folder_path = os.path.join(PRIM_RESULTS_DIR, safe_trial_name_for_folder)
-
-        # Basepath for files (video and CSV) will include the trial name again
-        # This means files will be like: .../Session_XYZ/Session_XYZ_timestamped.avi
-        basepath_for_files = os.path.join(
-            session_folder_path, trial_name
-        )  # Original trial_name for filename part
-
-        try:
-            os.makedirs(session_folder_path, exist_ok=True)
-            log.info(f"Ensured recording directory exists: {session_folder_path}")
-        except OSError as e:
-            log.exception(f"Error creating recording directory: {session_folder_path}")
-            QMessageBox.critical(
-                self, "Directory Error", f"Could not create directory: {e}"
-            )
-            return
-
-        frame_size_attr = getattr(self.qt_cam._camera_thread, "frame_size", None)
-        if (
-            frame_size_attr is None
-            and hasattr(self.qt_cam._camera_thread, "desired_width")
-            and hasattr(self.qt_cam._camera_thread, "desired_height")
-        ):
-            # Fallback to desired_width/height if frame_size attribute isn't populated yet but desired ones are
-            fw = self.qt_cam._camera_thread.desired_width
-            fh = self.qt_cam._camera_thread.desired_height
-            log.warning(f"Using desired_width/height for frame size: {fw}x{fh}")
-        elif frame_size_attr:
-            fw, fh = frame_size_attr
-        else:
-            fw, fh = DEFAULT_FRAME_SIZE  # Absolute fallback
-            log.warning(f"Falling back to DEFAULT_FRAME_SIZE for recording: {fw}x{fh}")
-
-        chosen_ext = self.format_combo.currentData()  # This should be 'avi' or 'tif'
-        if not chosen_ext:  # Fallback if currentData is None for some reason
-            chosen_ext = self.format_combo.currentText().lower()
-            if chosen_ext not in SUPPORTED_FORMATS:
-                chosen_ext = DEFAULT_VIDEO_EXTENSION
-
+        (fw, fh) = getattr(self.qt_cam._camera_thread, "frame_size", DEFAULT_FRAME_SIZE)
+        chosen_ext = (
+            self.format_combo.currentData() or self.format_combo.currentText().lower()
+        )
         chosen_codec = DEFAULT_VIDEO_CODEC
 
-        # Ensure self.trial_recorder is None before trying to create a new one
-        if self.trial_recorder is not None:
-            log.warning(
-                "TrialRecorder was not None before starting a new recording. This should not happen."
-            )
-            self.trial_recorder = None  # Reset it
+        self.trial_recorder = TrialRecorder(
+            basepath=basepath,
+            fps=DEFAULT_FPS,
+            frame_size=(fw, fh),
+            video_ext=chosen_ext,
+            video_codec=chosen_codec,
+        )
+        if not self.trial_recorder.is_recording:
+            raise RuntimeError("Recorder failed to start")
 
-        try:
-            log.info(
-                f"Attempting to start TrialRecorder with: basepath='{basepath_for_files}', fps={DEFAULT_FPS}, frame_size=({fw},{fh}), ext='{chosen_ext}', codec='{chosen_codec}'"
-            )
-            self.trial_recorder = TrialRecorder(
-                basepath=basepath_for_files,  # Use the path including the session name
-                fps=DEFAULT_FPS,
-                frame_size=(fw, fh),
-                video_ext=chosen_ext,
-                video_codec=chosen_codec,
-            )
-            # Check if recorder's internal state indicates it's ready
-            if (
-                not self.trial_recorder.is_recording
-            ):  # is_recording is a property in TrialRecorder
-                # This path might be taken if TrialRecorder.__init__ itself sets is_recording_active to False
-                # due to an internal error but doesn't re-raise an exception that's caught here.
-                log.error(
-                    "TrialRecorder was instantiated but its 'is_recording' state is False."
-                )
-                QMessageBox.critical(
-                    self,
-                    "Recording Error",
-                    "Recorder initialized but is not in a recording state. Check logs.",
-                )
-                self.trial_recorder.stop()  # Attempt to clean up
-                self.trial_recorder = None
-                return  # Exit
-
-            log.info(
-                f"TrialRecorder started successfully for {self.trial_recorder.base_filename_with_timestamp}"
-            )
-
-        except Exception as e:
-            log.exception("Failed to start or initialize TrialRecorder.")
-            QMessageBox.critical(
-                self, "Recording Error", f"Failed to start recorder: {e}"
-            )
-            self._is_recording = (
-                False  # Redundant if already false, but ensures correct state
-            )
-            self.start_action.setIcon(self.icon_record_start)
-            self.start_action.setEnabled(
-                bool(
-                    self._serial_thread
-                    and self.qt_cam._camera_thread
-                    and self.qt_cam._camera_thread.isRunning()
-                )
-            )
-            self.stop_action.setEnabled(False)
-            if self.trial_recorder:  # If it was partially created before error
-                self.trial_recorder.stop()  # Attempt to clean up
-            self.trial_recorder = None  # Explicitly set to None on failure
-            return  # Important to return
-
-        # If we reach here, TrialRecorder should be successfully initialized.
-        # Disconnect first to avoid multiple connections if _start_pc_recording is somehow called again without stopping.
         try:
             self.qt_cam.frame_ready.disconnect()
-        except TypeError:  # Raised if no connections exist to disconnect
-            log.debug(
-                "No previous frame_ready connection to disconnect, or already disconnected."
-            )
-            pass  # It's fine, means no old connection was there
-
+        except Exception:
+            pass
         self.qt_cam.frame_ready.connect(
             lambda qimg, arr: self.trial_recorder.write_video_frame(arr)
         )
-        log.info("Connected frame_ready signal to trial_recorder.write_video_frame")
 
-        self.last_trial_basepath = session_folder_path  # Store the folder path
-        self._is_recording = True  # Set recording flag
+        self.last_trial_basepath = folder
         self.start_action.setIcon(self.icon_recording_active)
         self.start_action.setEnabled(False)
         self.stop_action.setEnabled(True)
+        self._is_recording = True
         self.plot_w.clear_plot()
         self.statusBar().showMessage(f"Recording Started: {trial_name}", 0)
-        log.info(f"Recording started for session: {trial_name}")
 
     def _stop_pc_recording(self):
         if self.trial_recorder:
