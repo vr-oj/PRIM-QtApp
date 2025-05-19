@@ -3,7 +3,13 @@ import imagingcontrol4 as ic4
 import time
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
-from imagingcontrol4 import SnapSink, StreamSetupOption, ErrorCode, IC4Exception
+from imagingcontrol4 import (
+    SnapSink,
+    StreamSetupOption,
+    ErrorCode,
+    IC4Exception,
+    VideoFormatDesc,
+)
 from imagingcontrol4.properties import (
     PropInteger,
     PropBoolean,
@@ -17,6 +23,7 @@ log = logging.getLogger(__name__)
 class SDKCameraThread(QThread):
     """
     Thread handling TIS SDK camera grab and emitting live frames and camera properties.
+    Queries supported video formats on startup and emits them.
     Uses SnapSink with continuous snap_single calls for live preview.
     """
 
@@ -73,6 +80,39 @@ class SDKCameraThread(QThread):
             grabber.device_open(dev)
             pm = grabber.device_property_map
 
+            # Query and emit supported video formats
+            formats = []
+            try:
+                descs = VideoFormatDesc.get_frame_descriptions(grabber)
+                for desc in descs:
+                    formats.append((desc.width, desc.height, desc.pixel_format))
+                if formats:
+                    self.camera_resolutions_available.emit(formats)
+                else:
+                    raise ValueError("Empty format list")
+            except Exception as e:
+                log.warning(f"Could not query supported formats: {e}")
+                # Fallback to current resolution
+                try:
+                    w = pm.get_value(ic4.PropId.WIDTH)
+                    h = pm.get_value(ic4.PropId.HEIGHT)
+                    formats = [(w, h, self.desired_pixel_format)]
+                    self.camera_resolutions_available.emit(formats)
+                except Exception:
+                    pass
+
+            # Choose initial resolution if unsupported
+            if formats:
+                supported_wh = [(w, h) for w, h, pf in formats]
+                if (self.desired_width, self.desired_height) not in supported_wh:
+                    w0, h0, pf0 = formats[0]
+                    log.info(
+                        f"Desired resolution ({self.desired_width}x{self.desired_height}) not supported; using {w0}x{h0}"
+                    )
+                    self.desired_width = w0
+                    self.desired_height = h0
+                    self.desired_pixel_format = pf0
+
             # Emit initial camera properties
             controls = {}
 
@@ -116,14 +156,6 @@ class SDKCameraThread(QThread):
                     try_prop(name, getattr(ic4.PropId, attr))
             self.camera_properties_updated.emit(controls)
 
-            # Emit available resolution
-            try:
-                w = pm.get_value(ic4.PropId.WIDTH)
-                h = pm.get_value(ic4.PropId.HEIGHT)
-                self.camera_resolutions_available.emit([(w, h)])
-            except Exception:
-                pass
-
             # Apply initial settings (best-effort)
             for pid_attr, value in [
                 ("WIDTH", self.desired_width),
@@ -139,8 +171,8 @@ class SDKCameraThread(QThread):
 
             # Prepare SnapSink for individual frames
             sink = SnapSink()
-
             log.info("Entering live capture loop via SnapSink.")
+
             last_time = time.time()
             while not self._stop_requested:
                 # Handle pending updates
@@ -211,7 +243,6 @@ class SDKCameraThread(QThread):
             log.exception(f"Error in SDKCameraThread: {e}")
             self.camera_error.emit(str(e), type(e).__name__)
         finally:
-            # Cleanup
             if grabber:
                 try:
                     grabber.device_close()
