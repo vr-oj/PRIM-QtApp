@@ -193,32 +193,6 @@ class SDKCameraThread(QThread):
                         log.warning(f"Error updating auto_exposure: {e}")
                     self._pending_auto_exposure = None
 
-                # Acquire frame
-                try:
-                    image_buffer = sink.snap_single(1000)
-                    frame_array = image_buffer.as_bytearray()
-                    qimg = QImage(
-                        frame_array,
-                        image_buffer.width,
-                        image_buffer.height,
-                        image_buffer.width,
-                        QImage.Format_Indexed8,
-                    )
-                    if qimg.isNull():
-                        log.warning("Created QImage is null. Check frame parameters.")
-                    else:
-                        self.frame_ready.emit(qimg.copy(), frame_array)
-                except ic4.IC4Exception as e:
-                    if e.code == ic4.ErrorCode.Timeout:
-                        log.warning("Frame grab timeout using snap_single.")
-                    else:
-                        log.error(
-                            f"IC4Exception during snap_single: {e} (Code: {e.code})"
-                        )
-                except Exception as e:
-                    log.exception(f"Unexpected error in frame acquisition: {e}")
-
-                # Throttle FPS
                 elapsed = time.time() - last_time
                 to_sleep = max(0, (1.0 / self.target_fps) - elapsed)
                 if to_sleep > 0:
