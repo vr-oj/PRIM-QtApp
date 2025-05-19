@@ -4,22 +4,15 @@ import time
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 from imagingcontrol4 import SnapSink, StreamSetupOption, ErrorCode, IC4Exception
-from imagingcontrol4.properties import (
-    PropInteger,
-    PropBoolean,
-    PropFloat,
-    PropEnumeration,
-)
+from imagingcontrol4.properties import PropInteger, PropBoolean, PropFloat, PropEnumeration
 
 log = logging.getLogger(__name__)
-
 
 class SDKCameraThread(QThread):
     """
     Thread handling TIS SDK camera grab and emitting live frames and camera properties.
     Uses SnapSink + stream_setup + stream_start for continuous capture.
     """
-
     frame_ready = pyqtSignal(QImage, object)
     camera_resolutions_available = pyqtSignal(list)
     camera_properties_updated = pyqtSignal(dict)
@@ -76,42 +69,20 @@ class SDKCameraThread(QThread):
 
             # Emit initial properties
             controls = {}
-
             def try_prop(name, pid):
                 try:
                     prop = pm.find(pid)
                     if isinstance(prop, PropInteger):
-                        controls[name] = {
-                            "enabled": True,
-                            "min": int(prop.minimum),
-                            "max": int(prop.maximum),
-                            "value": int(prop.value),
-                        }
+                        controls[name] = {"enabled": True, "min": int(prop.minimum), "max": int(prop.maximum), "value": int(prop.value)}
                     elif isinstance(prop, PropFloat):
-                        controls[name] = {
-                            "enabled": True,
-                            "min": float(prop.minimum),
-                            "max": float(prop.maximum),
-                            "value": float(prop.value),
-                        }
+                        controls[name] = {"enabled": True, "min": float(prop.minimum), "max": float(prop.maximum), "value": float(prop.value)}
                     elif isinstance(prop, PropBoolean):
                         controls[name] = {"enabled": True, "value": bool(prop.value)}
                     elif isinstance(prop, PropEnumeration):
-                        controls[name] = {
-                            "enabled": True,
-                            "options": prop.options,
-                            "value": prop.get_value_str(),
-                        }
+                        controls[name] = {"enabled": True, "options": prop.options, "value": prop.get_value_str()}
                 except Exception:
                     pass
-
-            prop_map = {
-                "width": "WIDTH",
-                "height": "HEIGHT",
-                "exposure": "EXPOSURE",
-                "gain": "GAIN",
-                "auto_exposure": "EXPOSURE_AUTO",
-            }
+            prop_map = {"width":"WIDTH","height":"HEIGHT","exposure":"EXPOSURE","gain":"GAIN","auto_exposure":"EXPOSURE_AUTO"}
             for name, attr in prop_map.items():
                 if hasattr(ic4.PropId, attr):
                     try_prop(name, getattr(ic4.PropId, attr))
@@ -125,14 +96,10 @@ class SDKCameraThread(QThread):
             except Exception:
                 pass
 
-            # Apply initial settings
-            for pid_attr, value in [
-                ("WIDTH", self.desired_width),
-                ("HEIGHT", self.desired_height),
-                ("EXPOSURE", self.desired_exposure),
-            ]:
+                        # Apply initial settings (without availability checks)
+            for pid_attr, value in [("WIDTH", self.desired_width), ("HEIGHT", self.desired_height), ("EXPOSURE", self.desired_exposure)]:
                 pid = getattr(ic4.PropId, pid_attr, None)
-                if pid and pm.is_property_available(pid):
+                if pid:
                     try:
                         pm.set_value(pid, value)
                     except Exception as e:
@@ -147,30 +114,21 @@ class SDKCameraThread(QThread):
             last_time = time.time()
             while not self._stop_requested:
                 # Handle pending property updates
-                if self._pending_exposure is not None and pm.is_property_available(
-                    ic4.PropId.EXPOSURE
-                ):
+                                if self._pending_exposure is not None:
                     try:
                         pm.set_value(ic4.PropId.EXPOSURE, self._pending_exposure)
                     except Exception as e:
                         log.warning(f"Error updating exposure: {e}")
                     self._pending_exposure = None
-                if self._pending_gain is not None and pm.is_property_available(
-                    ic4.PropId.GAIN
-                ):
+                                if self._pending_gain is not None:
                     try:
                         pm.set_value(ic4.PropId.GAIN, self._pending_gain)
                     except Exception as e:
                         log.warning(f"Error updating gain: {e}")
                     self._pending_gain = None
-                if (
-                    self._pending_auto_exposure is not None
-                    and pm.is_property_available(ic4.PropId.EXPOSURE_AUTO)
-                ):
+                                if self._pending_auto_exposure is not None:
                     try:
-                        pm.set_value(
-                            ic4.PropId.EXPOSURE_AUTO, self._pending_auto_exposure
-                        )
+                        pm.set_value(ic4.PropId.EXPOSURE_AUTO, self._pending_auto_exposure)
                     except Exception as e:
                         log.warning(f"Error updating auto exposure: {e}")
                     self._pending_auto_exposure = None
@@ -179,20 +137,14 @@ class SDKCameraThread(QThread):
                 try:
                     img_buf = sink.snap_single(1000)
                     data = None
-                    if hasattr(img_buf, "as_bytearray"):
+                    if hasattr(img_buf, 'as_bytearray'):
                         data = img_buf.as_bytearray()
-                    elif hasattr(img_buf, "buffer"):
+                    elif hasattr(img_buf, 'buffer'):
                         data = bytearray(img_buf.buffer)
                     else:
                         data = bytes(img_buf)
-                    stride = getattr(img_buf, "stride", img_buf.width)
-                    qimg = QImage(
-                        data,
-                        img_buf.width,
-                        img_buf.height,
-                        stride,
-                        QImage.Format_Indexed8,
-                    )
+                    stride = getattr(img_buf, 'stride', img_buf.width)
+                    qimg = QImage(data, img_buf.width, img_buf.height, stride, QImage.Format_Indexed8)
                     if not qimg.isNull():
                         self.frame_ready.emit(qimg.copy(), None)
                     else:
