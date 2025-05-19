@@ -1,6 +1,7 @@
 import os
 import sys
 import csv
+import time
 import logging
 import numpy as np
 
@@ -35,11 +36,10 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtGui import QIcon, QKeySequence, QImage
 
-# Check for IC4 availability
+# Check IC4 availability
 _IC4_AVAILABLE = False
 _IC4_INITIALIZED = False
 _ic4_module = None
-
 try:
     current_file_dir = os.path.dirname(os.path.abspath(__file__))
     if current_file_dir not in sys.path:
@@ -53,10 +53,11 @@ try:
 
         _ic4_module = ic4_sdk
     logging.getLogger(__name__).info(
-        "Successfully checked prim_app for IC4 flags. Initialized: %s", _IC4_INITIALIZED
+        "Successfully checked prim_app for IC4 flags in MainWindow. Initialized: %s",
+        _IC4_INITIALIZED,
     )
 except Exception as e:
-    logging.getLogger(__name__).warning(f"MainWindow: Error checking IC4 status: {e}")
+    logging.getLogger(__name__).warning(f"IC4 check failed: {e}")
 
 from threads.qtcamera_widget import QtCameraWidget
 from threads.serial_thread import SerialThread
@@ -65,6 +66,7 @@ from utils import list_serial_ports
 
 from control_panels.top_control_panel import TopControlPanel
 from canvas.pressure_plot_widget import PressurePlotWidget
+
 from config import (
     APP_NAME,
     APP_VERSION,
@@ -88,7 +90,6 @@ class MainWindow(QMainWindow):
         self._is_recording = False
         self.last_trial_basepath = ""
 
-        # Track actual frame size
         self.current_camera_frame_width = DEFAULT_FRAME_SIZE[0]
         self.current_camera_frame_height = DEFAULT_FRAME_SIZE[1]
 
@@ -109,8 +110,8 @@ class MainWindow(QMainWindow):
         self._connect_top_control_panel_signals()
         self._connect_camera_widget_signals()
 
-        # Populate camera list after UI ready
-        if self.top_ctrl.camera_controls:
+        # Populate camera list after a short delay
+        if hasattr(self.top_ctrl, "camera_controls") and self.top_ctrl.camera_controls:
             QTimer.singleShot(250, self.top_ctrl.camera_controls.populate_camera_list)
 
     def _init_paths_and_icons(self):
@@ -119,7 +120,10 @@ class MainWindow(QMainWindow):
 
         def get_icon(name):
             path = os.path.join(icon_dir, name)
-            return QIcon(path) if os.path.exists(path) else QIcon()
+            if not os.path.exists(path):
+                log.warning(f"Icon not found: {path}")
+                return QIcon()
+            return QIcon(path)
 
         self.icon_record_start = get_icon("record.svg")
         self.icon_record_stop = get_icon("stop.svg")
@@ -133,44 +137,51 @@ class MainWindow(QMainWindow):
         self.dock_console.setAllowedAreas(
             Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea
         )
-        w = QWidget()
-        layout = QVBoxLayout(w)
+        console_widget = QWidget()
+        layout = QVBoxLayout(console_widget)
         self.console_out_textedit = QTextEdit(readOnly=True)
         self.console_out_textedit.setFontFamily("monospace")
         layout.addWidget(self.console_out_textedit)
-        self.dock_console.setWidget(w)
+        self.dock_console.setWidget(console_widget)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_console)
         self.dock_console.setVisible(False)
 
     def _build_central_widget_layout(self):
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(3)
+        central_container_widget = QWidget()
+        outer_layout = QVBoxLayout(central_container_widget)
+        outer_layout.setContentsMargins(2, 2, 2, 2)
+        outer_layout.setSpacing(3)
+
         self.top_ctrl = TopControlPanel(self)
         self.top_ctrl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        layout.addWidget(self.top_ctrl)
+        outer_layout.addWidget(self.top_ctrl)
 
         self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
+
         self.qt_cam_widget = QtCameraWidget(self)
         self.pressure_plot_widget = PressurePlotWidget(self)
+
         self.main_splitter.addWidget(self.qt_cam_widget)
         self.main_splitter.addWidget(self.pressure_plot_widget)
         self.main_splitter.setStretchFactor(0, 2)
         self.main_splitter.setStretchFactor(1, 3)
-        layout.addWidget(self.main_splitter, 1)
 
-        self.setCentralWidget(container)
+        outer_layout.addWidget(self.main_splitter, 1)
+        self.setCentralWidget(central_container_widget)
 
     def _build_menus(self):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("&File")
-        act_export_csv = QAction("Export Plot &Data (CSV)…", self)
-        act_export_csv.triggered.connect(self._export_plot_data_as_csv)
-        file_menu.addAction(act_export_csv)
-        act_export_img = QAction("Export Plot &Image…", self)
-        act_export_img.triggered.connect(self.pressure_plot_widget.export_as_image)
-        file_menu.addAction(act_export_img)
+        export_plot_data_action = QAction("Export Plot &Data (CSV)…", self)
+        export_plot_data_action.triggered.connect(self._export_plot_data_as_csv)
+        file_menu.addAction(export_plot_data_action)
+
+        export_plot_image_action = QAction("Export Plot &Image…", self)
+        export_plot_image_action.triggered.connect(
+            self.pressure_plot_widget.export_as_image
+        )
+        file_menu.addAction(export_plot_image_action)
         file_menu.addSeparator()
         exit_action = QAction("&Exit", self, shortcut=QKeySequence.Quit)
         exit_action.triggered.connect(self.close)
@@ -186,6 +197,7 @@ class MainWindow(QMainWindow):
             enabled=False,
         )
         acq_menu.addAction(self.start_recording_action)
+
         self.stop_recording_action = QAction(
             self.icon_record_stop,
             "Stop R&ecording",
@@ -200,11 +212,11 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.dock_console.toggleViewAction())
 
         plot_menu = menubar.addMenu("&Plot")
-        clear_plot = QAction(
+        clear_plot_action = QAction(
             "&Clear Plot Data", self, triggered=self._clear_pressure_plot
         )
-        plot_menu.addAction(clear_plot)
-        reset_zoom = QAction(
+        plot_menu.addAction(clear_plot_action)
+        reset_plot_zoom_action = QAction(
             "&Reset Plot Zoom",
             self,
             triggered=lambda: self.pressure_plot_widget.reset_zoom(
@@ -212,13 +224,13 @@ class MainWindow(QMainWindow):
                 self.top_ctrl.plot_controls.auto_y_cb.isChecked(),
             ),
         )
-        plot_menu.addAction(reset_zoom)
+        plot_menu.addAction(reset_plot_zoom_action)
 
         help_menu = menubar.addMenu("&Help")
-        about_app = QAction(
+        about_app_action = QAction(
             f"&About {APP_NAME}", self, triggered=self._show_about_dialog
         )
-        help_menu.addAction(about_app)
+        help_menu.addAction(about_app_action)
         help_menu.addAction("About &Qt", QApplication.instance().aboutQt)
 
     def _build_main_toolbar(self):
@@ -253,8 +265,8 @@ class MainWindow(QMainWindow):
 
         self.video_format_combobox = QComboBox()
         self.video_format_combobox.setToolTip("Select Video Recording Format")
-        for fmt in SUPPORTED_FORMATS:
-            self.video_format_combobox.addItem(fmt.upper(), QVariant(fmt))
+        for fmt_str in SUPPORTED_FORMATS:
+            self.video_format_combobox.addItem(fmt_str.upper(), QVariant(fmt_str))
         default_idx = self.video_format_combobox.findData(
             QVariant(DEFAULT_VIDEO_EXTENSION.lower())
         )
@@ -269,6 +281,7 @@ class MainWindow(QMainWindow):
     def _build_status_bar(self):
         status_bar = self.statusBar() or QStatusBar(self)
         self.setStatusBar(status_bar)
+
         self.app_session_time_label = QLabel("Session: 00:00:00")
         status_bar.addPermanentWidget(self.app_session_time_label)
         self._app_session_seconds = 0
@@ -278,7 +291,8 @@ class MainWindow(QMainWindow):
 
     def _set_initial_control_states(self):
         self.top_ctrl.update_connection_status("Disconnected", False)
-        self.top_ctrl.camera_controls.disable_all_controls()
+        if hasattr(self.top_ctrl, "camera_controls") and self.top_ctrl.camera_controls:
+            self.top_ctrl.camera_controls.disable_all_controls()
         self.start_recording_action.setEnabled(False)
         self.stop_recording_action.setEnabled(False)
 
@@ -286,10 +300,10 @@ class MainWindow(QMainWindow):
         tc = self.top_ctrl
         tc.camera_selected.connect(self._handle_camera_selection)
         tc.resolution_selected.connect(self._handle_resolution_selection)
-        tc.exposure_changed.connect(lambda v: self.qt_cam_widget.set_exposure(v))
-        tc.gain_changed.connect(lambda v: self.qt_cam_widget.set_gain(v))
+        tc.exposure_changed.connect(lambda val: self.qt_cam_widget.set_exposure(val))
+        tc.gain_changed.connect(lambda val: self.qt_cam_widget.set_gain(val))
         tc.auto_exposure_toggled.connect(
-            lambda b: self.qt_cam_widget.set_auto_exposure(b)
+            lambda checked: self.qt_cam_widget.set_auto_exposure(checked)
         )
         tc.roi_changed.connect(self.qt_cam_widget.set_software_roi)
         tc.roi_reset_requested.connect(self.qt_cam_widget.reset_roi_to_default)
@@ -307,73 +321,87 @@ class MainWindow(QMainWindow):
         )
 
     def _connect_camera_widget_signals(self):
-        cp = self.top_ctrl.camera_controls
-        self.qt_cam_widget.camera_resolutions_updated.connect(
-            cp.update_camera_resolutions_list
-        )
-        self.qt_cam_widget.camera_properties_updated.connect(
-            cp.update_camera_properties_ui
-        )
+        if hasattr(self.top_ctrl, "camera_controls") and self.top_ctrl.camera_controls:
+            self.qt_cam_widget.camera_resolutions_updated.connect(
+                self.top_ctrl.camera_controls.update_camera_resolutions_list
+            )
+            self.qt_cam_widget.camera_properties_updated.connect(
+                self.top_ctrl.camera_controls.update_camera_properties_ui
+            )
         self.qt_cam_widget.camera_error.connect(self._handle_camera_error)
         self.qt_cam_widget.frame_ready.connect(self._handle_new_camera_frame)
 
-    @pyqtSlot(object)
+    @pyqtSlot(ic4_sdk.DeviceInfo)
     def _handle_camera_selection(self, device_info_obj):
-        log.debug(f"Camera selection changed: {device_info_obj}")
-        is_ic4 = _ic4_module and isinstance(device_info_obj, _ic4_module.DeviceInfo)
-        if is_ic4:
+        log.debug(
+            f"MainWindow: Camera selection changed. DeviceInfo: {device_info_obj}"
+        )
+        is_ic4_device = (
+            _ic4_module
+            and hasattr(_ic4_module, "DeviceInfo")
+            and isinstance(device_info_obj, _ic4_module.DeviceInfo)
+        )
+        if is_ic4_device:
             self.qt_cam_widget.set_active_camera_device(device_info_obj)
         else:
             self.qt_cam_widget.set_active_camera_device(None)
-            self.top_ctrl.camera_controls.disable_all_controls()
-            self.top_ctrl.camera_controls.update_camera_resolutions_list([])
+            if hasattr(self.top_ctrl, "camera_controls"):
+                self.top_ctrl.camera_controls.disable_all_controls()
+                self.top_ctrl.camera_controls.update_camera_resolutions_list([])
         self._update_recording_actions_enable_state()
 
     @pyqtSlot(str)
     def _handle_resolution_selection(self, resolution_str: str):
-        log.debug(f"Resolution selection: {resolution_str}")
+        log.debug(f"MainWindow: Resolution selection changed to: {resolution_str}")
         self.qt_cam_widget.set_active_resolution_str(resolution_str)
         try:
-            w_str, h_rest = resolution_str.split("x", 1)
-            w = int(w_str)
-            h = int(h_rest.split()[0])
-            self.current_camera_frame_width = w
-            self.current_camera_frame_height = h
-            log.info(f"Updated frame hint: {w}x{h}")
+            if "x" in resolution_str:
+                w_str, h_rest = resolution_str.split("x", 1)
+                h_str = h_rest.split(" ")[0]
+                self.current_camera_frame_width = int(w_str)
+                self.current_camera_frame_height = int(h_str)
+                log.info(
+                    f"Recording frame size hint updated to {self.current_camera_frame_width}x{self.current_camera_frame_height}"
+                )
         except Exception as e:
-            log.warning(f"Could not parse resolution: {e}")
+            log.warning(f"Could not parse resolution '{resolution_str}': {e}")
 
     @pyqtSlot(str, str)
-    def _handle_camera_error(self, message: str, code: str):
-        log.error(f"Camera Error: {code} - {message}")
-        self.statusBar().showMessage(f"Camera Error: {code}", 7000)
+    def _handle_camera_error(self, msg: str, code: str):
+        log.error(f"Camera Error: {code} – {msg}")
+        self.statusBar().showMessage(f"Camera Error: {msg}", 7000)
         if self._is_recording:
             QMessageBox.warning(
                 self,
                 "Recording Problem",
-                f"Camera error occurred: {message}\nRecording will be stopped.",
+                f"A camera error occurred: {msg}\nRecording will stop.",
             )
             self._trigger_stop_recording()
         self._update_recording_actions_enable_state()
 
     def _toggle_serial_connection(self):
         if self._serial_thread and self._serial_thread.isRunning():
+            log.info("Stopping serial thread...")
             self._serial_thread.stop()
         else:
             data = self.serial_port_combobox.currentData()
-            port_path = data.value() if isinstance(data, QVariant) else data
+            port = data.value() if isinstance(data, QVariant) else data
             if (
-                port_path is None
+                port is None
                 and self.serial_port_combobox.currentText() != "🔌 Simulated Data"
             ):
-                QMessageBox.warning(
-                    self, "Serial Connection", "Please select a valid serial port."
-                )
+                QMessageBox.warning(self, "Serial Connection", "Please select a port.")
                 return
+
+            log.info(f"Starting serial thread on port: {port or 'Simulation'}")
             try:
                 if self._serial_thread and self._serial_thread.isRunning():
-                    self._serial_thread.terminate()
-                self._serial_thread = SerialThread(port=port_path, parent=self)
+                    if not self._serial_thread.wait(100):
+                        self._serial_thread.terminate()
+                        self._serial_thread.wait(500)
+                    self._serial_thread = None
+
+                self._serial_thread = SerialThread(port=port, parent=self)
                 self._serial_thread.data_ready.connect(self._handle_new_serial_data)
                 self._serial_thread.error_occurred.connect(self._handle_serial_error)
                 self._serial_thread.status_changed.connect(
@@ -384,20 +412,18 @@ class MainWindow(QMainWindow):
                 )
                 self._serial_thread.start()
             except Exception as e:
-                log.exception("Failed to start serial thread.")
-                QMessageBox.critical(
-                    self, "Serial Error", f"Could not start serial communication: {e}"
-                )
+                log.exception("Failed to start SerialThread.")
+                QMessageBox.critical(self, "Serial Error", str(e))
                 self._serial_thread = None
-            self._update_recording_actions_enable_state()
+                self._update_recording_actions_enable_state()
 
     @pyqtSlot(str)
-    def _handle_serial_status_change(self, status_message: str):
-        log.info(f"Serial status: {status_message}")
-        self.top_ctrl.update_connection_status(
-            status_message, "connected" in status_message.lower()
-        )
-        if "connected" in status_message.lower():
+    def _handle_serial_status_change(self, status: str):
+        log.info(f"Serial status: {status}")
+        self.statusBar().showMessage(f"PRIM Device: {status}", 4000)
+        connected = "connected" in status.lower()
+        self.top_ctrl.update_connection_status(status, connected)
+        if connected:
             self.connect_serial_action.setIcon(self.icon_disconnect)
             self.connect_serial_action.setText("Disconnect PRIM Device")
             self.serial_port_combobox.setEnabled(False)
@@ -408,109 +434,118 @@ class MainWindow(QMainWindow):
             self.serial_port_combobox.setEnabled(True)
             if self._is_recording:
                 QMessageBox.information(
-                    self,
-                    "Recording Stopped",
-                    "PRIM device disconnected. Recording has been stopped.",
+                    self, "Recording Stopped", "PRIM device disconnected."
                 )
                 self._trigger_stop_recording()
         self._update_recording_actions_enable_state()
 
     @pyqtSlot(str)
-    def _handle_serial_error(self, error_message: str):
-        log.error(f"Serial Error: {error_message}")
-        self.statusBar().showMessage(f"PRIM Device Error: {error_message}", 6000)
+    def _handle_serial_error(self, msg: str):
+        log.error(f"Serial error: {msg}")
+        self.statusBar().showMessage(f"Serial Error: {msg}", 6000)
 
     @pyqtSlot()
     def _handle_serial_thread_finished(self):
+        log.info("SerialThread finished.")
         if self._serial_thread is self.sender():
             self._serial_thread = None
-            self._update_recording_actions_enable_state()
+            current = (
+                self.top_ctrl.conn_lbl.text().lower()
+                if hasattr(self.top_ctrl, "conn_lbl")
+                else ""
+            )
+            if "connected" in current:
+                self._handle_serial_status_change("Disconnected")
+            else:
+                self._update_recording_actions_enable_state()
 
     @pyqtSlot(int, float, float)
-    def _handle_new_serial_data(self, frame_idx: int, time_s: float, pressure: float):
-        self.top_ctrl.update_prim_data(frame_idx, time_s, pressure)
-        auto_x = self.top_ctrl.plot_controls.auto_x_cb.isChecked()
-        auto_y = self.top_ctrl.plot_controls.auto_y_cb.isChecked()
-        self.pressure_plot_widget.update_plot(time_s, pressure, auto_x, auto_y)
+    def _handle_new_serial_data(self, idx: int, t: float, p: float):
+        # Update GUI
+        self.top_ctrl.update_prim_data(idx, t, p)
+        ax = self.top_ctrl.plot_controls.auto_x_cb.isChecked()
+        ay = self.top_ctrl.plot_controls.auto_y_cb.isChecked()
+        self.pressure_plot_widget.update_plot(t, p, ax, ay)
         if self.dock_console.isVisible():
             self.console_out_textedit.append(
-                f"PRIM Data: Idx={frame_idx}, Time={time_s:.3f}s, Pressure={pressure:.2f} mmHg"
+                f"PRIM Data: Idx={idx}, Time={t:.3f}s, P={p:.2f}"
             )
+
+        # Write CSV if recording
         if self._is_recording and self.trial_recorder:
             try:
-                self.trial_recorder.write_csv_data(time_s, frame_idx, pressure)
-            except Exception as e:
-                log.exception("Failed to write CSV data during recording.")
+                self.trial_recorder.write_csv_data(t, idx, p)
+            except Exception:
+                log.exception("Error writing CSV during recording.")
                 self.statusBar().showMessage(
-                    "Error writing CSV data. Recording stopped.", 5000
+                    "CSV write error. Stopping recording.", 5000
                 )
                 self._trigger_stop_recording()
 
     def _update_recording_actions_enable_state(self):
-        serial_ready = self._serial_thread and self._serial_thread.isRunning()
+        serial_ready = (
+            self._serial_thread is not None and self._serial_thread.isRunning()
+        )
         camera_ready = self.qt_cam_widget.current_camera_is_active()
-        can_start = serial_ready and camera_ready and not self._is_recording
-        self.start_recording_action.setEnabled(can_start)
-        self.stop_recording_action.setEnabled(self._is_recording)
+
+        can_start_recording = serial_ready and camera_ready and not self._is_recording
+
+        # Use the correct variable and ensure a bool is passed
+        self.start_recording_action.setEnabled(bool(can_start_recording))
+        self.stop_recording_action.setEnabled(bool(self._is_recording))
 
     @pyqtSlot(QImage, object)
     def _handle_new_camera_frame(self, qimage: QImage, frame_obj: object):
-        if qimage and not qimage.isNull():
-            if (
-                self.current_camera_frame_width != qimage.width()
-                or self.current_camera_frame_height != qimage.height()
-            ):
-                self.current_camera_frame_width = qimage.width()
-                self.current_camera_frame_height = qimage.height()
-                log.info(f"Actual frame size: {qimage.width()}x{qimage.height()}")
         if (
-            self._is_recording
-            and self.trial_recorder
-            and qimage
-            and not qimage.isNull()
+            qimage.width() != self.current_camera_frame_width
+            or qimage.height() != self.current_camera_frame_height
         ):
-            numpy_frame = None
+            self.current_camera_frame_width = qimage.width()
+            self.current_camera_frame_height = qimage.height()
+            log.info(f"Actual camera frame size: {qimage.width()}x{qimage.height()}")
+
+        if self._is_recording and self.trial_recorder and not qimage.isNull():
             try:
+                # Convert to numpy
+                numpy_frame = None
                 if qimage.format() == QImage.Format_Grayscale8:
                     ptr = qimage.constBits()
-                    dims = (qimage.height(), qimage.width())
                     numpy_frame = np.array(
                         ptr.asarray(qimage.sizeInBytes()), dtype=np.uint8
-                    ).reshape(dims)
+                    )
+                    numpy_frame = numpy_frame.reshape(qimage.height(), qimage.width())
                 elif qimage.format() == QImage.Format_RGB888:
                     ptr = qimage.constBits()
-                    dims = (qimage.height(), qimage.width(), 3)
                     numpy_frame = np.array(
                         ptr.asarray(qimage.sizeInBytes()), dtype=np.uint8
-                    ).reshape(dims)
+                    )
+                    numpy_frame = numpy_frame.reshape(
+                        qimage.height(), qimage.width(), 3
+                    )
+
                 if numpy_frame is not None:
                     self.trial_recorder.write_video_frame(numpy_frame.copy())
                 else:
-                    log.warning(
-                        f"Unsupported QImage format for recording: {qimage.format()}"
-                    )
+                    log.warning("Unsupported QImage format for video frame.")
+
             except Exception:
-                log.exception("Failed to write video frame during recording.")
+                log.exception("Error writing video frame.")
                 self.statusBar().showMessage(
-                    "Error writing video frame. Recording stopped.", 5000
+                    "Video write error. Stopping recording.", 5000
                 )
                 self._trigger_stop_recording()
 
     def _trigger_start_recording_dialog(self):
         if not (self._serial_thread and self._serial_thread.isRunning()):
             QMessageBox.warning(
-                self, "Cannot Start Recording", "PRIM device is not connected."
+                self, "Cannot Start Recording", "PRIM device not connected."
             )
             return
         if not self.qt_cam_widget.current_camera_is_active():
-            QMessageBox.warning(
-                self, "Cannot Start Recording", "Camera is not active or not selected."
-            )
+            QMessageBox.warning(self, "Cannot Start Recording", "Camera is not active.")
             return
         if self._is_recording:
-            QMessageBox.information(
-                self, "Recording Active", "Recording is already in progress."
-            )
+            QMessageBox.information(self, "Recording Active", "Already recording.")
             return
 
         dialog = QDialog(self)
@@ -520,49 +555,62 @@ class MainWindow(QMainWindow):
             f"Session_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')}"
         )
         layout.addRow("Session Name:", name_edit)
-        op_edit = QLineEdit()
-        layout.addRow("Operator:", op_edit)
+        operator_edit = QLineEdit()
+        layout.addRow("Operator:", operator_edit)
         notes_edit = QTextEdit()
         notes_edit.setFixedHeight(80)
         layout.addRow("Notes:", notes_edit)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addRow(buttons)
+
         if dialog.exec_() != QDialog.Accepted:
             return
 
-        session_name = name_edit.text().strip() or name_edit.placeholderText()
-        safe_name = "".join(
-            c if c.isalnum() or c in ("_", "-") else "_" for c in session_name
+        session = name_edit.text().strip() or name_edit.placeholderText()
+        safe = "".join(
+            c if c.isalnum() or c in (" ", "_", "-") else "_" for c in session
         ).rstrip()
-        session_folder = os.path.join(PRIM_RESULTS_DIR, safe_name)
-        os.makedirs(session_folder, exist_ok=True)
-        base_output = os.path.join(session_folder, safe_name)
-        self.last_trial_basepath = session_folder
+        safe = safe.replace(" ", "_")
 
-        frame_w = self.current_camera_frame_width or DEFAULT_FRAME_SIZE[0]
-        frame_h = self.current_camera_frame_height or DEFAULT_FRAME_SIZE[1]
-        data = self.video_format_combobox.currentData()
-        ext = data.value() if isinstance(data, QVariant) else data
-        ext = ext or DEFAULT_VIDEO_EXTENSION.lower()
+        folder = os.path.join(PRIM_RESULTS_DIR, safe)
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except Exception as e:
+            log.error(f"Couldn’t create folder {folder}: {e}")
+            QMessageBox.critical(self, "File Error", str(e))
+            return
+
+        base = os.path.join(folder, safe)
+        self.last_trial_basepath = folder
+
+        w, h = self.current_camera_frame_width, self.current_camera_frame_height
+        if w <= 0 or h <= 0:
+            log.warning("Invalid frame size, using default.")
+            w, h = DEFAULT_FRAME_SIZE
+
+        ext_data = self.video_format_combobox.currentData()
+        video_ext = ext_data.value() if isinstance(ext_data, QVariant) else ext_data
+        if not video_ext:
+            video_ext = DEFAULT_VIDEO_EXTENSION.lower()
         codec = DEFAULT_VIDEO_CODEC
 
+        log.info(f"Starting recording: {base}, {DEFAULT_FPS} FPS, {w}x{h}, {video_ext}")
         try:
             self.trial_recorder = TrialRecorder(
-                basepath=base_output,
+                basepath=base,
                 fps=DEFAULT_FPS,
-                frame_size=(frame_w, frame_h),
-                video_ext=ext,
+                frame_size=(w, h),
+                video_ext=video_ext,
                 video_codec=codec,
             )
             if not self.trial_recorder.is_recording:
                 raise RuntimeError("Recorder failed to start.")
         except Exception as e:
-            log.exception("Failed to initialize recorder.")
-            QMessageBox.critical(
-                self, "Recording Error", f"Could not start recorder: {e}"
-            )
+            log.exception("Failed to initialize TrialRecorder.")
+            QMessageBox.critical(self, "Recording Error", str(e))
             self.trial_recorder = None
             return
 
@@ -570,41 +618,38 @@ class MainWindow(QMainWindow):
         self.start_recording_action.setIcon(self.icon_recording_active)
         self._update_recording_actions_enable_state()
         self.pressure_plot_widget.clear_plot()
-        self.statusBar().showMessage(f"Recording Started: {safe_name}", 0)
+        self.statusBar().showMessage(f"Recording Started: {safe}", 0)
 
     def _trigger_stop_recording(self):
         if not self._is_recording:
             return
+
         log.info("Stopping recording.")
         if self.trial_recorder:
             try:
                 self.trial_recorder.stop()
-                frames = self.trial_recorder.video_frame_count
-                self.statusBar().showMessage(
-                    f"Recording Stopped. Frames: {frames}", 7000
+                count = self.trial_recorder.video_frame_count
+                self.statusBar().showMessage(f"Recording Stopped. {count} frames", 7000)
+                reply = QMessageBox.information(
+                    self,
+                    "Recording Saved",
+                    f"Saved to:\n{self.last_trial_basepath}\nOpen folder?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
                 )
-                if self.last_trial_basepath and os.path.exists(
-                    self.last_trial_basepath
-                ):
-                    reply = QMessageBox.information(
-                        self,
-                        "Recording Saved",
-                        f"Recording saved to:\n{self.last_trial_basepath}\n\nOpen folder?",
-                        QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.No,
-                    )
-                    if reply == QMessageBox.Yes:
-                        if sys.platform == "win32":
-                            os.startfile(self.last_trial_basepath)
-                        elif sys.platform == "darwin":
-                            os.system(f'open "{self.last_trial_basepath}"')
-                        else:
-                            os.system(f'xdg-open "{self.last_trial_basepath}"')
+                if reply == QMessageBox.Yes:
+                    if sys.platform == "win32":
+                        os.startfile(self.last_trial_basepath)
+                    elif sys.platform == "darwin":
+                        os.system(f'open "{self.last_trial_basepath}"')
+                    else:
+                        os.system(f'xdg-open "{self.last_trial_basepath}"')
             except Exception:
                 log.exception("Error stopping recorder.")
-                self.statusBar().showMessage("Error stopping recorder.", 5000)
+                self.statusBar().showMessage("Error stopping recording.", 5000)
             finally:
                 self.trial_recorder = None
+
         self._is_recording = False
         self.start_recording_action.setIcon(self.icon_record_start)
         self._update_recording_actions_enable_state()
@@ -617,18 +662,18 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _export_plot_data_as_csv(self):
         if not self.pressure_plot_widget.times:
-            QMessageBox.information(self, "No Plot Data", "There is no data to export.")
+            QMessageBox.information(self, "No Plot Data", "Nothing to export.")
             return
-        default = (
+        default_name = (
             f"plot_data_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')}.csv"
         )
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Export Plot Data as CSV", default, "CSV Files (*.csv);;All Files (*)"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Plot Data", default_name, "CSV Files (*.csv);;All Files (*)"
         )
-        if not file_path:
+        if not path:
             return
         try:
-            with open(file_path, "w", newline="") as f:
+            with open(path, "w", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(["time_s", "pressure_mmHg"])
                 for t, p in zip(
@@ -636,11 +681,11 @@ class MainWindow(QMainWindow):
                 ):
                     writer.writerow([f"{t:.6f}", f"{p:.6f}"])
             self.statusBar().showMessage(
-                f"Plot data exported to {os.path.basename(file_path)}", 4000
+                f"Plot data exported to {os.path.basename(path)}", 4000
             )
         except Exception:
             log.exception("Failed to export plot data.")
-            QMessageBox.critical(self, "Export Error", f"Could not save plot data: {e}")
+            QMessageBox.critical(self, "Export Error", "Could not save CSV.")
 
     @pyqtSlot()
     def _show_about_dialog(self):
@@ -654,12 +699,12 @@ class MainWindow(QMainWindow):
         self.app_session_time_label.setText(f"Session: {h:02}:{m:02}:{s:02}")
 
     def closeEvent(self, event):
-        log.info(f"Closing MainWindow. Recording? {self._is_recording}")
+        log.info(f"Close event received. Recording: {self._is_recording}")
         if self._is_recording:
             reply = QMessageBox.question(
                 self,
                 "Confirm Exit",
-                "Recording in progress. Stop and exit?",
+                "Recording is in progress. Stop and exit?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             )
@@ -668,8 +713,15 @@ class MainWindow(QMainWindow):
             else:
                 event.ignore()
                 return
+
         if self._serial_thread and self._serial_thread.isRunning():
+            log.info("Stopping serial thread on exit...")
             self._serial_thread.stop()
-            self._serial_thread.wait(2000)
+            if not self._serial_thread.wait(2000):
+                self._serial_thread.terminate()
+                self._serial_thread.wait(500)
+            self._serial_thread = None
+
+        log.info("Closing camera widget.")
         self.qt_cam_widget.close()
         super().closeEvent(event)
