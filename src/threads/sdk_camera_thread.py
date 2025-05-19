@@ -28,35 +28,29 @@ log = logging.getLogger(__name__)
 
 class DummySinkListener:
     """
-    A simple listener for the queue sink. Allocates buffers when the sink is connected.
+    Listener for the queue sink: allocates buffers on connection.
     """
 
     def sink_connected(self, sink, image_type, min_buffers_required):
         log.debug(
-            f"DummyListener: Sink connected. ImageType: {image_type}, MinBuffers: {min_buffers_required}"
+            f"Sink connected: {image_type}, buffers required: {min_buffers_required}"
         )
-        # Allocate required buffers for the sink
         sink.alloc_and_queue_buffers(min_buffers_required)
         return True
 
-    def frames_queued(self, sink, userdata):
-        # Not used; we poll directly in the thread
-        pass
-
     def sink_disconnected(self, sink):
-        log.debug(f"DummyListener: Sink disconnected (event for sink: {type(sink)}).")
-        pass
+        log.debug(f"Sink disconnected: {type(sink)}")
 
 
 class SDKCameraThread(QThread):
     """
-    Thread managing the camera acquisition via the IC4 SDK.
+    Thread managing camera acquisition via IC4 SDK.
 
     Emits:
-        frame_ready (QImage, mem_ptr) when a new frame is captured.
-        camera_resolutions_available (list) when supported resolutions change.
-        camera_properties_updated (dict) when camera controls update.
-        camera_error (str, str) on error, with message and exception type.
+        frame_ready (QImage, mem_ptr)
+        camera_resolutions_available (list)
+        camera_properties_updated (dict)
+        camera_error (message, code)
     """
 
     frame_ready = pyqtSignal(QImage, object)
@@ -81,6 +75,7 @@ class SDKCameraThread(QThread):
         self.desired_height = desired_height
         self.desired_pixel_format_str = desired_pixel_format
 
+        # Placeholder for property updates
         self._pending_exposure_us = None
         self._pending_gain_db = None
         self._pending_auto_exposure = None
@@ -93,86 +88,76 @@ class SDKCameraThread(QThread):
 
     def run(self):
         try:
-            # Initialize grabber and open device
+            # Initialize grabber and open the selected device
             self.grabber = ic4.Grabber()
-            self.grabber.system_open()
             self.grabber.device_open(self.device_info)
             log.info(f"Device opened: {self.device_info.model_name}")
             self.pm = self.grabber.device_property_map
 
-            # Configure critical properties BEFORE stream_setup
+            # Configure critical properties before starting stream
             try:
-                # Set pixel format to Mono8 or equivalent
-                current_pf_prop = self.pm.find(PROP_PIXEL_FORMAT)
-                if not (current_pf_prop and current_pf_prop.is_available):
-                    raise RuntimeError(f"'{PROP_PIXEL_FORMAT}' not available.")
-                current_pf_val = current_pf_prop.value
-                if current_pf_val.replace(" ", "").lower() != "mono8":
-                    self._set_property_value(
-                        PROP_PIXEL_FORMAT, self.desired_pixel_format_str
+                # Set pixel format
+                pf_prop = self.pm.find(PROP_PIXEL_FORMAT)
+                if not (pf_prop and pf_prop.is_available):
+                    raise RuntimeError(f"'{PROP_PIXEL_FORMAT}' not available")
+                if pf_prop.value != self.desired_pixel_format_str:
+                    pf_prop.value = self.desired_pixel_format_str
+
+                # Set ROI: width & height
+                w_prop = self.pm.find(PROP_WIDTH)
+                h_prop = self.pm.find(PROP_HEIGHT)
+                if w_prop and h_prop and w_prop.is_available and h_prop.is_available:
+                    w_prop.value = self.desired_width
+                    h_prop.value = self.desired_height
+
+                # Set acquisition mode, trigger mode, and frame rate
+                acq_mode = self.pm.find(PROP_ACQUISITION_MODE)
+                trg_mode = self.pm.find(PROP_TRIGGER_MODE)
+                fr_prop = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
+                if acq_mode and acq_mode.is_available:
+                    acq_mode.value = PropEnumEntry(
+                        self.pm, PROP_ACQUISITION_MODE, "Continuous"
                     )
-                # Set width, height, acquisition mode, trigger, fps similarly...
-                # Apply pending properties
+                if trg_mode and trg_mode.is_available:
+                    trg_mode.value = PropEnumEntry(self.pm, PROP_TRIGGER_MODE, "Off")
+                if fr_prop and fr_prop.is_available:
+                    fr_prop.value = float(self.target_fps)
+
             except Exception as e:
-                log.error(f"Critical property setup error: {e}", exc_info=True)
-                self.camera_error.emit(f"Camera Config Error: {e}", type(e).__name__)
+                log.error("Camera configuration failed", exc_info=True)
+                self.camera_error.emit(f"Config Error: {e}", type(e).__name__)
                 return
 
-            # Create and configure queue sink listener
-            self.dummy_listener = DummySinkListener()
-            self.sink = ic4.QueueSink(self.dummy_listener)
-            if hasattr(self.sink, "accept_incomplete_frames"):
-                try:
-                    self.sink.accept_incomplete_frames = False
-                except Exception as e:
-                    log.warning(f"Could not set accept_incomplete_frames: {e}")
-            log.info("QueueSink created.")
+            # Create sink and listener
+            listener = DummySinkListener()
+            self.sink = ic4.QueueSink(listener)
+            log.info("QueueSink created")
 
-            # Brief pause before starting acquisition
+            # Start acquisition
             time.sleep(0.2)
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
-            log.info("Stream setup complete; acquisition starting.")
+            log.info("Stream setup and acquisition started")
 
-            # Enter acquisition loop
-            log.info("Entering frame acquisition loop...")
-            frame_counter = 0
-            null_buffer_counter = 0
+            # Acquisition loop
+            log.info("Entering acquisition loop")
             last_frame_time = time.monotonic()
-
+            frame_count = 0
             while not self._stop_requested:
-                self._apply_pending_properties()
-                buf = None
                 try:
-                    # Retrieve the next available image buffer (blocking)
                     buf = self.sink.pop_output_buffer()
                 except ic4.IC4Exception as e:
-                    # Handle stream timeout or other errors
-                    if hasattr(e, "code") and e.code == ic4.ErrorCode.TIMEOUT:
-                        null_buffer_counter += 1
-                        continue
-                    log.error(
-                        f"IC4Exception during sink.pop_output_buffer: {e}",
-                        exc_info=True,
-                    )
-                    self.camera_error.emit(
-                        str(e), f"SinkPop ({e.code if hasattr(e,'code') else 'N/A'})"
-                    )
-                    break
-
-                if buf is None:
-                    null_buffer_counter += 1
+                    log.warning(f"Sink timeout/error: {e}")
                     continue
 
-                frame_counter += 1
-                log.debug(
-                    f"Frame {frame_counter}: Buffer received. Resolution: {buf.image_type.width}x{buf.image_type.height}, Format: {buf.image_type.pixel_format.name}"
-                )
-                null_buffer_counter = 0
+                if buf is None:
+                    continue
+
+                frame_count += 1
+                log.debug(f"Frame {frame_count} received")
 
                 try:
-                    # Wrap raw memory into QImage for display
                     qimg = QImage(
                         buf.mem_ptr,
                         buf.image_type.width,
@@ -180,43 +165,40 @@ class SDKCameraThread(QThread):
                         buf.image_type.stride_bytes,
                         self.actual_qimage_format,
                     )
-                    if qimg.isNull():
-                        log.error(f"Frame {frame_counter}: QImage creation failed.")
-                    else:
+                    if not qimg.isNull():
                         self.frame_ready.emit(qimg.copy(), buf.mem_ptr)
+                    else:
+                        log.error("QImage creation returned null image")
                 finally:
                     pass
 
-                # Throttle to target FPS
+                # Enforce target FPS
                 now = time.monotonic()
                 dt = now - last_frame_time
-                target_interval = 1.0 / self.target_fps if self.target_fps > 0 else 0.05
-                if dt < target_interval:
-                    sleep_ms = int((target_interval - dt) * 1000)
-                    if sleep_ms > 5:
-                        self.msleep(sleep_ms)
+                interval = 1.0 / self.target_fps
+                if dt < interval:
+                    self.msleep(int((interval - dt) * 1000))
                 last_frame_time = time.monotonic()
 
-            log.info("Exited frame acquisition loop.")
+            log.info("Acquisition loop exited")
+
         except Exception as e:
-            log.exception("Unhandled exception in SDKCameraThread.run():")
+            log.exception("Unhandled exception in SDKCameraThread.run()")
             self.camera_error.emit(str(e), type(e).__name__)
+
         finally:
-            # Clean up streaming and device
-            if self.grabber:
-                try:
-                    if getattr(self.grabber, "is_streaming", False):
-                        self.grabber.stream_stop()
-                        log.info("Stream stopped.")
-                except Exception:
-                    pass
-                try:
-                    if getattr(self.grabber, "is_device_open", False):
-                        self.grabber.device_close()
-                        log.info("Device closed.")
-                except Exception as e:
-                    log.error(f"Error closing device: {e}")
-            log.info(
-                f"SDKCameraThread ({self.device_info.model_name if self.device_info else 'N/A'}) fully stopped."
-            )
-            self.grabber, self.sink, self.pm = None, None, None
+            # Cleanup: stop stream and close device
+            try:
+                self.grabber.stream_stop()
+                log.info("Stream stopped")
+            except Exception:
+                pass
+            try:
+                self.grabber.device_close()
+                log.info("Device closed")
+            except Exception:
+                pass
+            log.info(f"SDKCameraThread for {self.device_info.model_name} stopped")
+            self.grabber = None
+            self.sink = None
+            self.pm = None
