@@ -154,9 +154,11 @@ class SDKCameraThread(QThread):
             # Frame acquisition loop
             last_time = time.time()
             while True:
-                with self._mutex:
-                    if self._stop_requested:
-                        break
+                self._mutex.lock()
+                if self._stop_requested:
+                    self._mutex.unlock()
+                    break
+                self._mutex.unlock()
 
                 # Handle pending UI updates with availability checks
                 if self._pending_exposure is not None:
@@ -255,5 +257,6 @@ class SDKCameraThread(QThread):
             log.info("Camera thread finished.")
 
     def stop(self):
-        with self._mutex:
-            self._stop_requested = True
+        self._mutex.lock()
+        self._stop_requested = True
+        self._mutex.unlock()
