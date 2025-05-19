@@ -9,8 +9,8 @@ from imagingcontrol4.properties import (
     PropInteger,
     PropFloat,
     PropBoolean,
-    PropEnumeration,  # PropEnumeration is imported
-    PropEnumEntry,  # Import this if needed, though often not directly instantiated by user
+    PropEnumeration,
+    PropEnumEntry,  # Ensure this is available if we need to type check 'entry'
 )
 
 log = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ class SDKCameraThread(QThread):
         target_fps: float = 20.0,
         desired_width: int = None,
         desired_height: int = None,
-        desired_pixel_format: str = "Mono 8",
+        desired_pixel_format: str = "Mono 8",  # Default target
         parent=None,
     ):
         super().__init__(parent)
@@ -92,9 +92,7 @@ class SDKCameraThread(QThread):
                         self._emit_camera_properties()
             except ic4.IC4Exception as e:
                 log.warning(f"Failed to set EXPOSURE_AUTO: {e}")
-            except (
-                Exception
-            ) as e:  # Catch other AttributeErrors if property not found/available
+            except Exception as e:
                 log.warning(f"Generic error setting EXPOSURE_AUTO: {e}")
             self._pending_auto_exposure = None
 
@@ -104,9 +102,7 @@ class SDKCameraThread(QThread):
                 if auto_exp_prop.is_available and not auto_exp_prop.value:
                     self.pm.set_value(ic4.PropId.EXPOSURE, self._pending_exposure_us)
                     log.info(f"Set EXPOSURE to {self._pending_exposure_us} us")
-                elif (
-                    not auto_exp_prop.is_available
-                ):  # If auto exposure not available, try setting manual
+                elif not auto_exp_prop.is_available:
                     self.pm.set_value(ic4.PropId.EXPOSURE, self._pending_exposure_us)
                     log.info(
                         f"Set EXPOSURE to {self._pending_exposure_us} us (auto not available)."
@@ -140,8 +136,14 @@ class SDKCameraThread(QThread):
                         f"ROI size change (req: {w}x{h}, curr: {current_w_cam}x{current_h_cam}) requires camera restart. Not applying on-the-fly."
                     )
                 elif w == 0 and h == 0:
-                    self.pm.set_value(ic4.PropId.OFFSET_X, 0)
-                    self.pm.set_value(ic4.PropId.OFFSET_Y, 0)
+                    if self.pm.is_property_available(
+                        ic4.PropId.OFFSET_X
+                    ) and self.pm.is_property_writable(ic4.PropId.OFFSET_X):
+                        self.pm.set_value(ic4.PropId.OFFSET_X, 0)
+                    if self.pm.is_property_available(
+                        ic4.PropId.OFFSET_Y
+                    ) and self.pm.is_property_writable(ic4.PropId.OFFSET_Y):
+                        self.pm.set_value(ic4.PropId.OFFSET_Y, 0)
                     log.info(f"Reset OFFSET_X and OFFSET_Y to 0.")
                 else:
                     if self.pm.is_property_available(
@@ -173,21 +175,18 @@ class SDKCameraThread(QThread):
 
         for name, (val_pid, auto_pid) in prop_map_ids.items():
             try:
-                p_info = {"enabled": False}  # Default to disabled
+                p_info = {"enabled": False}
                 if self.pm.is_property_available(val_pid):
                     prop_val = self.pm.find(val_pid)
-                    p_info["enabled"] = (
-                        prop_val.is_writable
-                    )  # Use is_writable for enabled status
+                    p_info["enabled"] = prop_val.is_writable
                     if isinstance(prop_val, (PropInteger, PropFloat)):
                         p_info["min"] = prop_val.minimum
                         p_info["max"] = prop_val.maximum
                         p_info["value"] = prop_val.value
                     elif isinstance(prop_val, PropEnumeration):
-                        # For enums, .value is the current selection string
-                        p_info["options"] = [
-                            str(entry.name) for entry in prop_val.Entries
-                        ]
+                        # --- CORRECTED PART for emitting options ---
+                        p_info["options"] = [entry.name for entry in prop_val.entries]
+                        # --- End of corrected part ---
                         p_info["value"] = prop_val.value
 
                     if auto_pid and self.pm.is_property_available(auto_pid):
@@ -195,21 +194,14 @@ class SDKCameraThread(QThread):
                         if prop_auto.is_available:
                             p_info["is_auto_on"] = bool(prop_auto.value)
                             p_info["auto_available"] = True
-                            # if auto is on, the main value control might be disabled by UI
-                            if (
-                                p_info["is_auto_on"] and name == "exposure"
-                            ):  # Specific for exposure
-                                p_info["enabled"] = (
-                                    False  # Disable manual exposure if auto is on
-                                )
+                            if p_info["is_auto_on"] and name == "exposure":
+                                p_info["enabled"] = False
                         else:
                             p_info["auto_available"] = False
                 props_dict["controls"][name] = p_info
             except (ic4.IC4Exception, AttributeError) as e:
                 log.debug(f"Could not get property {name}: {e}")
-                props_dict["controls"][name] = {
-                    "enabled": False
-                }  # Ensure disabled on error
+                props_dict["controls"][name] = {"enabled": False}
 
         roi_props_dict = {}
         try:
@@ -252,9 +244,7 @@ class SDKCameraThread(QThread):
             resolutions.append(f"{w}x{h} ({pf_val_str})")
         except ic4.IC4Exception as e:
             log.warning(f"Could not get current resolution details: {e}")
-        except (
-            AttributeError
-        ) as e:  # Catch if .value is not found on a property (e.g. not available)
+        except AttributeError as e:
             log.warning(f"AttributeError getting resolution details: {e}")
 
         log.debug(f"Emitting camera_resolutions_available: {resolutions}")
@@ -293,10 +283,10 @@ class SDKCameraThread(QThread):
                     and current_pf_val != self.desired_pixel_format_str
                 ):
                     if isinstance(current_pf_prop, PropEnumeration):
-                        # --- THIS IS THE CORRECTED PART ---
+                        # --- THIS IS THE CORRECTED PART for getting available formats ---
                         available_formats = [
-                            entry.name for entry in current_pf_prop.Entries
-                        ]
+                            entry.name for entry in current_pf_prop.entries
+                        ]  # lowercase 'entries'
                         # --- End of corrected part ---
                         log.info(
                             f"Available pixel formats on camera: {available_formats}"
@@ -308,9 +298,7 @@ class SDKCameraThread(QThread):
                             log.warning(
                                 f"Desired format {self.desired_pixel_format_str} not found, falling back to 'Mono 8'"
                             )
-                        elif (
-                            "Mono8" in available_formats
-                        ):  # Some cameras might use "Mono8"
+                        elif "Mono8" in available_formats:
                             desired_format_to_set = "Mono8"
                             log.warning(
                                 f"Desired format {self.desired_pixel_format_str} not found, falling back to 'Mono8'"
@@ -323,16 +311,15 @@ class SDKCameraThread(QThread):
 
                 elif current_pf_val != "Mono 8" and current_pf_val != "Mono8":
                     if isinstance(current_pf_prop, PropEnumeration):
-                        # Check both "Mono 8" and "Mono8" as they are common for TIS cameras
                         available_formats_check = [
-                            entry.name for entry in current_pf_prop.Entries
-                        ]
+                            entry.name for entry in current_pf_prop.entries
+                        ]  # lowercase 'entries'
                         if "Mono 8" in available_formats_check:
                             desired_format_to_set = "Mono 8"
                         elif "Mono8" in available_formats_check:
                             desired_format_to_set = "Mono8"
                         else:
-                            desired_format_to_set = current_pf_val  # Keep current if neither standard mono8 is available
+                            desired_format_to_set = current_pf_val
                     elif not isinstance(current_pf_prop, PropEnumeration):
                         desired_format_to_set = "Mono 8"
                     else:
@@ -345,7 +332,6 @@ class SDKCameraThread(QThread):
                 self.current_pixel_format_name = self.pm.find(
                     ic4.PropId.PIXEL_FORMAT
                 ).value
-                # Accept "Mono 8" or "Mono8" for Grayscale8
                 if self.current_pixel_format_name.replace(" ", "") == "Mono8":
                     self.actual_qimage_format = QImage.Format_Grayscale8
                 else:
@@ -362,9 +348,9 @@ class SDKCameraThread(QThread):
                 log.error(f"Error setting/getting PIXEL_FORMAT: {e}")
                 self.camera_error.emit(f"Pixel Format Error: {e}", type(e).__name__)
                 return
-            except AttributeError as e:  # Catch if .Entries or .name is not found
+            except AttributeError as e:
                 log.error(
-                    f"AttributeError during pixel format setup (e.g. .Entries or .name missing): {e}"
+                    f"AttributeError during pixel format setup (e.g. '.entries' or '.name' missing): {e}"
                 )
                 self.camera_error.emit(
                     f"Pixel Format Enum Error: {e}", type(e).__name__
@@ -434,7 +420,7 @@ class SDKCameraThread(QThread):
                 try:
                     buf = self.sink.pop(timeout_ms=100)
                 except ic4.IC4Exception as e:
-                    if e.code == ic4.ErrorCode.TIMEOUT:
+                    if hasattr(e, "code") and e.code == ic4.ErrorCode.TIMEOUT:
                         continue
                     else:
                         log.error(
@@ -494,9 +480,7 @@ class SDKCameraThread(QThread):
             self.camera_error.emit(
                 str(e), f"IC4Exception ({e.code if hasattr(e,'code') else 'N/A'})"
             )
-        except (
-            Exception
-        ) as e:  # Catch-all for any other unhandled error in the run loop
+        except Exception as e:
             log.exception("Unhandled exception in camera thread run loop:")
             self.camera_error.emit(str(e), type(e).__name__)
         finally:
