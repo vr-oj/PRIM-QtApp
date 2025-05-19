@@ -27,7 +27,6 @@ PROP_OFFSET_Y = "OffsetY"
 PROP_ACQUISITION_FRAME_RATE = "AcquisitionFrameRate"
 PROP_ACQUISITION_MODE = "AcquisitionMode"
 PROP_TRIGGER_MODE = "TriggerMode"
-PROP_ACQUISITION_STOP = "AcquisitionStop"  # Command to stop acquisition
 
 
 class DummySinkListener:
@@ -102,53 +101,13 @@ class SDKCameraThread(QThread):
 
     def _is_prop_writable(self, prop_object):
         if prop_object and prop_object.is_available:
-            if hasattr(
-                prop_object, "is_readonly"
-            ):  # Check if is_readonly attribute exists
+            if hasattr(prop_object, "is_readonly"):
                 return not prop_object.is_readonly
-            # If is_readonly is not present, we might need to query a different flag or assume based on type.
-            # For now, if is_readonly isn't there, let's be cautious and log.
-            # Some SDKs might not have is_readonly on all property types, but is_writable might exist.
-            # However, the error was 'PropInteger' object has no attribute 'is_writable'.
-            log.warning(
-                f"Property '{getattr(prop_object,'name', 'UnknownProp')}' lacks 'is_readonly' attribute. Cannot definitively determine writability this way."
-            )
-            # Fallback: Try to see if it's a command. Commands are not typically "writable" in the sense of set_value.
-            if isinstance(prop_object, ic4.properties.PropCommand):
-                return True  # Commands are executed, not written to in the same way
-            return False  # Default to not writable if is_readonly is missing and not a command
-        return False
-
-    def _execute_command_if_available(self, command_name: str):
-        """Helper to execute a command property if available."""
-        try:
-            prop_cmd = self.pm.find(command_name)
-            if prop_cmd and prop_cmd.is_available:
-                # Check if it's a command type and has an execute method or similar
-                if isinstance(prop_cmd, ic4.properties.PropCommand) and hasattr(
-                    prop_cmd, "execute"
-                ):
-                    prop_cmd.execute()
-                    log.info(f"Executed command: {command_name}")
-                    return True
-                else:  # Try setting value to True/1 if it's not a PropCommand but used like one (less common)
-                    log.warning(
-                        f"Property {command_name} is not a PropCommand with execute method. Attempting set_value(True)."
-                    )
-                    if self._is_prop_writable(prop_cmd):
-                        self.pm.set_value(
-                            command_name, True
-                        )  # Some "commands" are bools
-                        log.info(f"Set (command-like) property {command_name} to True")
-                        return True
             else:
                 log.warning(
-                    f"Command property {command_name} not found or not available."
+                    f"Property '{getattr(prop_object,'name', 'UnknownProp')}' lacks 'is_readonly' attribute. Assuming writable if available."
                 )
-        except ic4.IC4Exception as e:
-            log.warning(f"IC4Exception executing command {command_name}: {e}")
-        except Exception as e:
-            log.warning(f"Generic error executing command {command_name}: {e}")
+                return True
         return False
 
     def _set_property_value(self, prop_name: str, value_to_set):
@@ -156,13 +115,11 @@ class SDKCameraThread(QThread):
             prop = self.pm.find(prop_name)
             if self._is_prop_writable(prop):
                 self.pm.set_value(prop_name, value_to_set)
-                log.info(
-                    f"Set {getattr(prop, 'name', prop_name)} to {value_to_set}"
-                )  # Use prop.name if available
+                log.info(f"Set {prop.name} to {value_to_set}")
                 return True
             elif prop and prop.is_available:
                 log.warning(
-                    f"Property {getattr(prop, 'name', prop_name)} found but not writable (is_readonly={getattr(prop, 'is_readonly', 'N/A')})."
+                    f"Property {prop.name} found but not writable (is_readonly={getattr(prop, 'is_readonly', 'N/A')})."
                 )
         except ic4.IC4Exception as e:
             log.warning(f"IC4Exception setting {prop_name} to {value_to_set}: {e}")
@@ -369,15 +326,9 @@ class SDKCameraThread(QThread):
                 log.info(
                     f"Using first available TIS camera: {self.device_info.model_name}"
                 )
-
             self.grabber.device_open(self.device_info)
             log.info(f"Device opened: {self.device_info.model_name}")
             self.pm = self.grabber.device_property_map
-
-            # --- Attempt Pre-emptive AcquisitionStop ---
-            log.info("Attempting pre-emptive AcquisitionStop command...")
-            self._execute_command_if_available(PROP_ACQUISITION_STOP)
-            # --- End Pre-emptive Stop ---
 
             # --- Configure critical properties BEFORE stream_setup ---
             try:
@@ -494,23 +445,17 @@ class SDKCameraThread(QThread):
                     log.warning(f"Could not set accept_incomplete_frames: {e}")
             log.info("QueueSink created.")
 
-            log.info(
-                "Pausing briefly before stream_setup with DEFER_ACQUISITION_START..."
-            )
-            time.sleep(0.5)  # Increased delay further
+            log.info("Pausing briefly before stream_setup with ACQUISITION_START...")
+            time.sleep(0.2)
 
+            # CHANGED: Use ACQUISITION_START directly in stream_setup
             self.grabber.stream_setup(
-                self.sink, setup_option=ic4.StreamSetupOption.DEFER_ACQUISITION_START
+                self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
-            log.info("Stream setup deferred.")
-
-            log.info("Pausing briefly before acquisition_start...")
-            time.sleep(
-                0.5
-            )  # Increased delay further, total 1s after config before explicit start
-
-            self.grabber.acquisition_start()
-            log.info("Acquisition started explicitly.")
+            log.info(
+                "Stream setup with ACQUISITION_START attempted, and acquisition should be starting."
+            )
+            # REMOVED: self.grabber.acquisition_start()
 
             last_frame_time = time.monotonic()
             while not self._stop_requested:
