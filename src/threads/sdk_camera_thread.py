@@ -118,6 +118,8 @@ class SDKCameraThread(QThread):
     def _apply_pending_properties(self):
         if not self.pm or not self.grabber or not self.grabber.is_device_open:
             return
+
+        # Auto‐exposure
         if self._pending_auto_exposure is not None:
             val_str = "Continuous" if self._pending_auto_exposure else "Off"
             prop_auto = self.pm.find(PROP_EXPOSURE_AUTO)
@@ -133,6 +135,8 @@ class SDKCameraThread(QThread):
                 if success and not self._pending_auto_exposure:
                     self._emit_camera_properties()
             self._pending_auto_exposure = None
+
+        # Manual exposure
         if self._pending_exposure_us is not None:
             prop_auto = self.pm.find(PROP_EXPOSURE_AUTO)
             auto_on = (
@@ -151,9 +155,13 @@ class SDKCameraThread(QThread):
             if not auto_on:
                 self._set_property_value(PROP_EXPOSURE_TIME, self._pending_exposure_us)
             self._pending_exposure_us = None
+
+        # Gain
         if self._pending_gain_db is not None:
             self._set_property_value(PROP_GAIN, self._pending_gain_db)
             self._pending_gain_db = None
+
+        # ROI
         if self._pending_roi is not None:
             x, y, w, h = self._pending_roi
             if x == 0 and y == 0 and w == 0 and h == 0:
@@ -168,11 +176,14 @@ class SDKCameraThread(QThread):
         if not self.pm:
             self.camera_properties_updated.emit({})
             return
+
         props_dict = {"controls": {}, "roi": {}}
         prop_map = {
             "exposure": (PROP_EXPOSURE_TIME, PROP_EXPOSURE_AUTO),
             "gain": (PROP_GAIN, None),
         }
+
+        # Controls
         for name, (val_pn, auto_pn) in prop_map.items():
             try:
                 p_info = {"enabled": False, "value": 0, "min": 0, "max": 0}
@@ -210,7 +221,10 @@ class SDKCameraThread(QThread):
             except Exception as e:
                 log.debug(f"Error getting prop {name}: {e}")
                 props_dict["controls"][name] = {"enabled": False}
+
+        # ROI
         try:
+            roi_props_dict = {}
             for k, pn_str in [
                 ("w", PROP_WIDTH),
                 ("h", PROP_HEIGHT),
@@ -224,6 +238,7 @@ class SDKCameraThread(QThread):
             props_dict["roi"] = roi_props_dict
         except Exception:
             props_dict["roi"] = {}
+
         self.camera_properties_updated.emit(props_dict)
 
     def _emit_available_resolutions(self):
@@ -231,31 +246,35 @@ class SDKCameraThread(QThread):
             self.camera_resolutions_available.emit([])
             return
         try:
-            w, h, pf = (
-                self.pm.find(PROP_WIDTH).value,
-                self.pm.find(PROP_HEIGHT).value,
-                self.pm.find(PROP_PIXEL_FORMAT).value,
-            )
+            w = self.pm.find(PROP_WIDTH).value
+            h = self.pm.find(PROP_HEIGHT).value
+            pf = self.pm.find(PROP_PIXEL_FORMAT).value
             self.camera_resolutions_available.emit([f"{w}x{h} ({pf})"])
         except Exception as e:
             log.warning(f"Error emitting resolutions: {e}")
+            self.camera_resolutions_available.emit([])
 
     def run(self):
         log.info(
             f"SDKCameraThread starting for: {self.device_info.model_name or 'Unknown'}"
         )
         self.grabber = ic4.Grabber()
+
         try:
+            # Open device
             if not self.device_info:
                 devices = ic4.DeviceEnum.devices()
                 if not devices:
                     raise RuntimeError("No TIS cameras found.")
                 self.device_info = devices[0]
+
             self.grabber.device_open(self.device_info)
             self.pm = self.grabber.device_property_map
             log.info(f"Device opened: {self.device_info.model_name}")
 
-            try:  # Initial Config
+            # --- Initial configuration ---
+            try:
+                # Pixel format
                 pf_prop = self.pm.find(PROP_PIXEL_FORMAT)
                 pf_val = pf_prop.value
                 desired_pf = self.desired_pixel_format_str
@@ -264,26 +283,29 @@ class SDKCameraThread(QThread):
                 ) != desired_pf.lower().replace(" ", ""):
                     if isinstance(pf_prop, PropEnumeration):
                         opts = [e.name for e in pf_prop.entries]
-                        if desired_pf in opts:
-                            pass
-                        elif "Mono8" in opts:
-                            desired_pf = "Mono8"
-                        elif "Mono 8" in opts:
-                            desired_pf = "Mono 8"
-                        else:
-                            desired_pf = pf_val
+                        if desired_pf not in opts:
+                            if "Mono8" in opts:
+                                desired_pf = "Mono8"
+                            elif "Mono 8" in opts:
+                                desired_pf = "Mono 8"
+                            else:
+                                desired_pf = pf_val
                     if desired_pf != pf_val:
                         self._set_property_value(PROP_PIXEL_FORMAT, desired_pf)
+
                 self.current_pixel_format_name = self.pm.find(PROP_PIXEL_FORMAT).value
                 if self.current_pixel_format_name.replace(" ", "") != "Mono8":
                     raise RuntimeError(f"Not Mono8: {self.current_pixel_format_name}")
                 self.actual_qimage_format = QImage.Format_Grayscale8
 
-                w_prop, h_prop = self.pm.find(PROP_WIDTH), self.pm.find(PROP_HEIGHT)
+                # Resolution
+                w_prop = self.pm.find(PROP_WIDTH)
+                h_prop = self.pm.find(PROP_HEIGHT)
                 if self.desired_width and self._is_prop_writable(w_prop):
                     self._set_property_value(PROP_WIDTH, self.desired_width)
                 if self.desired_height and self._is_prop_writable(h_prop):
                     self._set_property_value(PROP_HEIGHT, self.desired_height)
+
                 self.current_frame_width = (
                     w_prop.value
                     if w_prop and w_prop.is_available
@@ -295,9 +317,11 @@ class SDKCameraThread(QThread):
                     else DEFAULT_FRAME_SIZE[1]
                 )
                 log.info(
-                    f"Res: {self.current_frame_width}x{self.current_frame_height}, Format: {self.current_pixel_format_name}"
+                    f"Res: {self.current_frame_width}x{self.current_frame_height}, "
+                    f"Format: {self.current_pixel_format_name}"
                 )
 
+                # Continuous mode, no trigger, frame rate
                 self._set_property_value(PROP_ACQUISITION_MODE, "Continuous")
                 self._set_property_value(PROP_TRIGGER_MODE, "Off")
                 self._set_property_value(
@@ -308,102 +332,95 @@ class SDKCameraThread(QThread):
                 self.camera_error.emit(f"Config: {e}", type(e).__name__)
                 return
 
+            # Apply any pending exposure/gain/ROI changes
             self._apply_pending_properties()
+            # Emit UI info
             self._emit_available_resolutions()
             self._emit_camera_properties()
+
+            # Create and attach sink
             self.sink = ic4.QueueSink(self.dummy_listener)
             if hasattr(self.sink, "accept_incomplete_frames"):
                 self.sink.accept_incomplete_frames = False
             log.info("QueueSink created.")
             time.sleep(0.2)
+
+            # ——— FIXED LINE: pass setup_option by name ———
             self.grabber.stream_setup(
-                self.sink, ic4.StreamSetupOption.ACQUISITION_START
+                self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
             log.info("Stream setup with ACQUISITION_START attempted.")
 
+            # Acquisition loop
             log.info("Entering frame acquisition loop...")
             fc, nbc, last_ft = 0, 0, time.monotonic()
-
             while not self._stop_requested:
                 self._apply_pending_properties()
-                buf = None
                 try:
-                    buf = self.sink.pop_output_buffer()  # Call with NO arguments
+                    buf = self.sink.pop_output_buffer()
                 except ic4.IC4Exception as e_pop:
-                    # Check for NoData specifically
-                    if hasattr(e_pop, "code") and e_pop.code == ic4.ErrorCode.NO_DATA:
+                    code = getattr(e_pop, "code", None)
+                    if code == ic4.ErrorCode.NO_DATA or code == ic4.ErrorCode.TIMEOUT_:
                         nbc += 1
-                        if (
-                            nbc > 0 and nbc % 200 == 0
-                        ):  # Log every ~10s if using 50ms sleep
+                        if nbc % 200 == 0:
                             log.warning(
-                                f"Still no frames after {nbc * 0.05:.1f}s of polling (ErrorCode.NO_DATA from pop_output_buffer)."
-                            )
-                        self.msleep(50)  # Wait a bit before retrying
-                        continue
-                    # Check for actual TIMEOUT_ if that's a different expected non-data code
-                    elif (
-                        hasattr(e_pop, "code") and e_pop.code == ic4.ErrorCode.TIMEOUT_
-                    ):  # Use TIMEOUT_
-                        nbc += 1
-                        if nbc > 0 and nbc % 200 == 0:
-                            log.warning(
-                                f"Still no frames after {nbc * 0.05:.1f}s of polling (ErrorCode.TIMEOUT_ from pop_output_buffer)."
+                                f"Still no frames after {nbc * 0.05:.1f}s of polling."
                             )
                         self.msleep(50)
                         continue
-                    # For other IC4Exceptions
                     log.error(
                         f"IC4Exception during pop_output_buffer: {e_pop}", exc_info=True
                     )
                     self.camera_error.emit(
                         str(e_pop),
-                        f"SinkPop ({e_pop.code if hasattr(e_pop,'code') else 'N/A'})",
+                        f"SinkPop ({code if code is not None else 'N/A'})",
                     )
                     break
-                # Removed the generic TypeError catch for pop_output_buffer() as the previous error confirmed its signature (takes no explicit args)
 
-                if buf is None:  # Should primarily be caught by NO_DATA exception now
+                if buf is None:
                     nbc += 1
-                    if nbc > 0 and nbc % 200 == 0:
+                    if nbc % 200 == 0:
                         log.warning(
-                            f"Still no frames after {nbc * 0.05:.1f}s of polling (buf is None from pop_output_buffer)."
+                            f"Still no frames after {nbc * 0.05:.1f}s of polling (buf None)."
                         )
                     self.msleep(50)
                     continue
 
                 fc += 1
                 log.info(
-                    f"Frame {fc}: Buffer! W:{buf.image_type.width},H:{buf.image_type.height},Fmt:{buf.image_type.pixel_format.name}"
+                    f"Frame {fc}: W={buf.image_type.width}, "
+                    f"H={buf.image_type.height}, "
+                    f"Fmt={buf.image_type.pixel_format.name}"
                 )
                 nbc = 0
-                try:
-                    img = QImage(
-                        buf.mem_ptr,
-                        buf.image_type.width,
-                        buf.image_type.height,
-                        buf.image_type.stride_bytes,
-                        self.actual_qimage_format,
-                    )
-                    if not img.isNull():
-                        self.frame_ready.emit(img.copy(), buf.mem_ptr)
-                    else:
-                        log.warning(f"Frame {fc}: QImage isNull.")
-                finally:
-                    pass
 
+                # Build and emit QImage
+                img = QImage(
+                    buf.mem_ptr,
+                    buf.image_type.width,
+                    buf.image_type.height,
+                    buf.image_type.stride_bytes,
+                    self.actual_qimage_format,
+                )
+                if not img.isNull():
+                    self.frame_ready.emit(img.copy(), buf.mem_ptr)
+                else:
+                    log.warning(f"Frame {fc}: QImage isNull.")
+
+                # Throttle to target_fps
                 now = time.monotonic()
                 dt = now - last_ft
                 target_int = 1.0 / self.target_fps if self.target_fps > 0 else 0.05
                 if dt < target_int:
-                    self.msleep(
-                        max(0, int((target_int - dt) * 1000))
-                    )  # Ensure non-negative sleep
+                    self.msleep(max(0, int((target_int - dt) * 1000)))
                 last_ft = time.monotonic()
+
             log.info("Exited frame acquisition loop.")
+
         except Exception as e:
             log.exception("Unhandled exception in SDKCameraThread.run()")
             self.camera_error.emit(str(e), type(e).__name__)
+
         finally:
             log.info("SDKCameraThread run() finishing...")
             if self.grabber:
@@ -411,15 +428,17 @@ class SDKCameraThread(QThread):
                     if self.grabber.is_streaming:
                         self.grabber.stream_stop()
                         log.info("Stream stopped.")
-                except:
+                except Exception:
                     pass
                 try:
                     if self.grabber.is_device_open:
                         self.grabber.device_close()
                         log.info("Device closed.")
-                except:
+                except Exception:
                     pass
-            self.grabber, self.sink, self.pm = None, None, None
+            self.grabber = None
+            self.sink = None
+            self.pm = None
             log.info(
                 f"SDKCameraThread ({self.device_info.model_name if self.device_info else 'N/A'}) fully stopped."
             )
