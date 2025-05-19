@@ -53,18 +53,12 @@ class SDKCameraThread(QThread):
         self,
         device_info: "ic4.DeviceInfo" = None,
         target_fps: float = 20.0,
-        desired_width: int = None,
-        desired_height: int = None,
-        desired_pixel_format: str = "Mono 8",
         parent=None,
     ):
         super().__init__(parent)
         self._stop_requested = False
         self.device_info = device_info
         self.target_fps = target_fps
-        self.desired_width = desired_width
-        self.desired_height = desired_height
-        self.desired_pixel_format_str = desired_pixel_format
 
         # pending property updates
         self._pending_exposure_us = None
@@ -118,8 +112,11 @@ class SDKCameraThread(QThread):
         return False
 
     def _apply_pending_properties(self):
-        # throttle so we only ever hit the driver ~10×/s at most
         now = time.monotonic()
+        # only if something changed and our 0.1 s debounce has elapsed
+        if now - self._last_prop_apply_time < self._prop_throttle_interval:
+            return
+
         any_pending = any(
             x is not None
             for x in (
@@ -131,8 +128,7 @@ class SDKCameraThread(QThread):
         )
         if not any_pending:
             return
-        if now - self._last_prop_apply_time < self._prop_throttle_interval:
-            return
+
         self._last_prop_apply_time = now
 
         if not (self.pm and self.grabber and self.grabber.is_device_open):
@@ -274,26 +270,22 @@ class SDKCameraThread(QThread):
                 # force Mono8
                 pfp = self.pm.find(PROP_PIXEL_FORMAT)
                 cur_pf = pfp.value
-                want_pf = self.desired_pixel_format_str
+                want_pf = "Mono 8"
                 if isinstance(pfp, PropEnumeration) and cur_pf.lower().replace(
                     " ", ""
                 ) != want_pf.lower().replace(" ", ""):
                     opts = [e.name for e in pfp.entries]
                     if want_pf in opts:
                         self._set_property_value(PROP_PIXEL_FORMAT, want_pf)
-                    else:
-                        want_pf = cur_pf
                 self.actual_qimage_format = QImage.Format_Grayscale8
 
-                # full‐sensor resolution
+                # set full‐sensor size and clear any ROI
                 wp = self.pm.find(PROP_WIDTH)
                 hp = self.pm.find(PROP_HEIGHT)
-                if wp and wp.is_available and self._is_prop_writable(wp):
+                if self._is_prop_writable(wp):
                     self._set_property_value(PROP_WIDTH, wp.maximum)
-                if hp and hp.is_available and self._is_prop_writable(hp):
+                if self._is_prop_writable(hp):
                     self._set_property_value(PROP_HEIGHT, hp.maximum)
-
-                # reset any ROI
                 self._set_property_value(PROP_OFFSET_X, 0)
                 self._set_property_value(PROP_OFFSET_Y, 0)
 
@@ -317,27 +309,24 @@ class SDKCameraThread(QThread):
             self._emit_available_resolutions()
             self._emit_camera_properties()
 
-            # build sink
+            # build sink & start
             self.sink = ic4.QueueSink(self.dummy_listener)
             if hasattr(self.sink, "accept_incomplete_frames"):
                 self.sink.accept_incomplete_frames = False
             log.info("QueueSink created")
-
-            # start stream
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
             log.info("Streaming started")
 
-            last = time.monotonic()
             frame_count = 0
             no_data_count = 0
 
             while not self._stop_requested:
-                # only apply properties at most 10×/s
+                # apply any slider changes (debounced)
                 self._apply_pending_properties()
 
-                # pull next frame
+                # grab next frame
                 try:
                     buf = self.sink.pop_output_buffer()
                 except ic4.IC4Exception as ex:
@@ -375,25 +364,19 @@ class SDKCameraThread(QThread):
                     stride = w
                     raw = None
 
-                    # 1) numpy_wrap
                     if hasattr(buf, "numpy_wrap"):
                         arr = buf.numpy_wrap()
                         stride = arr.strides[0]
                         raw = arr.tobytes()
-
-                    # 2) numpy_copy
                     elif hasattr(buf, "numpy_copy"):
                         arr = buf.numpy_copy()
                         stride = arr.strides[0]
                         raw = arr.tobytes()
-
-                    # 3) pointer + pitch
                     elif hasattr(buf, "pointer"):
                         ptr = buf.pointer
                         pitch = getattr(buf, "pitch", w)
                         raw = ctypes.string_at(ptr, pitch * h)
                         stride = pitch
-
                     else:
                         raise RuntimeError("No image-buffer interface found")
 
@@ -405,14 +388,6 @@ class SDKCameraThread(QThread):
 
                 except Exception:
                     log.error("QImage construction failed", exc_info=True)
-
-                # pace to target FPS
-                now = time.monotonic()
-                dt = now - last
-                target = 1.0 / self.target_fps if self.target_fps > 0 else 0.05
-                if dt < target:
-                    self.msleep(int((target - dt) * 1000))
-                last = time.monotonic()
 
             log.info("Exited acquisition loop")
 
