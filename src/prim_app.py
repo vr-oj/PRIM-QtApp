@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 import traceback
 import logging
 
@@ -21,6 +22,9 @@ except ImportError:
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
+# ─── Reduce matplotlib logging noise ───────────────────────────────────────
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
+
 log = logging.getLogger(__name__)
 
 # ─── Optional TIS camera library ────────────────────────────────────────────
@@ -32,6 +36,23 @@ try:
 except ImportError:
     IC4_AVAILABLE = False
     log.warning("imagingcontrol4 library not found; camera disabled.")
+
+
+# ─── QSS preprocessing to handle variables ─────────────────────────────────
+def load_processed_qss(path):
+    var_def = re.compile(r"@([A-Za-z0-9_]+):\s*(#[0-9A-Fa-f]{6});")
+    vars = {}
+    lines = []
+    with open(path, "r") as f:
+        for line in f:
+            m = var_def.match(line)
+            if m:
+                vars[m.group(1)] = m.group(2)
+            else:
+                for name, hexval in vars.items():
+                    line = line.replace(f"@{name}", hexval)
+                lines.append(line)
+    return "".join(lines)
 
 
 # ─── Application entry point ─────────────────────────────────────────────────
@@ -71,11 +92,11 @@ def main_app_entry():
     style_path = os.path.join(os.path.dirname(__file__), "style.qss")
     if os.path.exists(style_path):
         try:
-            with open(style_path) as f:
-                app.setStyleSheet(f.read())
-            log.info("Loaded style.qss")
+            qss = load_processed_qss(style_path)
+            app.setStyleSheet(qss)
+            log.info("Loaded and applied processed QSS from %s", style_path)
         except Exception as e:
-            log.warning("Failed to apply style.qss: %s", e)
+            log.warning("Failed to apply processed style.qss: %s", e)
             app.setStyle(QStyleFactory.create("Fusion"))
     else:
         log.warning("style.qss not found, using Fusion")

@@ -84,6 +84,7 @@ class QtCameraWidget(QWidget):
             self._start_new_camera_thread()
 
     def _start_new_camera_thread(self):
+        # if switching, existing thread must be cleaned first
         if self._camera_thread:
             return
         if self._active_camera_id < 0:
@@ -94,13 +95,16 @@ class QtCameraWidget(QWidget):
             return
 
         self.viewfinder.setText(f"Connecting to {self._active_camera_description}...")
+        # instantiate and start SDK thread
         thread = SDKCameraThread(
             exposure_us=self.default_exposure_us,
             target_fps=self.default_target_fps,
             width=self.default_width,
             height=self.default_height,
             pixel_format=self.default_pixel_format,
+            parent=self,
         )
+        # connect signals
         thread.frame_ready.connect(self._on_sdk_frame_received)
         thread.camera_error.connect(self._on_camera_thread_error)
         thread.camera_resolutions_available.connect(self.camera_resolutions_updated)
@@ -130,26 +134,11 @@ class QtCameraWidget(QWidget):
         if self._camera_thread and self._camera_thread.isRunning():
             self._camera_thread.update_gain(gain)
 
-    @pyqtSlot(int)
-    def set_brightness(self, brightness: int):
-        log.info(f"Queuing brightness change: {brightness}")
-        self.default_brightness = brightness
-        if (
-            self._camera_thread
-            and self._camera_thread.isRunning()
-            and hasattr(self._camera_thread, "update_brightness")
-        ):
-            self._camera_thread.update_brightness(brightness)
-
     @pyqtSlot(bool)
     def set_auto_exposure(self, enable_auto: bool):
         log.info(f"Queuing auto-exposure toggle: {enable_auto}")
         self.default_auto_exposure = enable_auto
-        if (
-            self._camera_thread
-            and self._camera_thread.isRunning()
-            and hasattr(self._camera_thread, "update_auto_exposure")
-        ):
+        if self._camera_thread and self._camera_thread.isRunning():
             self._camera_thread.update_auto_exposure(enable_auto)
 
     @pyqtSlot(int, int, int, int)
@@ -161,14 +150,6 @@ class QtCameraWidget(QWidget):
                 self._camera_thread.set_roi(x, y, w, h)
             except Exception:
                 log.debug("Failed to set ROI on the fly; will apply on restart")
-
-    @pyqtSlot()
-    def reset_roi_to_default(self):
-        self.set_software_roi(0, 0, 0, 0)
-        if self._active_camera_id >= 0:
-            self.set_active_camera(
-                self._active_camera_id, self._active_camera_description
-            )
 
     @pyqtSlot(QImage, object)
     def _on_sdk_frame_received(self, qimg: QImage, frame: object):
