@@ -25,6 +25,7 @@ PROP_GAIN = "Gain"
 PROP_OFFSET_X = "OffsetX"
 PROP_OFFSET_Y = "OffsetY"
 PROP_ACQUISITION_FRAME_RATE = "AcquisitionFrameRate"
+PROP_ACQUISITION_MODE = "AcquisitionMode"  # Added for setting continuous mode
 
 
 class DummySinkListener:
@@ -32,14 +33,14 @@ class DummySinkListener:
         log.debug(
             f"DummyListener: Sink connected. ImageType: {image_type}, MinBuffers: {min_buffers_required}"
         )
-        return True  # Important: Must return True to allow streaming
+        return True
 
     def frames_queued(self, sink, userdata):
-        # log.debug("DummyListener: Frames queued (event)") # Can be noisy
+        # log.debug("DummyListener: Frames queued (event)")
         pass
 
-    def sink_disconnected(self, sink, userdata):  # ADDED THIS METHOD
-        log.debug("DummyListener: Sink disconnected (event).")
+    def sink_disconnected(self, sink):  # CORRECTED: Removed userdata
+        log.debug(f"DummyListener: Sink disconnected (event for sink: {type(sink)}).")
         pass
 
 
@@ -150,7 +151,7 @@ class SDKCameraThread(QThread):
                     )
                 else:
                     log.warning(
-                        f"Property {PROP_EXPOSURE_AUTO} is not Enum or Bool, type: {type(prop_auto_exp)}. Attempting to set as string '{auto_value_to_set_str}'."
+                        f"Property {PROP_EXPOSURE_AUTO} is not Enum or Bool, type: {type(prop_auto_exp)}. Attempting set as string."
                     )
                     success = self._set_property_value(
                         PROP_EXPOSURE_AUTO, auto_value_to_set_str
@@ -182,8 +183,9 @@ class SDKCameraThread(QThread):
 
         if self._pending_roi is not None:
             x, y, w, h = self._pending_roi
-            prop_w_cam_obj = self.pm.find(PROP_WIDTH)
-            prop_h_cam_obj = self.pm.find(PROP_HEIGHT)
+            prop_w_cam_obj, prop_h_cam_obj = self.pm.find(PROP_WIDTH), self.pm.find(
+                PROP_HEIGHT
+            )
             current_w_cam = (
                 prop_w_cam_obj.value
                 if prop_w_cam_obj and prop_w_cam_obj.is_available
@@ -196,7 +198,7 @@ class SDKCameraThread(QThread):
             )
             if w > 0 and h > 0 and (w != current_w_cam or h != current_h_cam):
                 log.warning(
-                    f"SDKCameraThread: ROI size change (req: {w}x{h}, curr: {current_w_cam}x{current_h_cam}) requested. Restart camera for new dimensions."
+                    f"ROI size change (req: {w}x{h}, curr: {current_w_cam}x{current_h_cam}) requested. Restart camera for new dimensions."
                 )
             if x == 0 and y == 0 and w == 0 and h == 0:
                 self._set_property_value(PROP_OFFSET_X, 0)
@@ -228,7 +230,14 @@ class SDKCameraThread(QThread):
                             prop_val.value,
                         )
                     elif isinstance(prop_val, PropEnumeration):
-                        p_info["options"] = [entry.name for entry in prop_val.entries]
+                        try:
+                            p_info["options"] = [
+                                entry.name for entry in prop_val.entries
+                            ]
+                        except AttributeError:
+                            p_info["options"] = [
+                                str(entry) for entry in prop_val.entries
+                            ]
                         p_info["value"] = prop_val.value
                     if auto_prop_name:
                         prop_auto = self.pm.find(auto_prop_name)
@@ -258,23 +267,23 @@ class SDKCameraThread(QThread):
                 }
         roi_props_dict = {}
         try:
-            for key, prop_name in [
+            for key, prop_name_str in [
                 ("w", PROP_WIDTH),
                 ("h", PROP_HEIGHT),
                 ("x", PROP_OFFSET_X),
                 ("y", PROP_OFFSET_Y),
-            ]:
-                prop = self.pm.find(prop_name)
+            ]:  # Use prop_name_str
+                prop = self.pm.find(prop_name_str)
                 if prop and prop.is_available:
                     roi_props_dict[key] = prop.value
-                    if key in ["w", "h"]:
+                    if key in ["w", "h", "x", "y"] and hasattr(
+                        prop, "maximum"
+                    ):  # Max value for offset might also be relevant
                         roi_props_dict[f"max_{key}"] = prop.maximum
-                    elif key in ["x", "y"]:
-                        roi_props_dict[f"max_{key}"] = prop.maximum  # Max offset
             props_dict["roi"] = roi_props_dict
         except (ic4.IC4Exception, AttributeError) as e:
             log.debug(f"Could not get ROI properties: {e}")
-            props_dict["roi"] = {"max_w": 0, "max_h": 0}
+            props_dict["roi"] = {}
         log.debug(f"Emitting camera_properties_updated: {props_dict}")
         self.camera_properties_updated.emit(props_dict)
 
@@ -323,13 +332,13 @@ class SDKCameraThread(QThread):
             log.info(f"Device opened: {self.device_info.model_name}")
             self.pm = self.grabber.device_property_map
 
-            # Pixel Format
+            # --- Pixel Format ---
             try:
                 current_pf_prop = self.pm.find(PROP_PIXEL_FORMAT)
                 if not (current_pf_prop and current_pf_prop.is_available):
                     raise RuntimeError(f"'{PROP_PIXEL_FORMAT}' not available.")
                 current_pf_val = current_pf_prop.value
-                log.info(f"Current camera pixel format: {current_pf_val}")
+                log.info(f"Current pixel format: {current_pf_val}")
                 desired_format_to_set = self.desired_pixel_format_str
                 if (
                     self.desired_pixel_format_str
@@ -349,7 +358,7 @@ class SDKCameraThread(QThread):
                         else:
                             desired_format_to_set = current_pf_val
                             log.warning(
-                                f"Desired/Fallback Mono8 not found. Using current: {current_pf_val}"
+                                f"Desired/Fallback Mono8 not found. Using: {current_pf_val}"
                             )
                 elif current_pf_val.replace(" ", "").lower() != "mono8":
                     if isinstance(current_pf_prop, PropEnumeration):
@@ -380,24 +389,22 @@ class SDKCameraThread(QThread):
                 self.camera_error.emit(f"Pixel Format Error: {e}", type(e).__name__)
                 return
 
-            # Width/Height
+            # --- Width/Height ---
             try:
                 prop_w, prop_h = self.pm.find(PROP_WIDTH), self.pm.find(PROP_HEIGHT)
                 if self.desired_width is not None and self._is_prop_writable(prop_w):
-                    self.pm.set_value(PROP_WIDTH, self.desired_width)
+                    self._set_property_value(PROP_WIDTH, self.desired_width)
                 if self.desired_height is not None and self._is_prop_writable(prop_h):
-                    self.pm.set_value(PROP_HEIGHT, self.desired_height)
+                    self._set_property_value(PROP_HEIGHT, self.desired_height)
                 self.current_frame_width = (
                     prop_w.value if prop_w and prop_w.is_available else 0
                 )
                 self.current_frame_height = (
                     prop_h.value if prop_h and prop_h.is_available else 0
                 )
-                if (
-                    self.current_frame_width == 0 or self.current_frame_height == 0
-                ):  # Fallback if read failed
+                if self.current_frame_width == 0 or self.current_frame_height == 0:
                     self.current_frame_width, self.current_frame_height = (
-                        DEFAULT_FRAME_SIZE
+                        DEFAULT_FRAME_SIZE  # Fallback
                     )
                     log.warning(f"Used default frame size: {DEFAULT_FRAME_SIZE}")
                 log.info(
@@ -407,28 +414,31 @@ class SDKCameraThread(QThread):
                 log.warning(f"Error setting/getting W/H: {e}", exc_info=True)
                 self.current_frame_width, self.current_frame_height = DEFAULT_FRAME_SIZE
 
-            # FrameRate
+            # --- Acquisition Mode & FrameRate ---
             try:
+                # Explicitly set AcquisitionMode to Continuous for freerun
+                self._set_property_value(PROP_ACQUISITION_MODE, "Continuous")
+
                 prop_fps = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
                 if self._is_prop_writable(prop_fps):
-                    self.pm.set_value(
+                    self._set_property_value(
                         PROP_ACQUISITION_FRAME_RATE, float(self.target_fps)
                     )
                     log.info(
-                        f"Set {PROP_ACQUISITION_FRAME_RATE} to {self.target_fps}, actual: {prop_fps.value}"
+                        f"Set {PROP_ACQUISITION_FRAME_RATE} to {self.target_fps}, actual: {prop_fps.value if prop_fps and prop_fps.is_available else 'N/A'}"
                     )
                 elif prop_fps and prop_fps.is_available:
                     log.warning(f"'{PROP_ACQUISITION_FRAME_RATE}' not writable.")
                 else:
                     log.warning(f"'{PROP_ACQUISITION_FRAME_RATE}' not available.")
             except Exception as e:
-                log.warning(f"Error setting frame rate: {e}", exc_info=True)
+                log.warning(f"Error setting AcqMode/FrameRate: {e}", exc_info=True)
 
             self._apply_pending_properties()
             self._emit_available_resolutions()
             self._emit_camera_properties()
 
-            self.sink = ic4.QueueSink(self.dummy_listener)  # Pass listener instance
+            self.sink = ic4.QueueSink(self.dummy_listener)
             if hasattr(self.sink, "accept_incomplete_frames"):
                 try:
                     self.sink.accept_incomplete_frames = False
@@ -436,12 +446,14 @@ class SDKCameraThread(QThread):
                     log.warning(f"Could not set accept_incomplete_frames: {e}")
             log.info("QueueSink created.")
 
-            # Use DEFER_ACQUISITION_START and then explicitly start
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.DEFER_ACQUISITION_START
             )
             log.info("Stream setup deferred.")
-            self.grabber.acquisition_start()  # Explicitly start acquisition
+
+            time.sleep(0.1)  # Brief pause before starting acquisition
+
+            self.grabber.acquisition_start()
             log.info("Acquisition started explicitly.")
 
             last_frame_time = time.monotonic()
@@ -472,7 +484,7 @@ class SDKCameraThread(QThread):
                     else:
                         self.frame_ready.emit(qimg.copy(), buf.mem_ptr)
                 finally:
-                    pass  # Assuming QueueSink buffer management
+                    pass
                 now = time.monotonic()
                 dt = now - last_frame_time
                 target_interval = 1.0 / self.target_fps if self.target_fps > 0 else 0.05
