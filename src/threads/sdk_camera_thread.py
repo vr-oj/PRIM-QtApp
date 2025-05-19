@@ -97,9 +97,7 @@ class SDKCameraThread(QThread):
 
     def _is_prop_writable(self, prop_object):
         if prop_object and prop_object.is_available:
-            return not getattr(
-                prop_object, "is_readonly", True
-            )  # Assume readonly if flag missing
+            return not getattr(prop_object, "is_readonly", True)
         return False
 
     def _set_property_value(self, prop_name: str, value_to_set):
@@ -122,15 +120,17 @@ class SDKCameraThread(QThread):
             return
         if self._pending_auto_exposure is not None:
             val_str = "Continuous" if self._pending_auto_exposure else "Off"
-            if self._set_property_value(
-                PROP_EXPOSURE_AUTO,
-                (
-                    val_str
-                    if isinstance(self.pm.find(PROP_EXPOSURE_AUTO), PropEnumeration)
-                    else self._pending_auto_exposure
-                ),
-            ):
-                if not self._pending_auto_exposure:
+            prop_auto = self.pm.find(PROP_EXPOSURE_AUTO)
+            if prop_auto and prop_auto.is_available:
+                success = self._set_property_value(
+                    PROP_EXPOSURE_AUTO,
+                    (
+                        val_str
+                        if isinstance(prop_auto, PropEnumeration)
+                        else self._pending_auto_exposure
+                    ),
+                )
+                if success and not self._pending_auto_exposure:
                     self._emit_camera_properties()
             self._pending_auto_exposure = None
         if self._pending_exposure_us is not None:
@@ -150,15 +150,12 @@ class SDKCameraThread(QThread):
             )
             if not auto_on:
                 self._set_property_value(PROP_EXPOSURE_TIME, self._pending_exposure_us)
-            else:
-                log.info("Auto exposure ON, not setting manual exposure.")
             self._pending_exposure_us = None
         if self._pending_gain_db is not None:
             self._set_property_value(PROP_GAIN, self._pending_gain_db)
             self._pending_gain_db = None
         if self._pending_roi is not None:
             x, y, w, h = self._pending_roi
-            # Size change should restart thread. Only apply offset.
             if x == 0 and y == 0 and w == 0 and h == 0:
                 self._set_property_value(PROP_OFFSET_X, 0)
                 self._set_property_value(PROP_OFFSET_Y, 0)
@@ -214,15 +211,16 @@ class SDKCameraThread(QThread):
                 log.debug(f"Error getting prop {name}: {e}")
                 props_dict["controls"][name] = {"enabled": False}
         try:
-            for k, pn in [
+            for k, pn_str in [
                 ("w", PROP_WIDTH),
                 ("h", PROP_HEIGHT),
                 ("x", PROP_OFFSET_X),
                 ("y", PROP_OFFSET_Y),
             ]:
-                p = self.pm.find(pn)
+                p = self.pm.find(pn_str)
                 roi_props_dict[k] = p.value
-                roi_props_dict[f"max_{k}"] = p.maximum
+                if hasattr(p, "maximum"):
+                    roi_props_dict[f"max_{k}"] = p.maximum
             props_dict["roi"] = roi_props_dict
         except Exception:
             props_dict["roi"] = {}
@@ -257,8 +255,7 @@ class SDKCameraThread(QThread):
             self.pm = self.grabber.device_property_map
             log.info(f"Device opened: {self.device_info.model_name}")
 
-            # Initial Config
-            try:
+            try:  # Initial Config
                 pf_prop = self.pm.find(PROP_PIXEL_FORMAT)
                 pf_val = pf_prop.value
                 desired_pf = self.desired_pixel_format_str
@@ -279,7 +276,7 @@ class SDKCameraThread(QThread):
                         self._set_property_value(PROP_PIXEL_FORMAT, desired_pf)
                 self.current_pixel_format_name = self.pm.find(PROP_PIXEL_FORMAT).value
                 if self.current_pixel_format_name.replace(" ", "") != "Mono8":
-                    raise RuntimeError("Not Mono8")
+                    raise RuntimeError(f"Not Mono8: {self.current_pixel_format_name}")
                 self.actual_qimage_format = QImage.Format_Grayscale8
 
                 w_prop, h_prop = self.pm.find(PROP_WIDTH), self.pm.find(PROP_HEIGHT)
@@ -287,9 +284,15 @@ class SDKCameraThread(QThread):
                     self._set_property_value(PROP_WIDTH, self.desired_width)
                 if self.desired_height and self._is_prop_writable(h_prop):
                     self._set_property_value(PROP_HEIGHT, self.desired_height)
-                self.current_frame_width, self.current_frame_height = (
-                    w_prop.value,
-                    h_prop.value,
+                self.current_frame_width = (
+                    w_prop.value
+                    if w_prop and w_prop.is_available
+                    else DEFAULT_FRAME_SIZE[0]
+                )
+                self.current_frame_height = (
+                    h_prop.value
+                    if h_prop and h_prop.is_available
+                    else DEFAULT_FRAME_SIZE[1]
                 )
                 log.info(
                     f"Res: {self.current_frame_width}x{self.current_frame_height}, Format: {self.current_pixel_format_name}"
@@ -308,7 +311,6 @@ class SDKCameraThread(QThread):
             self._apply_pending_properties()
             self._emit_available_resolutions()
             self._emit_camera_properties()
-
             self.sink = ic4.QueueSink(self.dummy_listener)
             if hasattr(self.sink, "accept_incomplete_frames"):
                 self.sink.accept_incomplete_frames = False
@@ -326,23 +328,31 @@ class SDKCameraThread(QThread):
                 self._apply_pending_properties()
                 buf = None
                 try:
-                    # *** CORRECTED: pop_output_buffer() with no arguments ***
-                    buf = self.sink.pop_output_buffer()
+                    buf = self.sink.pop_output_buffer()  # Call with NO arguments
                 except ic4.IC4Exception as e_pop:
-                    # Check for NoData specifically, which means try again
-                    if (
-                        hasattr(e_pop, "code") and e_pop.code == ic4.ErrorCode.NO_DATA
-                    ):  # Corrected ErrorCode
+                    # Check for NoData specifically
+                    if hasattr(e_pop, "code") and e_pop.code == ic4.ErrorCode.NO_DATA:
                         nbc += 1
                         if (
                             nbc > 0 and nbc % 200 == 0
-                        ):  # Log every ~20s if still no data
+                        ):  # Log every ~10s if using 50ms sleep
                             log.warning(
-                                f"Still no frames after {nbc/10.0:.1f}s of polling (ErrorCode.NO_DATA from pop_output_buffer)."
+                                f"Still no frames after {nbc * 0.05:.1f}s of polling (ErrorCode.NO_DATA from pop_output_buffer)."
                             )
-                        self.msleep(50)  # Slightly longer sleep if consistently no data
+                        self.msleep(50)  # Wait a bit before retrying
                         continue
-                    # For other IC4Exceptions (like actual TIMEOUT if it were different from NO_DATA)
+                    # Check for actual TIMEOUT_ if that's a different expected non-data code
+                    elif (
+                        hasattr(e_pop, "code") and e_pop.code == ic4.ErrorCode.TIMEOUT_
+                    ):  # Use TIMEOUT_
+                        nbc += 1
+                        if nbc > 0 and nbc % 200 == 0:
+                            log.warning(
+                                f"Still no frames after {nbc * 0.05:.1f}s of polling (ErrorCode.TIMEOUT_ from pop_output_buffer)."
+                            )
+                        self.msleep(50)
+                        continue
+                    # For other IC4Exceptions
                     log.error(
                         f"IC4Exception during pop_output_buffer: {e_pop}", exc_info=True
                     )
@@ -351,14 +361,13 @@ class SDKCameraThread(QThread):
                         f"SinkPop ({e_pop.code if hasattr(e_pop,'code') else 'N/A'})",
                     )
                     break
+                # Removed the generic TypeError catch for pop_output_buffer() as the previous error confirmed its signature (takes no explicit args)
 
-                if (
-                    buf is None
-                ):  # Should be handled by NO_DATA, but as a fallback for non-exception None return
+                if buf is None:  # Should primarily be caught by NO_DATA exception now
                     nbc += 1
                     if nbc > 0 and nbc % 200 == 0:
                         log.warning(
-                            f"Still no frames after {nbc/10.0:.1f}s of polling (buf is None from pop_output_buffer)."
+                            f"Still no frames after {nbc * 0.05:.1f}s of polling (buf is None from pop_output_buffer)."
                         )
                     self.msleep(50)
                     continue
@@ -381,13 +390,15 @@ class SDKCameraThread(QThread):
                     else:
                         log.warning(f"Frame {fc}: QImage isNull.")
                 finally:
-                    pass  # Buffer management by QueueSink
+                    pass
 
                 now = time.monotonic()
                 dt = now - last_ft
                 target_int = 1.0 / self.target_fps if self.target_fps > 0 else 0.05
                 if dt < target_int:
-                    self.msleep(int((target_int - dt) * 1000))
+                    self.msleep(
+                        max(0, int((target_int - dt) * 1000))
+                    )  # Ensure non-negative sleep
                 last_ft = time.monotonic()
             log.info("Exited frame acquisition loop.")
         except Exception as e:
