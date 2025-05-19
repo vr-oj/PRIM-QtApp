@@ -34,26 +34,28 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtGui import QIcon, QKeySequence, QImage
 
-# --- Robust import of prim_app flags and imagingcontrol4 ---
 _IC4_AVAILABLE = False
 _IC4_INITIALIZED = False
-_ic4_module = None  # Will hold the 'imagingcontrol4' module if loaded
+_ic4_module = None
 
 try:
     import sys
 
-    # If prim_app.py is in the same directory as main_window.py (e.g. both in 'src'), direct import is fine.
-    # If structure is different, path adjustment might be needed, but usually the entry point (prim_app.py)
-    # handles path setup for its own directory.
-    import prim_app  # Assuming prim_app.py is the entry point and sets up its path
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    if (
+        current_file_dir not in sys.path
+    ):  # Ensure current dir (src) is in path for prim_app
+        sys.path.insert(0, current_file_dir)
+
+    import prim_app
 
     _IC4_AVAILABLE = getattr(prim_app, "IC4_AVAILABLE", False)
     _IC4_INITIALIZED = getattr(prim_app, "IC4_INITIALIZED", False)
 
     if _IC4_INITIALIZED:
-        import imagingcontrol4 as ic4_sdk  # Actual import of the SDK
+        import imagingcontrol4 as ic4_sdk
 
-        _ic4_module = ic4_sdk  # Store the imported module
+        _ic4_module = ic4_sdk
     logging.getLogger(__name__).info(
         "Successfully checked prim_app for IC4 flags in MainWindow. Initialized: %s",
         _IC4_INITIALIZED,
@@ -71,7 +73,6 @@ except Exception as e:
     logging.getLogger(__name__).error(
         f"MainWindow: Unexpected error during prim_app import for IC4 flags: {e}"
     )
-# --- End of robust import section ---
 
 
 from threads.qtcamera_widget import QtCameraWidget
@@ -108,7 +109,6 @@ class MainWindow(QMainWindow):
 
         self.current_camera_frame_width = DEFAULT_FRAME_SIZE[0]
         self.current_camera_frame_height = DEFAULT_FRAME_SIZE[1]
-        # self.current_camera_pixel_format_str = "Mono 8" # This is more of a target, actual comes from camera
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
@@ -133,11 +133,10 @@ class MainWindow(QMainWindow):
             hasattr(self.top_ctrl, "camera_controls")
             and self.top_ctrl.camera_controls is not None
         ):
-            # Defer camera list population slightly to ensure prim_app has fully initialized IC4
             QTimer.singleShot(250, self.top_ctrl.camera_controls.populate_camera_list)
         else:
             log.error(
-                "TopControlPanel or CameraControlPanel not initialized. Camera list won't populate."
+                "TopControlPanel or CameraControlPanel not initialized. Camera list might not populate."
             )
 
     def _init_paths_and_icons(self):
@@ -155,9 +154,7 @@ class MainWindow(QMainWindow):
         self.icon_record_stop = get_icon("stop.svg")
         self.icon_recording_active = get_icon("recording_active.svg")
         self.icon_connect = get_icon("plug.svg")
-        self.icon_disconnect = get_icon(
-            "plug_disconnect.svg"
-        )  # Ensure this icon exists
+        self.icon_disconnect = get_icon("plug_disconnect.svg")
 
     def _build_console_log_dock(self):
         self.dock_console = QDockWidget("Console Log", self)
@@ -281,15 +278,20 @@ class MainWindow(QMainWindow):
         self.serial_port_combobox = QComboBox()
         self.serial_port_combobox.setToolTip("Select Serial Port for PRIM device")
         self.serial_port_combobox.setMinimumWidth(200)
-        self.serial_port_combobox.addItem("🔌 Simulated Data", QVariant())
+        self.serial_port_combobox.addItem(
+            "🔌 Simulated Data", QVariant()
+        )  # Store QVariant() for None
         ports = list_serial_ports()
         if ports:
             for port_path, desc in ports:
+                # Store the actual port_path (string) as data, wrapped in QVariant
                 self.serial_port_combobox.addItem(
                     f"{os.path.basename(port_path)} ({desc})", QVariant(port_path)
                 )
         else:
-            self.serial_port_combobox.addItem("No Serial Ports Found", QVariant())
+            self.serial_port_combobox.addItem(
+                "No Serial Ports Found", QVariant()
+            )  # Store QVariant()
             self.serial_port_combobox.setEnabled(False)
         toolbar.addWidget(self.serial_port_combobox)
 
@@ -359,7 +361,6 @@ class MainWindow(QMainWindow):
         )
 
     def _connect_camera_widget_signals(self):
-        # Ensure top_ctrl and camera_controls are valid before connecting
         if (
             hasattr(self.top_ctrl, "camera_controls")
             and self.top_ctrl.camera_controls is not None
@@ -385,7 +386,6 @@ class MainWindow(QMainWindow):
         )
 
         is_ic4_device = False
-        # Use the locally scoped _ic4_module for the isinstance check
         if (
             _ic4_module
             and hasattr(_ic4_module, "DeviceInfo")
@@ -448,12 +448,14 @@ class MainWindow(QMainWindow):
             log.info("MainWindow: Attempting to stop serial thread.")
             self._serial_thread.stop()
         else:
-            selected_port_variant = self.serial_port_combobox.currentData()
-            port_path = (
-                selected_port_variant.value()
-                if selected_port_variant is not None
-                else None
-            )
+            # --- THIS IS THE CORRECTED PART for AttributeError ---
+            current_data = self.serial_port_combobox.currentData()
+            port_path = None
+            if isinstance(current_data, QVariant):  # Check if it's a QVariant
+                port_path = current_data.value()  # If so, get its Python value
+            else:  # Otherwise, assume currentData() returned the Python object directly
+                port_path = current_data
+            # port_path will now be the string or None, not a QVariant wrapping None
 
             if (
                 port_path is None
@@ -586,7 +588,6 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(QImage, object)
     def _handle_new_camera_frame(self, qimage: QImage, frame_obj: object):
-        # Update internal frame size knowledge from the actual qimage dimensions if available
         if qimage and not qimage.isNull():
             if (
                 self.current_camera_frame_width != qimage.width()
@@ -608,28 +609,20 @@ class MainWindow(QMainWindow):
                 numpy_frame = None
                 if qimage.format() == QImage.Format_Grayscale8:
                     ptr = qimage.constBits()
-                    # constBits returns a sip.voidptr that can be converted to a memory view.
-                    # The size of the data pointed to is qimage.sizeInBytes().
-                    # QImage data is contiguous if bytesPerLine() * height() == sizeInBytes().
-                    # For Grayscale8, bytesPerLine() is typically width().
                     if qimage.bytesPerLine() * qimage.height() == qimage.sizeInBytes():
                         numpy_frame = np.array(
                             ptr.asarray(qimage.sizeInBytes()), dtype=np.uint8
                         ).reshape(qimage.height(), qimage.width())
-                    else:  # If padding exists in scanlines (less common for Grayscale8)
+                    else:
                         log.warning(
                             "QImage (Grayscale8) has padding, converting line by line (slower)."
                         )
-                        # Fallback to slower copy if there's padding or direct reshape is problematic
-                        # This can be optimized if needed
-                        temp_image = qimage.convertToFormat(
-                            QImage.Format_Grayscale8
-                        )  # Ensure it's Grayscale8
+                        temp_image = qimage.convertToFormat(QImage.Format_Grayscale8)
                         ptr = temp_image.constBits()
-                        ptr.setsize(temp_image.sizeInBytes())
-                        numpy_frame = np.array(ptr, dtype=np.uint8).reshape(
-                            temp_image.height(), temp_image.width()
-                        )
+                        # ptr.setsize(temp_image.sizeInBytes()) # Not needed if using asarray with size
+                        numpy_frame = np.array(
+                            ptr.asarray(temp_image.sizeInBytes()), dtype=np.uint8
+                        ).reshape(temp_image.height(), temp_image.width())
 
                 elif qimage.format() == QImage.Format_RGB888:
                     ptr = qimage.constBits()
@@ -643,15 +636,13 @@ class MainWindow(QMainWindow):
                         )
                         temp_image = qimage.convertToFormat(QImage.Format_RGB888)
                         ptr = temp_image.constBits()
-                        ptr.setsize(temp_image.sizeInBytes())
-                        numpy_frame = np.array(ptr, dtype=np.uint8).reshape(
-                            temp_image.height(), temp_image.width(), 3
-                        )
+                        # ptr.setsize(temp_image.sizeInBytes())
+                        numpy_frame = np.array(
+                            ptr.asarray(temp_image.sizeInBytes()), dtype=np.uint8
+                        ).reshape(temp_image.height(), temp_image.width(), 3)
 
                 if numpy_frame is not None:
-                    self.trial_recorder.write_video_frame(
-                        numpy_frame.copy()
-                    )  # Pass a copy
+                    self.trial_recorder.write_video_frame(numpy_frame.copy())
                 else:
                     log.warning(
                         f"Unsupported QImage format for recording: {qimage.format()} or conversion failed. Cannot write video frame."
@@ -738,11 +729,15 @@ class MainWindow(QMainWindow):
             frame_w, frame_h = DEFAULT_FRAME_SIZE
 
         video_ext_str_variant = self.video_format_combobox.currentData()
+        # Ensure value() is called if it's a QVariant, otherwise use directly if it's already the string
         video_ext_str = (
             video_ext_str_variant.value()
-            if video_ext_str_variant
-            else DEFAULT_VIDEO_EXTENSION.lower()
+            if isinstance(video_ext_str_variant, QVariant)
+            else video_ext_str_variant
         )
+        if not video_ext_str:
+            video_ext_str = DEFAULT_VIDEO_EXTENSION.lower()  # Fallback
+
         video_codec_str = DEFAULT_VIDEO_CODEC
 
         log.info(
