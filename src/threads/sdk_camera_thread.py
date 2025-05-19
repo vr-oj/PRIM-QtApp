@@ -295,7 +295,7 @@ class SDKCameraThread(QThread):
             props_dict["roi"] = roi_props_dict
         except (ic4.IC4Exception, AttributeError) as e:
             log.debug(f"Could not get ROI properties: {e}")
-            props_dict["roi"] = {}  # Ensure it's at least an empty dict
+            props_dict["roi"] = {}
         log.debug(f"Emitting camera_properties_updated: {props_dict}")
         self.camera_properties_updated.emit(props_dict)
 
@@ -479,8 +479,10 @@ class SDKCameraThread(QThread):
                 self._apply_pending_properties()
                 buf = None
                 try:
-                    # *** CORRECTED TO USE pop_output_buffer as suggested by error ***
-                    buf = self.sink.pop_output_buffer(timeout_ms=100)
+                    # *** CORRECTED TO USE pop_output_buffer with positional timeout ***
+                    buf = self.sink.pop_output_buffer(
+                        100
+                    )  # timeout_ms=100 changed to positional 100
                 except ic4.IC4Exception as e:
                     if hasattr(e, "code") and e.code == ic4.ErrorCode.TIMEOUT:
                         null_buffer_counter += 1
