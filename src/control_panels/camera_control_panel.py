@@ -14,216 +14,440 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QPushButton,
     QSizePolicy,
+    QDoubleSpinBox,  # For Gain if it's float
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtMultimedia import QCameraInfo
+from PyQt5.QtCore import Qt, pyqtSignal, QVariant  # For QComboBox data
 
-from config import DEFAULT_CAMERA_INDEX, DEFAULT_FRAME_SIZE
+# from PyQt5.QtMultimedia import QCameraInfo # No longer primary for TIS
+
+# Conditional import of imagingcontrol4
+try:
+    import imagingcontrol4 as ic4
+    from prim_app import IC4_AVAILABLE, IC4_INITIALIZED  # Check if SDK is usable
+except ImportError:
+    ic4 = None  # Ensure ic4 is defined
+    IC4_AVAILABLE = False
+    IC4_INITIALIZED = False
+
+
+from config import DEFAULT_FRAME_SIZE  # May not be used if TIS cam is active
 
 log = logging.getLogger(__name__)
 
 
 class CameraControlPanel(QGroupBox):
-    camera_selected = pyqtSignal(int, str)
+    # Emits ic4.DeviceInfo object or None if "No Camera" or error
+    camera_selected = pyqtSignal(object)  # Use object to allow ic4.DeviceInfo or None
+    # Emits resolution string like "WidthxHeight (PixelFormat)"
     resolution_selected = pyqtSignal(str)
-    exposure_changed = pyqtSignal(int)
-    gain_changed = pyqtSignal(int)
-    brightness_changed = pyqtSignal(int)
+
+    # Property change signals
+    exposure_changed = pyqtSignal(int)  # Value in microseconds
+    gain_changed = pyqtSignal(float)  # Value in dB (often float for TIS)
+    # brightness_changed = pyqtSignal(int)  # Brightness not a direct TIS param
     auto_exposure_toggled = pyqtSignal(bool)
-    roi_changed = pyqtSignal(int, int, int, int)
+
+    roi_changed = pyqtSignal(int, int, int, int)  # x, y, w, h
     roi_reset_requested = pyqtSignal()
 
     def __init__(self, parent=None):
-        super().__init__("Camera", parent)
+        super().__init__("Camera Controls", parent)  # Changed title
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        tabs = QTabWidget()
-        layout.addWidget(tabs)
+        self.tabs = QTabWidget()  # Made tabs an instance variable
+        layout.addWidget(self.tabs)
 
-        # Basic Controls
-        basic = QWidget()
-        basic_layout = QFormLayout(basic)
+        # Basic Controls Tab
+        basic_tab = QWidget()
+        basic_layout = QFormLayout(basic_tab)
         self.cam_selector = QComboBox()
-        self.cam_selector.setToolTip("Select camera")
-        self.cam_selector.currentIndexChanged.connect(self._on_camera_selected)
+        self.cam_selector.setToolTip("Select camera device")
+        self.cam_selector.currentIndexChanged.connect(self._on_camera_selection_changed)
         basic_layout.addRow("Device:", self.cam_selector)
 
         self.res_selector = QComboBox()
-        self.res_selector.setToolTip("Select resolution")
-        self.res_selector.currentIndexChanged.connect(self._on_resolution_selected)
-        self.res_selector.setEnabled(False)
+        self.res_selector.setToolTip("Select camera resolution and format")
+        self.res_selector.currentIndexChanged.connect(
+            self._on_resolution_selection_changed
+        )
+        self.res_selector.setEnabled(
+            False
+        )  # Enabled when camera is active and resolutions are known
         basic_layout.addRow("Resolution:", self.res_selector)
-        tabs.addTab(basic, "Basic")
+        self.tabs.addTab(basic_tab, "Source")  # Renamed tab
 
-        # Adjustments
-        adj = QWidget()
-        adj_layout = QFormLayout(adj)
+        # Adjustments Tab
+        adj_tab = QWidget()
+        adj_layout = QFormLayout(adj_tab)
+
+        # Exposure
         self.exposure_slider = QSlider(Qt.Horizontal)
-        self.exposure_label = QLabel("N/A")
+        self.exposure_spinbox = QSpinBox()  # For precise value input/display
+        self.exposure_spinbox.setKeyboardTracking(False)
         exp_box = QHBoxLayout()
         exp_box.addWidget(self.exposure_slider)
-        exp_box.addWidget(self.exposure_label)
+        exp_box.addWidget(self.exposure_spinbox)
         adj_layout.addRow("Exposure (µs):", exp_box)
-
-        self.gain_slider = QSlider(Qt.Horizontal)
-        self.gain_label = QLabel("N/A")
-        gain_box = QHBoxLayout()
-        gain_box.addWidget(self.gain_slider)
-        gain_box.addWidget(self.gain_label)
-        adj_layout.addRow("Gain (dB):", gain_box)
-
-        self.brightness_slider = QSlider(Qt.Horizontal)
-        self.brightness_label = QLabel("N/A")
-        bright_box = QHBoxLayout()
-        bright_box.addWidget(self.brightness_slider)
-        bright_box.addWidget(self.brightness_label)
-        adj_layout.addRow("Brightness:", bright_box)
-
         self.auto_exposure_cb = QCheckBox("Auto Exposure")
         adj_layout.addRow(self.auto_exposure_cb)
-        tabs.addTab(adj, "Adjustments")
 
-        # ROI
-        roi = QWidget()
-        roi_layout = QFormLayout(roi)
-        self.roi_x = QSpinBox()
-        self.roi_y = QSpinBox()
-        self.roi_w = QSpinBox()
-        self.roi_h = QSpinBox()
-        for spin in (self.roi_x, self.roi_y, self.roi_w, self.roi_h):
-            spin.setRange(0, max(DEFAULT_FRAME_SIZE) * 2)
-        roi_layout.addRow("X:", self.roi_x)
-        roi_layout.addRow("Y:", self.roi_y)
-        roi_layout.addRow("Width:", self.roi_w)
-        roi_layout.addRow("Height:", self.roi_h)
-        self.reset_roi_btn = QPushButton("Reset ROI")
-        roi_layout.addRow(self.reset_roi_btn)
-        tabs.addTab(roi, "ROI")
+        # Gain
+        self.gain_slider = QSlider(
+            Qt.Horizontal
+        )  # Will map float to int range for slider
+        self.gain_spinbox = QDoubleSpinBox()  # For precise float value
+        self.gain_spinbox.setDecimals(1)
+        self.gain_spinbox.setKeyboardTracking(False)
+        gain_box = QHBoxLayout()
+        gain_box.addWidget(self.gain_slider)
+        gain_box.addWidget(self.gain_spinbox)
+        adj_layout.addRow("Gain (dB):", gain_box)
 
-        # Initialize controls disabled
-        for widget in (
-            self.exposure_slider,
-            self.gain_slider,
-            self.brightness_slider,
-            self.auto_exposure_cb,
-            roi,
+        self.tabs.addTab(adj_tab, "Adjustments")
+        adj_tab.setEnabled(
+            False
+        )  # Enabled when camera is active and properties are known
+
+        # ROI Tab
+        roi_tab = QWidget()
+        roi_layout = QFormLayout(roi_tab)
+        self.roi_x_spinbox = QSpinBox()
+        self.roi_y_spinbox = QSpinBox()
+        self.roi_w_spinbox = QSpinBox()
+        self.roi_h_spinbox = QSpinBox()
+
+        max_dim = (
+            max(DEFAULT_FRAME_SIZE) * 4
+        )  # Generous upper limit for spinboxes initially
+        for spin in (
+            self.roi_x_spinbox,
+            self.roi_y_spinbox,
+            self.roi_w_spinbox,
+            self.roi_h_spinbox,
         ):
-            widget.setEnabled(False)
+            spin.setRange(0, max_dim)  # Initial range, will be updated by camera props
+            spin.setKeyboardTracking(False)
+            spin.valueChanged.connect(self._emit_roi_if_changed)  # Connect once
+
+        roi_layout.addRow("Offset X:", self.roi_x_spinbox)
+        roi_layout.addRow("Offset Y:", self.roi_y_spinbox)
+        roi_layout.addRow("Width:", self.roi_w_spinbox)
+        roi_layout.addRow("Height:", self.roi_h_spinbox)
+
+        self.reset_roi_btn = QPushButton("Reset ROI to Full Frame")
+        self.reset_roi_btn.clicked.connect(self.roi_reset_requested)  # Forward signal
+        roi_layout.addRow(self.reset_roi_btn)
+        self.tabs.addTab(roi_tab, "Region of Interest (ROI)")
+        roi_tab.setEnabled(
+            False
+        )  # Enabled when camera is active and ROI props are known
 
         # Connect adjustment signals
-        self.exposure_slider.valueChanged.connect(self.exposure_changed)
-        self.gain_slider.valueChanged.connect(self.gain_changed)
-        self.brightness_slider.valueChanged.connect(self.brightness_changed)
-        self.auto_exposure_cb.toggled.connect(self.auto_exposure_toggled)
-        self.roi_x.valueChanged.connect(self._emit_roi)
-        self.roi_y.valueChanged.connect(self._emit_roi)
-        self.roi_w.valueChanged.connect(self._emit_roi)
-        self.roi_h.valueChanged.connect(self._emit_roi)
-        self.reset_roi_btn.clicked.connect(self.roi_reset_requested)
+        self.exposure_slider.valueChanged.connect(self._on_exposure_slider_changed)
+        self.exposure_spinbox.valueChanged.connect(self._on_exposure_spinbox_changed)
+        self.auto_exposure_cb.toggled.connect(self._on_auto_exposure_toggled)
 
-        self.populate_cameras()
+        self.gain_slider.valueChanged.connect(self._on_gain_slider_changed)
+        self.gain_spinbox.valueChanged.connect(self._on_gain_spinbox_changed)
 
-    def populate_cameras(self):
-        prev = self.cam_selector.currentData() or {}
+        # Populate cameras once, at startup. Could be refreshed via a button.
+        self.populate_camera_list()
+        self.disable_all_controls()  # Start with controls disabled
+
+    def populate_camera_list(self):
         self.cam_selector.blockSignals(True)
         self.cam_selector.clear()
-        cams = QCameraInfo.availableCameras()
-        for i, info in enumerate(cams):
-            desc = info.description() or f"Camera {i}"
-            self.cam_selector.addItem(desc, {"id": i, "description": desc})
-        if not cams:
-            self.cam_selector.addItem("No cameras", {"id": -1, "description": ""})
-            self.cam_selector.setEnabled(False)
+        self.cam_selector.addItem(
+            "Select Camera...", QVariant()
+        )  # Placeholder for None
+
+        if IC4_INITIALIZED and ic4:  # Check if SDK was actually initialized
+            try:
+                tis_devices = ic4.DeviceEnum.devices()
+                if tis_devices:
+                    for i, dev_info in enumerate(tis_devices):
+                        display_text = f"TIS: {dev_info.model_name} ({dev_info.serial})"
+                        self.cam_selector.addItem(
+                            display_text, QVariant(dev_info)
+                        )  # Store DeviceInfo
+                        # Optionally select the first TIS camera by default
+                        # if i == 0 : self.cam_selector.setCurrentIndex(self.cam_selector.count() -1)
+                else:
+                    self.cam_selector.addItem("No TIS cameras found", QVariant())
+            except Exception as e:
+                log.error(f"Failed to list TIS cameras: {e}")
+                self.cam_selector.addItem("Error listing TIS cameras", QVariant())
         else:
-            self.cam_selector.setEnabled(True)
+            log.warning(
+                "TIS SDK (imagingcontrol4) not available or not initialized. TIS cameras cannot be listed."
+            )
+            self.cam_selector.addItem("TIS SDK N/A", QVariant())
+
+        # Add a "Disconnect" option or rely on "Select Camera..."
+        self.cam_selector.setEnabled(
+            self.cam_selector.count() > 1
+            or (
+                self.cam_selector.count() == 1
+                and self.cam_selector.itemData(0).value() is not None
+            )
+        )
         self.cam_selector.blockSignals(False)
-        idx = 0
-        if prev.get("id", -1) >= 0:
-            for i in range(self.cam_selector.count()):
-                if self.cam_selector.itemData(i)["id"] == prev["id"]:
-                    idx = i
-                    break
-        elif DEFAULT_CAMERA_INDEX < self.cam_selector.count():
-            idx = DEFAULT_CAMERA_INDEX
-        self.cam_selector.setCurrentIndex(idx)
-        self._on_camera_selected(idx)
+        # self._on_camera_selection_changed(self.cam_selector.currentIndex()) # Trigger manually if needed
 
-    def _on_camera_selected(self, index):
-        data = self.cam_selector.itemData(index) or {}
-        cam_id = data.get("id", -1)
-        desc = data.get("description", "")
-        self.camera_selected.emit(cam_id, desc)
-        self.res_selector.clear()
-        self.res_selector.setEnabled(False)
+    def _on_camera_selection_changed(self, index):
+        selected_data_variant = self.cam_selector.itemData(index)
+        if selected_data_variant is not None:
+            device_info = (
+                selected_data_variant.value()
+            )  # This should be ic4.DeviceInfo or None
+            self.camera_selected.emit(device_info)  # Emit DeviceInfo or None
+            if device_info is None:
+                self.disable_all_controls()
+        else:  # Should not happen if QVariant() is used for None
+            self.camera_selected.emit(None)
+            self.disable_all_controls()
 
-    def _on_resolution_selected(self, index):
-        res = self.res_selector.itemData(index)
-        if res:
-            self.resolution_selected.emit(res)
+    def _on_resolution_selection_changed(self, index):
+        res_str = self.res_selector.itemData(
+            index
+        )  # This should be the resolution string
+        if res_str:
+            self.resolution_selected.emit(res_str)
 
-    def update_resolutions(self, modes):
-        cur = self.res_selector.currentText()
+    @pyqtSlot(list)  # List of strings like "WidthxHeight (PixelFormat)"
+    def update_camera_resolutions_list(self, resolution_strings: list):
+        current_res_str = self.res_selector.currentData()
         self.res_selector.blockSignals(True)
         self.res_selector.clear()
-        if modes:
-            for m in modes:
-                self.res_selector.addItem(m, m)
-            idx = self.res_selector.findText(cur)
-            if idx < 0:
-                default = f"{DEFAULT_FRAME_SIZE[0]}x{DEFAULT_FRAME_SIZE[1]}"
-                idx = self.res_selector.findText(default) or 0
-            self.res_selector.setCurrentIndex(idx)
+
+        if resolution_strings:
+            for res_str in resolution_strings:
+                self.res_selector.addItem(
+                    res_str, QVariant(res_str)
+                )  # Store string as data
+
+            # Try to reselect previous or default
+            idx = self.res_selector.findData(QVariant(current_res_str))
+            if idx != -1:
+                self.res_selector.setCurrentIndex(idx)
+            elif self.res_selector.count() > 0:
+                self.res_selector.setCurrentIndex(0)  # Select first available
+
             self.res_selector.setEnabled(True)
+            self._on_resolution_selection_changed(
+                self.res_selector.currentIndex()
+            )  # Emit current selection
         else:
-            self.res_selector.addItem("N/A", None)
+            self.res_selector.addItem("N/A", QVariant())
             self.res_selector.setEnabled(False)
         self.res_selector.blockSignals(False)
 
-    def update_control_from_properties(self, name, props):
-        mapping = {
-            "exposure": (
-                self.exposure_slider,
-                self.exposure_label,
-                self.auto_exposure_cb,
-            ),
-            "gain": (self.gain_slider, self.gain_label, None),
-            "brightness": (self.brightness_slider, self.brightness_label, None),
-        }
-        slider, label, checkbox = mapping.get(name, (None, None, None))
-        enabled = props.get("enabled", False)
-        if slider:
-            slider.setEnabled(enabled)
-            if enabled:
-                slider.blockSignals(True)
-                slider.setRange(int(props.get("min", 0)), int(props.get("max", 0)))
-                slider.setValue(int(props.get("value", 0)))
-                slider.blockSignals(False)
-            label.setText(f"{props.get('value', 0):.1f}" if enabled else "N/A")
-        if checkbox:
-            checkbox.setEnabled(enabled)
-            checkbox.blockSignals(True)
-            checkbox.setChecked(props.get("is_auto_on", False))
-            checkbox.blockSignals(False)
-            if slider:
-                slider.setEnabled(enabled and not checkbox.isChecked())
+    def _on_exposure_slider_changed(self, value):
+        self.exposure_spinbox.blockSignals(True)
+        self.exposure_spinbox.setValue(value)
+        self.exposure_spinbox.blockSignals(False)
+        self.exposure_changed.emit(value)
 
-    def update_roi_controls(self, roi):
-        tab = self.findChild(QTabWidget).widget(2)
-        enabled = roi.get("max_w", 0) > 0 and roi.get("max_h", 0) > 0
-        tab.setEnabled(enabled)
-        for spin, key in zip(
-            (self.roi_x, self.roi_y, self.roi_w, self.roi_h), ("x", "y", "w", "h")
-        ):
-            spin.blockSignals(True)
-            spin.setRange(0, roi.get(f"max_{key}", 0))
-            spin.setValue(roi.get(key, 0))
-            spin.blockSignals(False)
+    def _on_exposure_spinbox_changed(self, value):
+        self.exposure_slider.blockSignals(True)
+        self.exposure_slider.setValue(value)
+        self.exposure_slider.blockSignals(False)
+        self.exposure_changed.emit(value)
 
-    def _emit_roi(self):
-        self.roi_changed.emit(
-            self.roi_x.value(),
-            self.roi_y.value(),
-            self.roi_w.value(),
-            self.roi_h.value(),
+    def _on_auto_exposure_toggled(self, checked):
+        self.auto_exposure_toggled.emit(checked)
+        # UI update for enabled state of manual exposure will be handled by `update_camera_properties`
+
+    def _on_gain_slider_changed(self, slider_value):
+        # Map slider int value back to float for spinbox and signal
+        # Assuming slider represents gain * 10 or some other factor if gain has decimals
+        # For simplicity, if gain_spinbox min/max are set, slider can map to that.
+        # Let's assume gain_spinbox reflects the true float value range.
+        min_val = self.gain_spinbox.minimum()
+        max_val = self.gain_spinbox.maximum()
+        # For direct mapping where slider values are small
+        if max_val - min_val < 1000:  # Heuristic for direct mapping or small range
+            float_value = min_val + (slider_value / self.gain_slider.maximum()) * (
+                max_val - min_val
+            )
+        else:  # If gain has a large integer range, treat slider as direct int map
+            float_value = float(slider_value)
+
+        self.gain_spinbox.blockSignals(True)
+        self.gain_spinbox.setValue(round(float_value, 1))  # Round to 1 decimal for dB
+        self.gain_spinbox.blockSignals(False)
+        self.gain_changed.emit(self.gain_spinbox.value())
+
+    def _on_gain_spinbox_changed(self, value_float):
+        self.gain_slider.blockSignals(True)
+        # Map float to slider's integer range
+        min_val = self.gain_spinbox.minimum()
+        max_val = self.gain_spinbox.maximum()
+        if max_val - min_val > 0:  # Avoid division by zero
+            # If gain has a large integer range, treat slider as direct int map
+            if max_val - min_val < 1000:  # Heuristic for float mapping
+                slider_val = int(
+                    ((value_float - min_val) / (max_val - min_val))
+                    * self.gain_slider.maximum()
+                )
+            else:
+                slider_val = int(value_float)
+            self.gain_slider.setValue(slider_val)
+        self.gain_slider.blockSignals(False)
+        self.gain_changed.emit(value_float)
+
+    @pyqtSlot(dict)
+    def update_camera_properties_ui(self, props: dict):
+        log.debug(f"CameraControlPanel updating UI from properties: {props}")
+        controls_data = props.get("controls", {})
+        roi_data = props.get("roi", {})
+
+        # --- Update Adjustments Tab ---
+        adj_tab_enabled = False
+
+        # Exposure
+        exp_props = controls_data.get("exposure", {"enabled": False})
+        self.exposure_slider.blockSignals(True)
+        self.exposure_spinbox.blockSignals(True)
+        self.auto_exposure_cb.blockSignals(True)
+
+        self.exposure_slider.setEnabled(
+            exp_props.get("enabled", False) and not exp_props.get("is_auto_on", False)
         )
+        self.exposure_spinbox.setEnabled(
+            exp_props.get("enabled", False) and not exp_props.get("is_auto_on", False)
+        )
+        self.auto_exposure_cb.setEnabled(
+            exp_props.get("auto_available", False) and exp_props.get("enabled", False)
+        )
+
+        if exp_props.get("enabled", False):
+            adj_tab_enabled = True
+            self.exposure_slider.setRange(
+                int(exp_props.get("min", 0)), int(exp_props.get("max", 100000))
+            )
+            self.exposure_slider.setValue(int(exp_props.get("value", 0)))
+            self.exposure_spinbox.setRange(
+                int(exp_props.get("min", 0)), int(exp_props.get("max", 100000))
+            )
+            self.exposure_spinbox.setValue(int(exp_props.get("value", 0)))
+            if exp_props.get("auto_available", False):
+                self.auto_exposure_cb.setChecked(exp_props.get("is_auto_on", False))
+
+        self.exposure_slider.blockSignals(False)
+        self.exposure_spinbox.blockSignals(False)
+        self.auto_exposure_cb.blockSignals(False)
+
+        # Gain
+        gain_props = controls_data.get("gain", {"enabled": False})
+        self.gain_slider.blockSignals(True)
+        self.gain_spinbox.blockSignals(True)
+
+        self.gain_slider.setEnabled(gain_props.get("enabled", False))
+        self.gain_spinbox.setEnabled(gain_props.get("enabled", False))
+
+        if gain_props.get("enabled", False):
+            adj_tab_enabled = True
+            min_gain, max_gain = float(gain_props.get("min", 0.0)), float(
+                gain_props.get("max", 30.0)
+            )
+            current_gain = float(gain_props.get("value", 0.0))
+
+            self.gain_spinbox.setRange(min_gain, max_gain)
+            self.gain_spinbox.setValue(current_gain)
+
+            # For slider, map float range to int range (e.g., 0-100 or 0-max_gain_int)
+            # If gain range is small (e.g. 0-48dB), can multiply by 10 for slider precision
+            if max_gain - min_gain < 100:  # Heuristic for precision scaling
+                self.gain_slider.setRange(int(min_gain * 10), int(max_gain * 10))
+                self.gain_slider.setValue(int(current_gain * 10))
+            else:  # Direct integer mapping
+                self.gain_slider.setRange(int(min_gain), int(max_gain))
+                self.gain_slider.setValue(int(current_gain))
+
+        self.gain_slider.blockSignals(False)
+        self.gain_spinbox.blockSignals(False)
+
+        self.tabs.widget(1).setEnabled(adj_tab_enabled)  # Enable "Adjustments" tab
+
+        # --- Update ROI Tab ---
+        roi_tab_enabled = False
+        self.roi_x_spinbox.blockSignals(True)
+        self.roi_y_spinbox.blockSignals(True)
+        self.roi_w_spinbox.blockSignals(True)
+        self.roi_h_spinbox.blockSignals(True)
+
+        if roi_data and roi_data.get("max_w", 0) > 0:  # Check if ROI data is valid
+            roi_tab_enabled = True
+            # Max values for W and H are the sensor dimensions
+            # Max values for X and Y offsets depend on (SensorDim - CurrentDim)
+            self.roi_w_spinbox.setRange(0, roi_data.get("max_w", DEFAULT_FRAME_SIZE[0]))
+            self.roi_h_spinbox.setRange(0, roi_data.get("max_h", DEFAULT_FRAME_SIZE[1]))
+
+            # Current ROI width and height
+            current_w = roi_data.get("w", DEFAULT_FRAME_SIZE[0])
+            current_h = roi_data.get("h", DEFAULT_FRAME_SIZE[1])
+            self.roi_w_spinbox.setValue(current_w)
+            self.roi_h_spinbox.setValue(current_h)
+
+            # Max offset X = Sensor Width - Current ROI Width
+            # Max offset Y = Sensor Height - Current ROI Height
+            self.roi_x_spinbox.setRange(
+                0, roi_data.get("max_x", roi_data.get("max_w", 0) - current_w)
+            )
+            self.roi_y_spinbox.setRange(
+                0, roi_data.get("max_y", roi_data.get("max_h", 0) - current_h)
+            )
+            self.roi_x_spinbox.setValue(roi_data.get("x", 0))
+            self.roi_y_spinbox.setValue(roi_data.get("y", 0))
+
+        self.roi_x_spinbox.setEnabled(roi_tab_enabled)
+        self.roi_y_spinbox.setEnabled(roi_tab_enabled)
+        self.roi_w_spinbox.setEnabled(
+            roi_tab_enabled
+        )  # Width/Height changes may need camera restart
+        self.roi_h_spinbox.setEnabled(
+            roi_tab_enabled
+        )  # For TIS, width/height changes are done by setting new resolution
+        self.reset_roi_btn.setEnabled(roi_tab_enabled)
+
+        self.roi_x_spinbox.blockSignals(False)
+        self.roi_y_spinbox.blockSignals(False)
+        self.roi_w_spinbox.blockSignals(False)
+        self.roi_h_spinbox.blockSignals(False)
+
+        self.tabs.widget(2).setEnabled(roi_tab_enabled)  # Enable "ROI" tab
+
+    def _emit_roi_if_changed(self):
+        # This is called by each ROI spinbox.
+        # It's important that when one spinbox changes, we emit all four values.
+        # The check for actual change from previous emission can be done by MainWindow or QtCameraWidget if needed.
+        if not self.roi_x_spinbox.signalsBlocked():  # Check if updates are allowed
+            self.roi_changed.emit(
+                self.roi_x_spinbox.value(),
+                self.roi_y_spinbox.value(),
+                self.roi_w_spinbox.value(),
+                self.roi_h_spinbox.value(),
+            )
+
+    def disable_all_controls(self):
+        log.debug("CameraControlPanel: Disabling all controls.")
+        # Disable Adjustments Tab and its contents
+        self.tabs.widget(1).setEnabled(False)
+        for widget in [
+            self.exposure_slider,
+            self.exposure_spinbox,
+            self.auto_exposure_cb,
+            self.gain_slider,
+            self.gain_spinbox,
+        ]:
+            widget.setEnabled(False)
+            if isinstance(widget, QSlider):
+                widget.setValue(widget.minimum())
+            if isinstance(widget, QSpinBox):
+                widget.setValue(widget.minimum())
+            if isinstance(widget, QDoubleSpinBox):
+                widget.setValue(widget.minimum())
+            if isinstance(widget, QCheckBox):
+                widget.setChecked(False)
