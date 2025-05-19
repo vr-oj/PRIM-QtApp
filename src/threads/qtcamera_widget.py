@@ -151,6 +151,18 @@ class QtCameraWidget(QWidget):
             except Exception:
                 log.debug("Failed to set ROI on the fly; will apply on restart")
 
+    @pyqtSlot()
+    def reset_roi_to_default(self):
+        """
+        Resets the software ROI to defaults and restarts camera stream if active.
+        """
+        log.info("Resetting ROI to default (0,0,0,0)")
+        self.set_software_roi(0, 0, 0, 0)
+        if self._active_camera_id >= 0:
+            self.set_active_camera(
+                self._active_camera_id, self._active_camera_description
+            )
+
     @pyqtSlot(QImage, object)
     def _on_sdk_frame_received(self, qimg: QImage, frame: object):
         if self.viewfinder.text():
