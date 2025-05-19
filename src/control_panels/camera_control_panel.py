@@ -14,52 +14,66 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QPushButton,
     QSizePolicy,
-    QDoubleSpinBox,  # For Gain if it's float
+    QDoubleSpinBox,
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QVariant, pyqtSlot  # Added pyqtSlot here
+from PyQt5.QtCore import Qt, pyqtSignal, QVariant, pyqtSlot
 
-# Conditional import of imagingcontrol4
+# --- Robust import of prim_app flags and imagingcontrol4 ---
+# This section attempts to get the SDK initialization status from prim_app.py
+_IC4_AVAILABLE = False
+_IC4_INITIALIZED = False
+_ic4_module = None  # Will hold the 'imagingcontrol4' module if loaded
+
 try:
-    import imagingcontrol4 as ic4
-
-    # Assuming prim_app is in the parent directory of control_panels, or Python path is set up
-    # If prim_app is directly in src and this file is in src/control_panels:
     import sys
     import os
 
-    # Add src directory to Python path to find prim_app if not found otherwise
-    sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-    from prim_app import IC4_AVAILABLE, IC4_INITIALIZED  # Check if SDK is usable
+    # Dynamically add the 'src' directory (parent of 'control_panels') to sys.path
+    # This helps Python find 'prim_app' when 'camera_control_panel.py' is imported.
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))  # .../control_panels
+    src_dir = os.path.dirname(current_file_dir)  # .../src
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)  # Prepend to give it priority
+
+    import prim_app  # Import the prim_app module directly
+
+    _IC4_AVAILABLE = getattr(prim_app, "IC4_AVAILABLE", False)
+    _IC4_INITIALIZED = getattr(prim_app, "IC4_INITIALIZED", False)
+
+    if _IC4_INITIALIZED:
+        import imagingcontrol4 as ic4_sdk  # Actual import of the SDK
+
+        _ic4_module = ic4_sdk
+    logging.getLogger(__name__).info(
+        "Successfully checked prim_app for IC4 flags. Initialized: %s", _IC4_INITIALIZED
+    )
+
 except ImportError as e:
     logging.getLogger(__name__).warning(
-        f"Could not import IC4_AVAILABLE/IC4_INITIALIZED from prim_app: {e}. Assuming False."
+        f"Could not import 'prim_app' module to check IC4 status: {e}. Assuming TIS SDK not available."
     )
-    ic4 = None  # Ensure ic4 is defined
-    IC4_AVAILABLE = False
-    IC4_INITIALIZED = False
-except Exception as e:  # Catch any other exception during this conditional import
+except AttributeError as e:
+    logging.getLogger(__name__).warning(
+        f"'prim_app' module imported, but flags (IC4_AVAILABLE/IC4_INITIALIZED) are missing: {e}. Assuming TIS SDK not available."
+    )
+except Exception as e:
     logging.getLogger(__name__).error(
-        f"Unexpected error importing prim_app for IC4 flags: {e}"
+        f"Unexpected error during prim_app import for IC4 flags: {e}"
     )
-    ic4 = None
-    IC4_AVAILABLE = False
-    IC4_INITIALIZED = False
+# --- End of robust import section ---
 
 
 from config import DEFAULT_FRAME_SIZE
 
-log = logging.getLogger(__name__)
+log = logging.getLogger(__name__)  # Use module's logger after initial setup
 
 
 class CameraControlPanel(QGroupBox):
-    # Emits ic4.DeviceInfo object or None if "No Camera" or error
     camera_selected = pyqtSignal(object)
     resolution_selected = pyqtSignal(str)
-
     exposure_changed = pyqtSignal(int)
     gain_changed = pyqtSignal(float)
     auto_exposure_toggled = pyqtSignal(bool)
-
     roi_changed = pyqtSignal(int, int, int, int)
     roi_reset_requested = pyqtSignal()
 
@@ -156,9 +170,10 @@ class CameraControlPanel(QGroupBox):
         self.cam_selector.clear()
         self.cam_selector.addItem("Select Camera...", QVariant())
 
-        if IC4_INITIALIZED and ic4:
+        # Use the locally scoped _IC4_INITIALIZED and _ic4_module
+        if _IC4_INITIALIZED and _ic4_module:
             try:
-                tis_devices = ic4.DeviceEnum.devices()
+                tis_devices = _ic4_module.DeviceEnum.devices()
                 if tis_devices:
                     for i, dev_info in enumerate(tis_devices):
                         display_text = f"TIS: {dev_info.model_name} ({dev_info.serial})"
@@ -169,8 +184,9 @@ class CameraControlPanel(QGroupBox):
                 log.error(f"Failed to list TIS cameras: {e}")
                 self.cam_selector.addItem("Error listing TIS cameras", QVariant())
         else:
+            # This log is now more informative if the flags were not correctly read
             log.warning(
-                "TIS SDK (imagingcontrol4) not available or not initialized. TIS cameras cannot be listed."
+                "TIS SDK not available or not initialized (_IC4_INITIALIZED is False). TIS cameras cannot be listed here."
             )
             self.cam_selector.addItem("TIS SDK N/A", QVariant())
 
@@ -182,23 +198,33 @@ class CameraControlPanel(QGroupBox):
             )
         )
         self.cam_selector.blockSignals(False)
+        if (
+            self.cam_selector.currentIndex() >= 0
+        ):  # Ensure an item is selected before manually triggering
+            self._on_camera_selection_changed(self.cam_selector.currentIndex())
 
     def _on_camera_selection_changed(self, index):
         selected_data_variant = self.cam_selector.itemData(index)
+        device_info = None  # Default to None
         if selected_data_variant is not None:
-            device_info = selected_data_variant.value()
-            self.camera_selected.emit(device_info)
-            if device_info is None:
-                self.disable_all_controls()
-        else:
-            self.camera_selected.emit(None)
+            val = selected_data_variant.value()
+            # Check if val is an instance of DeviceInfo from the _ic4_module we imported
+            if (
+                _ic4_module
+                and hasattr(_ic4_module, "DeviceInfo")
+                and isinstance(val, _ic4_module.DeviceInfo)
+            ):
+                device_info = val
+
+        self.camera_selected.emit(device_info)
+        if device_info is None:
             self.disable_all_controls()
 
     def _on_resolution_selection_changed(self, index):
-        res_str_variant = self.res_selector.itemData(index)  # Get QVariant
+        res_str_variant = self.res_selector.itemData(index)
         if res_str_variant is not None:
-            res_str = res_str_variant.value()  # Get actual string from QVariant
-            if res_str:  # Ensure it's not None or empty after .value()
+            res_str = res_str_variant.value()
+            if res_str:
                 self.resolution_selected.emit(res_str)
 
     @pyqtSlot(list)
@@ -226,7 +252,6 @@ class CameraControlPanel(QGroupBox):
                 self.res_selector.setCurrentIndex(0)
 
             self.res_selector.setEnabled(True)
-            # Emit current selection only if list is not empty and something is selected.
             if self.res_selector.currentIndex() >= 0:
                 self._on_resolution_selection_changed(self.res_selector.currentIndex())
         else:
@@ -253,21 +278,20 @@ class CameraControlPanel(QGroupBox):
         min_val = self.gain_spinbox.minimum()
         max_val = self.gain_spinbox.maximum()
 
-        float_value = min_val  # Default to min_val
+        float_value = min_val
         if (
-            self.gain_slider.maximum() > 0
-        ):  # Avoid division by zero if slider not properly ranged
-            if max_val - min_val < 1000 and max_val - min_val > 0:
-                float_value = min_val + (slider_value / self.gain_slider.maximum()) * (
-                    max_val - min_val
-                )
-            else:
-                float_value = float(slider_value)
-        elif (
-            slider_value == self.gain_slider.minimum()
-        ):  # Handle case where slider might only have one value
+            self.gain_slider.maximum() > self.gain_slider.minimum()
+        ):  # Ensure slider has a range
+            # Proportionally map slider value to spinbox float range
+            proportion = (slider_value - self.gain_slider.minimum()) / (
+                self.gain_slider.maximum() - self.gain_slider.minimum()
+            )
+            float_value = min_val + proportion * (max_val - min_val)
+        elif slider_value == self.gain_slider.minimum():
             float_value = min_val
-        elif slider_value == self.gain_slider.maximum():
+        elif (
+            slider_value == self.gain_slider.maximum()
+        ):  # If min==max, this won't be distinct from above
             float_value = max_val
 
         self.gain_spinbox.blockSignals(True)
@@ -279,22 +303,18 @@ class CameraControlPanel(QGroupBox):
         self.gain_slider.blockSignals(True)
         min_val_spin = self.gain_spinbox.minimum()
         max_val_spin = self.gain_spinbox.maximum()
+        slider_min_int = self.gain_slider.minimum()
+        slider_max_int = self.gain_slider.maximum()
 
-        slider_val = self.gain_slider.minimum()  # Default to min
+        slider_val = slider_min_int
         if max_val_spin - min_val_spin > 0:
-            if max_val_spin - min_val_spin < 1000:
-                slider_val = int(
-                    ((value_float - min_val_spin) / (max_val_spin - min_val_spin))
-                    * self.gain_slider.maximum()
-                )
-            else:
-                slider_val = int(value_float)
-            # Clamp slider value to its actual min/max
-            slider_val = max(
-                self.gain_slider.minimum(), min(slider_val, self.gain_slider.maximum())
+            proportion = (value_float - min_val_spin) / (max_val_spin - min_val_spin)
+            slider_val = int(
+                slider_min_int + proportion * (slider_max_int - slider_min_int)
             )
+            slider_val = max(slider_min_int, min(slider_val, slider_max_int))  # Clamp
         elif value_float == min_val_spin:
-            slider_val = self.gain_slider.minimum()
+            slider_val = slider_min_int
 
         self.gain_slider.setValue(slider_val)
         self.gain_slider.blockSignals(False)
@@ -323,14 +343,14 @@ class CameraControlPanel(QGroupBox):
 
         if exp_is_controllable:
             adj_tab_enabled = True
-            self.exposure_slider.setRange(
-                int(exp_props.get("min", 0)), int(exp_props.get("max", 100000))
+            min_exp, max_exp = int(exp_props.get("min", 0)), int(
+                exp_props.get("max", 100000)
             )
-            self.exposure_slider.setValue(int(exp_props.get("value", 0)))
-            self.exposure_spinbox.setRange(
-                int(exp_props.get("min", 0)), int(exp_props.get("max", 100000))
-            )
-            self.exposure_spinbox.setValue(int(exp_props.get("value", 0)))
+            val_exp = int(exp_props.get("value", 0))
+            self.exposure_slider.setRange(min_exp, max_exp)
+            self.exposure_slider.setValue(val_exp)
+            self.exposure_spinbox.setRange(min_exp, max_exp)
+            self.exposure_spinbox.setValue(val_exp)
             if exp_auto_available:
                 self.auto_exposure_cb.setChecked(exp_is_auto_on)
 
@@ -356,27 +376,24 @@ class CameraControlPanel(QGroupBox):
             self.gain_spinbox.setRange(min_gain, max_gain)
             self.gain_spinbox.setValue(current_gain)
 
-            # Update slider mapping based on spinbox range
-            slider_min_int = (
-                self.gain_slider.minimum()
-            )  # Keep slider's own min/max for mapping proportion
-            slider_max_int = self.gain_slider.maximum()
+            # Sensible default for slider if not yet ranged, e.g., 0-1000
+            if (
+                self.gain_slider.maximum() == self.gain_slider.minimum()
+            ):  # If not ranged yet
+                self.gain_slider.setRange(0, 1000)  # Default precision range
 
-            if max_gain - min_gain > 0:  # Ensure valid range
-                if max_gain - min_gain < 1000:  # Heuristic for float mapping
-                    # Map current_gain (float) to slider's int range (0-100 or 0-X)
-                    # Example: If slider is 0-1000 for precision
-                    self.gain_slider.setRange(0, 1000)
-                    slider_val = int(
-                        ((current_gain - min_gain) / (max_gain - min_gain)) * 1000
-                    )
-                else:  # Direct integer mapping if gain range is large and integer-like
-                    self.gain_slider.setRange(int(min_gain), int(max_gain))
-                    slider_val = int(current_gain)
-                self.gain_slider.setValue(slider_val)
-            elif current_gain == min_gain:  # If range is zero (fixed gain)
-                self.gain_slider.setRange(0, 0)  # Or some fixed representation
-                self.gain_slider.setValue(0)
+            slider_min_int = self.gain_slider.minimum()
+            slider_max_int = self.gain_slider.maximum()
+            slider_val = slider_min_int
+            if max_gain - min_gain > 0:
+                proportion = (current_gain - min_gain) / (max_gain - min_gain)
+                slider_val = int(
+                    slider_min_int + proportion * (slider_max_int - slider_min_int)
+                )
+            elif current_gain == min_gain:
+                slider_val = slider_min_int
+
+            self.gain_slider.setValue(slider_val)
 
         self.gain_slider.blockSignals(False)
         self.gain_spinbox.blockSignals(False)
@@ -405,28 +422,17 @@ class CameraControlPanel(QGroupBox):
             self.roi_w_spinbox.setValue(current_roi_w)
             self.roi_h_spinbox.setValue(current_roi_h)
 
-            # Max offset X = Sensor Width - Current ROI Width
-            # Max offset Y = Sensor Height - Current ROI Height
             max_offset_x = max(0, max_w_sensor - current_roi_w)
             max_offset_y = max(0, max_h_sensor - current_roi_h)
-            self.roi_x_spinbox.setRange(
-                0, roi_data.get("max_x", max_offset_x)
-            )  # Prefer max_x from camera if available
+            self.roi_x_spinbox.setRange(0, roi_data.get("max_x", max_offset_x))
             self.roi_y_spinbox.setRange(0, roi_data.get("max_y", max_offset_y))
             self.roi_x_spinbox.setValue(current_roi_x)
             self.roi_y_spinbox.setValue(current_roi_y)
 
         self.roi_x_spinbox.setEnabled(roi_tab_enabled)
         self.roi_y_spinbox.setEnabled(roi_tab_enabled)
-        # Width/Height changes for TIS usually mean selecting a new "video format" or resolution.
-        # So, these spinboxes for W/H might be more for display or for cameras that support dynamic ROI size.
-        # For TIS, user should change resolution via resolution_selector if they want different W/H.
-        self.roi_w_spinbox.setEnabled(
-            roi_tab_enabled and False
-        )  # Typically false for TIS for direct edit
-        self.roi_h_spinbox.setEnabled(
-            roi_tab_enabled and False
-        )  # Make them read-only or disabled
+        self.roi_w_spinbox.setEnabled(roi_tab_enabled and False)
+        self.roi_h_spinbox.setEnabled(roi_tab_enabled and False)
         self.reset_roi_btn.setEnabled(roi_tab_enabled)
 
         self.roi_x_spinbox.blockSignals(False)
@@ -441,34 +447,21 @@ class CameraControlPanel(QGroupBox):
             self.roi_changed.emit(
                 self.roi_x_spinbox.value(),
                 self.roi_y_spinbox.value(),
-                self.roi_w_spinbox.value(),  # This will be current camera W
-                self.roi_h_spinbox.value(),  # This will be current camera H
+                self.roi_w_spinbox.value(),
+                self.roi_h_spinbox.value(),
             )
 
     def disable_all_controls(self):
         log.debug("CameraControlPanel: Disabling all controls.")
-        self.tabs.widget(1).setEnabled(False)
+        self.tabs.widget(1).setEnabled(False)  # Adjustments tab
+        self.tabs.widget(2).setEnabled(False)  # ROI tab
+
         for widget in [
             self.exposure_slider,
             self.exposure_spinbox,
             self.auto_exposure_cb,
             self.gain_slider,
             self.gain_spinbox,
-        ]:
-            widget.setEnabled(False)
-            if isinstance(widget, QSlider):
-                widget.setValue(widget.minimum())
-            # Check if spinbox has a valid range before setting minimum
-            if (
-                isinstance(widget, (QSpinBox, QDoubleSpinBox))
-                and widget.maximum() >= widget.minimum()
-            ):
-                widget.setValue(widget.minimum())
-            if isinstance(widget, QCheckBox):
-                widget.setChecked(False)
-
-        self.tabs.widget(2).setEnabled(False)
-        for widget in [
             self.roi_x_spinbox,
             self.roi_y_spinbox,
             self.roi_w_spinbox,
@@ -476,8 +469,16 @@ class CameraControlPanel(QGroupBox):
             self.reset_roi_btn,
         ]:
             widget.setEnabled(False)
-            if isinstance(widget, QSpinBox) and widget.maximum() >= widget.minimum():
+            if isinstance(widget, QSlider):
                 widget.setValue(widget.minimum())
+            if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+                # Ensure min is not greater than max before setting value to avoid errors
+                min_val, max_val = widget.minimum(), widget.maximum()
+                if min_val <= max_val:
+                    widget.setValue(min_val)
+                # else: log.debug(f"Spinbox {widget.objectName()} has invalid range min={min_val} > max={max_val}")
+            if isinstance(widget, QCheckBox):
+                widget.setChecked(False)
 
         self.res_selector.blockSignals(True)
         self.res_selector.clear()

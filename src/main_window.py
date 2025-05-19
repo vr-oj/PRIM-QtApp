@@ -1,7 +1,7 @@
 import os
 import csv
 import logging
-import numpy as np  # For QImage to NumPy array conversion
+import numpy as np
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -34,18 +34,44 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtGui import QIcon, QKeySequence, QImage
 
-try:
-    # If prim_app is in src and this file is in src:
-    from prim_app import IC4_AVAILABLE, IC4_INITIALIZED
+# --- Robust import of prim_app flags and imagingcontrol4 ---
+_IC4_AVAILABLE = False
+_IC4_INITIALIZED = False
+_ic4_module = None  # Will hold the 'imagingcontrol4' module if loaded
 
-    if IC4_INITIALIZED:
-        import imagingcontrol4 as ic4
-    else:
-        ic4 = None
-except ImportError:
-    IC4_AVAILABLE = False
-    IC4_INITIALIZED = False
-    ic4 = None
+try:
+    import sys
+
+    # If prim_app.py is in the same directory as main_window.py (e.g. both in 'src'), direct import is fine.
+    # If structure is different, path adjustment might be needed, but usually the entry point (prim_app.py)
+    # handles path setup for its own directory.
+    import prim_app  # Assuming prim_app.py is the entry point and sets up its path
+
+    _IC4_AVAILABLE = getattr(prim_app, "IC4_AVAILABLE", False)
+    _IC4_INITIALIZED = getattr(prim_app, "IC4_INITIALIZED", False)
+
+    if _IC4_INITIALIZED:
+        import imagingcontrol4 as ic4_sdk  # Actual import of the SDK
+
+        _ic4_module = ic4_sdk  # Store the imported module
+    logging.getLogger(__name__).info(
+        "Successfully checked prim_app for IC4 flags in MainWindow. Initialized: %s",
+        _IC4_INITIALIZED,
+    )
+
+except ImportError as e:
+    logging.getLogger(__name__).warning(
+        f"MainWindow: Could not import 'prim_app' module to check IC4 status: {e}."
+    )
+except AttributeError as e:
+    logging.getLogger(__name__).warning(
+        f"MainWindow: 'prim_app' module imported, but flags missing: {e}."
+    )
+except Exception as e:
+    logging.getLogger(__name__).error(
+        f"MainWindow: Unexpected error during prim_app import for IC4 flags: {e}"
+    )
+# --- End of robust import section ---
 
 
 from threads.qtcamera_widget import QtCameraWidget
@@ -82,7 +108,7 @@ class MainWindow(QMainWindow):
 
         self.current_camera_frame_width = DEFAULT_FRAME_SIZE[0]
         self.current_camera_frame_height = DEFAULT_FRAME_SIZE[1]
-        self.current_camera_pixel_format_str = "Mono 8"
+        # self.current_camera_pixel_format_str = "Mono 8" # This is more of a target, actual comes from camera
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
@@ -93,7 +119,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(
             f"{APP_NAME} - v{APP_VERSION if 'APP_VERSION' in globals() and APP_VERSION else '1.0'}"
-        )  # Added fallback for APP_VERSION
+        )
         self.showMaximized()
         self.statusBar().showMessage(
             "Ready. Select camera (if available) and serial port.", 5000
@@ -103,15 +129,15 @@ class MainWindow(QMainWindow):
         self._connect_top_control_panel_signals()
         self._connect_camera_widget_signals()
 
-        # Check if top_ctrl and camera_controls are initialized before calling populate_camera_list
         if (
             hasattr(self.top_ctrl, "camera_controls")
             and self.top_ctrl.camera_controls is not None
         ):
-            QTimer.singleShot(200, self.top_ctrl.camera_controls.populate_camera_list)
+            # Defer camera list population slightly to ensure prim_app has fully initialized IC4
+            QTimer.singleShot(250, self.top_ctrl.camera_controls.populate_camera_list)
         else:
             log.error(
-                "TopControlPanel or CameraControlPanel not initialized correctly. Camera list might not populate."
+                "TopControlPanel or CameraControlPanel not initialized. Camera list won't populate."
             )
 
     def _init_paths_and_icons(self):
@@ -129,7 +155,9 @@ class MainWindow(QMainWindow):
         self.icon_record_stop = get_icon("stop.svg")
         self.icon_recording_active = get_icon("recording_active.svg")
         self.icon_connect = get_icon("plug.svg")
-        self.icon_disconnect = get_icon("plug_disconnect.svg")
+        self.icon_disconnect = get_icon(
+            "plug_disconnect.svg"
+        )  # Ensure this icon exists
 
     def _build_console_log_dock(self):
         self.dock_console = QDockWidget("Console Log", self)
@@ -331,12 +359,22 @@ class MainWindow(QMainWindow):
         )
 
     def _connect_camera_widget_signals(self):
-        self.qt_cam_widget.camera_resolutions_updated.connect(
-            self.top_ctrl.camera_controls.update_camera_resolutions_list
-        )
-        self.qt_cam_widget.camera_properties_updated.connect(
-            self.top_ctrl.camera_controls.update_camera_properties_ui
-        )
+        # Ensure top_ctrl and camera_controls are valid before connecting
+        if (
+            hasattr(self.top_ctrl, "camera_controls")
+            and self.top_ctrl.camera_controls is not None
+        ):
+            self.qt_cam_widget.camera_resolutions_updated.connect(
+                self.top_ctrl.camera_controls.update_camera_resolutions_list
+            )
+            self.qt_cam_widget.camera_properties_updated.connect(
+                self.top_ctrl.camera_controls.update_camera_properties_ui
+            )
+        else:
+            log.error(
+                "Cannot connect camera widget signals: top_ctrl.camera_controls not found."
+            )
+
         self.qt_cam_widget.camera_error.connect(self._handle_camera_error)
         self.qt_cam_widget.frame_ready.connect(self._handle_new_camera_frame)
 
@@ -345,13 +383,13 @@ class MainWindow(QMainWindow):
         log.debug(
             f"MainWindow: Camera selection changed. DeviceInfo: {device_info_obj}"
         )
-        # Check if ic4 is available and device_info_obj is an instance of ic4.DeviceInfo
-        # This check needs ic4 to be defined, which it should be (as None if import failed)
+
         is_ic4_device = False
+        # Use the locally scoped _ic4_module for the isinstance check
         if (
-            ic4
-            and hasattr(ic4, "DeviceInfo")
-            and isinstance(device_info_obj, ic4.DeviceInfo)
+            _ic4_module
+            and hasattr(_ic4_module, "DeviceInfo")
+            and isinstance(device_info_obj, _ic4_module.DeviceInfo)
         ):
             is_ic4_device = True
 
@@ -359,7 +397,7 @@ class MainWindow(QMainWindow):
             self.qt_cam_widget.set_active_camera_device(device_info_obj)
         elif device_info_obj is None:
             self.qt_cam_widget.set_active_camera_device(None)
-            if hasattr(self.top_ctrl, "camera_controls"):  # Defensive check
+            if hasattr(self.top_ctrl, "camera_controls"):
                 self.top_ctrl.camera_controls.disable_all_controls()
                 self.top_ctrl.camera_controls.update_camera_resolutions_list([])
         else:
@@ -368,7 +406,7 @@ class MainWindow(QMainWindow):
             )
             self.qt_cam_widget.set_active_camera_device(None)
 
-        self._update_recording_actions_enable_state()  # This was the source of error if conditions lead to None
+        self._update_recording_actions_enable_state()
 
     @pyqtSlot(str)
     def _handle_resolution_selection(self, resolution_str: str):
@@ -431,17 +469,13 @@ class MainWindow(QMainWindow):
             )
             try:
                 if self._serial_thread:
-                    if (
-                        self._serial_thread.isRunning()
-                    ):  # Check if it's running before trying to wait/terminate
+                    if self._serial_thread.isRunning():
                         if not self._serial_thread.wait(100):
                             log.warning(
                                 "Previous serial thread instance still running, terminating before starting new."
                             )
                             self._serial_thread.terminate()
-                            self._serial_thread.wait(
-                                500
-                            )  # Give it a moment to terminate
+                            self._serial_thread.wait(500)
                     self._serial_thread = None
 
                 self._serial_thread = SerialThread(port=port_path, parent=self)
@@ -480,16 +514,14 @@ class MainWindow(QMainWindow):
             self.connect_serial_action.setText("Connect PRIM Device")
             self.serial_port_combobox.setEnabled(True)
 
-            if (
-                self._is_recording
-            ):  # Stop recording if disconnected for any reason while recording
+            if self._is_recording:
                 if "error" in status_message.lower():
                     QMessageBox.warning(
                         self,
                         "Recording Stopped",
                         f"PRIM device disconnected due to an error: {status_message}\nRecording has been stopped.",
                     )
-                else:  # Planned disconnect or other non-error disconnect
+                else:
                     QMessageBox.information(
                         self,
                         "Recording Stopped",
@@ -510,11 +542,11 @@ class MainWindow(QMainWindow):
         if self._serial_thread is self.sender():
             self._serial_thread = None
             current_status_text = ""
-            if hasattr(self.top_ctrl, "conn_lbl"):  # Defensive check
+            if hasattr(self.top_ctrl, "conn_lbl"):
                 current_status_text = self.top_ctrl.conn_lbl.text().lower()
             if "connected" in current_status_text:
                 self._handle_serial_status_change("Disconnected (thread finished)")
-            else:  # If already disconnected, ensure recording actions are updated
+            else:
                 self._update_recording_actions_enable_state()
             log.debug("MainWindow: _serial_thread dereferenced.")
 
@@ -542,7 +574,6 @@ class MainWindow(QMainWindow):
                 self._trigger_stop_recording()
 
     def _update_recording_actions_enable_state(self):
-        # --- THIS IS THE CORRECTED PART ---
         serial_ready = (
             self._serial_thread is not None and self._serial_thread.isRunning()
         )
@@ -550,19 +581,22 @@ class MainWindow(QMainWindow):
 
         can_start_recording = serial_ready and camera_ready and not self._is_recording
 
-        self.start_recording_action.setEnabled(
-            bool(can_start_recording)
-        )  # Explicitly cast to bool
+        self.start_recording_action.setEnabled(bool(can_start_recording))
         self.stop_recording_action.setEnabled(self._is_recording)
 
     @pyqtSlot(QImage, object)
     def _handle_new_camera_frame(self, qimage: QImage, frame_obj: object):
-        if self.current_camera_frame_width == 0 and qimage and not qimage.isNull():
-            self.current_camera_frame_width = qimage.width()
-            self.current_camera_frame_height = qimage.height()
-            log.info(
-                f"MainWindow: Frame size updated from first frame: {qimage.width()}x{qimage.height()}"
-            )
+        # Update internal frame size knowledge from the actual qimage dimensions if available
+        if qimage and not qimage.isNull():
+            if (
+                self.current_camera_frame_width != qimage.width()
+                or self.current_camera_frame_height != qimage.height()
+            ):
+                self.current_camera_frame_width = qimage.width()
+                self.current_camera_frame_height = qimage.height()
+                log.info(
+                    f"MainWindow: Actual frame size from camera: {qimage.width()}x{qimage.height()}"
+                )
 
         if (
             self._is_recording
@@ -571,31 +605,56 @@ class MainWindow(QMainWindow):
             and not qimage.isNull()
         ):
             try:
+                numpy_frame = None
                 if qimage.format() == QImage.Format_Grayscale8:
                     ptr = qimage.constBits()
-                    expected_size = qimage.height() * qimage.bytesPerLine()
-                    if (
-                        ptr.size() < expected_size
-                    ):  # Check if ptr.setsize is needed/safe
-                        ptr.setsize(expected_size)
-
-                    numpy_frame = np.array(ptr, dtype=np.uint8).reshape(
-                        qimage.height(), qimage.width()
-                    )
-                    self.trial_recorder.write_video_frame(numpy_frame.copy())
+                    # constBits returns a sip.voidptr that can be converted to a memory view.
+                    # The size of the data pointed to is qimage.sizeInBytes().
+                    # QImage data is contiguous if bytesPerLine() * height() == sizeInBytes().
+                    # For Grayscale8, bytesPerLine() is typically width().
+                    if qimage.bytesPerLine() * qimage.height() == qimage.sizeInBytes():
+                        numpy_frame = np.array(
+                            ptr.asarray(qimage.sizeInBytes()), dtype=np.uint8
+                        ).reshape(qimage.height(), qimage.width())
+                    else:  # If padding exists in scanlines (less common for Grayscale8)
+                        log.warning(
+                            "QImage (Grayscale8) has padding, converting line by line (slower)."
+                        )
+                        # Fallback to slower copy if there's padding or direct reshape is problematic
+                        # This can be optimized if needed
+                        temp_image = qimage.convertToFormat(
+                            QImage.Format_Grayscale8
+                        )  # Ensure it's Grayscale8
+                        ptr = temp_image.constBits()
+                        ptr.setsize(temp_image.sizeInBytes())
+                        numpy_frame = np.array(ptr, dtype=np.uint8).reshape(
+                            temp_image.height(), temp_image.width()
+                        )
 
                 elif qimage.format() == QImage.Format_RGB888:
                     ptr = qimage.constBits()
-                    expected_size = qimage.height() * qimage.bytesPerLine()
-                    if ptr.size() < expected_size:
-                        ptr.setsize(expected_size)
-                    numpy_frame = np.array(ptr, dtype=np.uint8).reshape(
-                        qimage.height(), qimage.width(), 3
-                    )
-                    self.trial_recorder.write_video_frame(numpy_frame.copy())
+                    if qimage.bytesPerLine() * qimage.height() == qimage.sizeInBytes():
+                        numpy_frame = np.array(
+                            ptr.asarray(qimage.sizeInBytes()), dtype=np.uint8
+                        ).reshape(qimage.height(), qimage.width(), 3)
+                    else:
+                        log.warning(
+                            "QImage (RGB888) has padding, converting line by line (slower)."
+                        )
+                        temp_image = qimage.convertToFormat(QImage.Format_RGB888)
+                        ptr = temp_image.constBits()
+                        ptr.setsize(temp_image.sizeInBytes())
+                        numpy_frame = np.array(ptr, dtype=np.uint8).reshape(
+                            temp_image.height(), temp_image.width(), 3
+                        )
+
+                if numpy_frame is not None:
+                    self.trial_recorder.write_video_frame(
+                        numpy_frame.copy()
+                    )  # Pass a copy
                 else:
                     log.warning(
-                        f"Unsupported QImage format for recording: {qimage.format()}. Cannot write video frame."
+                        f"Unsupported QImage format for recording: {qimage.format()} or conversion failed. Cannot write video frame."
                     )
 
             except Exception as e:
@@ -608,13 +667,11 @@ class MainWindow(QMainWindow):
                 self._trigger_stop_recording()
 
     def _trigger_start_recording_dialog(self):
-        # Check serial again, as state might have changed
         if not (self._serial_thread and self._serial_thread.isRunning()):
             QMessageBox.warning(
                 self, "Cannot Start Recording", "PRIM device is not connected."
             )
             return
-        # Check camera again
         if not self.qt_cam_widget.current_camera_is_active():
             QMessageBox.warning(
                 self, "Cannot Start Recording", "Camera is not active or not selected."
@@ -847,7 +904,7 @@ class MainWindow(QMainWindow):
                     "SerialThread did not stop gracefully on exit, terminating."
                 )
                 self._serial_thread.terminate()
-                self._serial_thread.wait(500)  # Give terminate a moment
+                self._serial_thread.wait(500)
             self._serial_thread = None
 
         log.info("MainWindow: Calling close on QtCameraWidget.")
