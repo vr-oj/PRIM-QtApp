@@ -326,6 +326,7 @@ class SDKCameraThread(QThread):
                 log.info(
                     f"Using first available TIS camera: {self.device_info.model_name}"
                 )
+
             self.grabber.device_open(self.device_info)
             log.info(f"Device opened: {self.device_info.model_name}")
             self.pm = self.grabber.device_property_map
@@ -448,30 +449,52 @@ class SDKCameraThread(QThread):
             log.info("Pausing briefly before stream_setup with ACQUISITION_START...")
             time.sleep(0.2)
 
-            # CHANGED: Use ACQUISITION_START directly in stream_setup
+            # Use ACQUISITION_START directly in stream_setup
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
             log.info(
                 "Stream setup with ACQUISITION_START attempted, and acquisition should be starting."
             )
-            # REMOVED: self.grabber.acquisition_start()
 
+            log.info("Entering frame acquisition loop...")  # Moved this log here
+            frame_counter = 0
+            null_buffer_counter = 0
             last_frame_time = time.monotonic()
+
             while not self._stop_requested:
                 self._apply_pending_properties()
+                buf = None
                 try:
                     buf = self.sink.pop(timeout_ms=100)
                 except ic4.IC4Exception as e:
                     if hasattr(e, "code") and e.code == ic4.ErrorCode.TIMEOUT:
+                        null_buffer_counter += 1
+                        if null_buffer_counter % 100 == 0:
+                            log.warning(
+                                f"Still no frames after {null_buffer_counter/10.0:.1f}s of polling (sink.pop timed out)."
+                            )
                         continue
                     log.error(f"IC4Exception during sink.pop: {e}", exc_info=True)
                     self.camera_error.emit(
                         str(e), f"SinkPop ({e.code if hasattr(e,'code') else 'N/A'})"
                     )
                     break
+
                 if buf is None:
+                    null_buffer_counter += 1
+                    if null_buffer_counter > 0 and null_buffer_counter % 100 == 0:
+                        log.warning(
+                            f"Still no frames after {null_buffer_counter/10.0:.1f}s of polling (buf is None)."
+                        )
                     continue
+
+                frame_counter += 1
+                log.info(
+                    f"Frame {frame_counter}: Buffer received! W: {buf.image_type.width}, H: {buf.image_type.height}, Format: {buf.image_type.pixel_format.name}"
+                )
+                null_buffer_counter = 0
+
                 try:
                     qimg = QImage(
                         buf.mem_ptr,
@@ -481,11 +504,15 @@ class SDKCameraThread(QThread):
                         self.actual_qimage_format,
                     )
                     if qimg.isNull():
-                        log.warning("Created QImage is null.")
+                        log.warning(f"Frame {frame_counter}: Created QImage is null.")
                     else:
+                        log.debug(
+                            f"Frame {frame_counter}: QImage created successfully, emitting frame_ready."
+                        )
                         self.frame_ready.emit(qimg.copy(), buf.mem_ptr)
                 finally:
                     pass
+
                 now = time.monotonic()
                 dt = now - last_frame_time
                 target_interval = 1.0 / self.target_fps if self.target_fps > 0 else 0.05
@@ -494,6 +521,7 @@ class SDKCameraThread(QThread):
                     if sleep_ms > 5:
                         self.msleep(sleep_ms)
                 last_frame_time = time.monotonic()
+            log.info("Exited frame acquisition loop.")  # Added this log
         except Exception as e:
             log.exception("Unhandled exception in SDKCameraThread.run():")
             self.camera_error.emit(str(e), type(e).__name__)
