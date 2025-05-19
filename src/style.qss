@@ -51,7 +51,7 @@ QGroupBox::title {
 QTabWidget::pane {
     border: 1px solid #40634A;
     border-radius: 4px;
-    background-color: #F9F9F9;
+    background-color: #40634A;
     padding: 4px;
 }
 QTabBar::tab {
