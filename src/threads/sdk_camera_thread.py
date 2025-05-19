@@ -323,7 +323,7 @@ class SDKCameraThread(QThread):
 
             # *** FIX: pass None for the Display parameter ***
             self.grabber.stream_setup(
-                None, self.sink, ic4.StreamSetupOption.ACQUISITION_START
+                self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
             log.info("Stream setup with ACQUISITION_START attempted.")
             log.info("Entering frame acquisition loop...")
