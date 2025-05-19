@@ -27,6 +27,27 @@ PROP_OFFSET_Y = "OffsetY"
 PROP_ACQUISITION_FRAME_RATE = "AcquisitionFrameRate"
 
 
+# --- Minimal Dummy Sink Listener ---
+class DummySinkListener:
+    def sink_connected(self, sink, image_type, min_buffers_required):
+        log.debug(
+            f"DummyListener: Sink connected. ImageType: {image_type}, MinBuffers: {min_buffers_required}"
+        )
+        # This handler should return True to allow streaming to start.
+        return True
+
+    def frames_queued(self, sink, userdata):
+        # log.debug("DummyListener: Frames queued (event)") # Can be noisy
+        pass
+
+    def sink_lost(self, sink, userdata):
+        log.warning("DummyListener: Sink lost!")
+        pass
+
+
+# --- End of Dummy Sink Listener ---
+
+
 class SDKCameraThread(QThread):
     frame_ready = pyqtSignal(QImage, object)
     camera_resolutions_available = pyqtSignal(list)
@@ -64,6 +85,8 @@ class SDKCameraThread(QThread):
         self.current_pixel_format_name = ""
         self.actual_qimage_format = QImage.Format_Invalid
 
+        self.dummy_listener = DummySinkListener()  # Create an instance of the listener
+
     def request_stop(self):
         log.debug("Stop requested for SDKCameraThread")
         self._stop_requested = True
@@ -81,7 +104,6 @@ class SDKCameraThread(QThread):
         self._pending_roi = (x, y, w, h)
 
     def _is_prop_writable(self, prop_object):
-        """Checks if a found property object is available and not read-only."""
         if prop_object and prop_object.is_available:
             if hasattr(prop_object, "is_readonly"):
                 return not prop_object.is_readonly
@@ -93,10 +115,9 @@ class SDKCameraThread(QThread):
         return False
 
     def _set_property_value(self, prop_name: str, value_to_set):
-        """Helper to set property if available and writable."""
         try:
             prop = self.pm.find(prop_name)
-            if self._is_prop_writable(prop):  # Use the helper
+            if self._is_prop_writable(prop):
                 self.pm.set_value(prop_name, value_to_set)
                 log.info(f"Set {prop.name} to {value_to_set}")
                 return True
@@ -104,10 +125,6 @@ class SDKCameraThread(QThread):
                 log.warning(
                     f"Property {prop.name} found but not writable (is_readonly={getattr(prop, 'is_readonly', 'N/A')})."
                 )
-            # elif not prop: # Handled by find raising exception or returning None
-            #     log.warning(f"Property {prop_name} not found by find().")
-            # else: # Not available (covered by _is_prop_writable)
-            #      log.warning(f"Property {prop.name} found but not available.")
         except ic4.IC4Exception as e:
             log.warning(f"IC4Exception setting {prop_name} to {value_to_set}: {e}")
         except AttributeError as e:
@@ -125,8 +142,8 @@ class SDKCameraThread(QThread):
         if self._pending_auto_exposure is not None:
             auto_value_to_set_str = (
                 "Continuous" if self._pending_auto_exposure else "Off"
-            )  # For Enum
-            auto_value_to_set_bool = self._pending_auto_exposure  # For Boolean
+            )
+            auto_value_to_set_bool = self._pending_auto_exposure
 
             prop_auto_exp = self.pm.find(PROP_EXPOSURE_AUTO)
 
@@ -146,7 +163,7 @@ class SDKCameraThread(QThread):
                     )
                     success = self._set_property_value(
                         PROP_EXPOSURE_AUTO, auto_value_to_set_str
-                    )  # Try string as last resort
+                    )
 
                 if success and not self._pending_auto_exposure:
                     self._emit_camera_properties()
@@ -216,12 +233,7 @@ class SDKCameraThread(QThread):
 
         for name, (val_prop_name, auto_prop_name) in prop_name_map.items():
             try:
-                p_info = {
-                    "enabled": False,
-                    "value": 0,
-                    "min": 0,
-                    "max": 0,
-                }  # Initialize with defaults
+                p_info = {"enabled": False, "value": 0, "min": 0, "max": 0}
                 prop_val = self.pm.find(val_prop_name)
 
                 if prop_val and prop_val.is_available:
@@ -235,9 +247,7 @@ class SDKCameraThread(QThread):
                             p_info["options"] = [
                                 entry.name for entry in prop_val.entries
                             ]
-                        except (
-                            AttributeError
-                        ):  # Fallback if .name is not on entry, try str(entry)
+                        except AttributeError:
                             p_info["options"] = [
                                 str(entry) for entry in prop_val.entries
                             ]
@@ -257,9 +267,7 @@ class SDKCameraThread(QThread):
                             p_info["is_auto_on"] = is_auto_mode_on
 
                             if p_info["is_auto_on"] and name == "exposure":
-                                p_info["enabled"] = (
-                                    False  # Manual exposure control disabled if auto is on
-                                )
+                                p_info["enabled"] = False
                         else:
                             p_info["auto_available"] = False
                 props_dict["controls"][name] = p_info
@@ -504,8 +512,9 @@ class SDKCameraThread(QThread):
             self._emit_camera_properties()
 
             # --- Corrected QueueSink instantiation ---
-            self.sink = ic4.QueueSink(None)  # Pass None for the listener if polling
-            # Set accept_incomplete_frames if the attribute exists on the sink instance
+            self.sink = ic4.QueueSink(
+                self.dummy_listener
+            )  # Pass the dummy listener instance
             if hasattr(self.sink, "accept_incomplete_frames"):
                 try:
                     self.sink.accept_incomplete_frames = False
@@ -514,7 +523,7 @@ class SDKCameraThread(QThread):
                         f"Could not set accept_incomplete_frames on QueueSink: {e_sink_prop}"
                     )
             # --- End of correction ---
-            log.info(f"QueueSink created.")
+            log.info(f"QueueSink created with dummy listener.")
 
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
@@ -569,7 +578,7 @@ class SDKCameraThread(QThread):
                     else:
                         self.frame_ready.emit(qimg.copy(), buf.mem_ptr)
                 finally:
-                    pass  # QueueSink buffers usually auto-managed
+                    pass
 
                 now = time.monotonic()
                 dt = now - last_frame_time
