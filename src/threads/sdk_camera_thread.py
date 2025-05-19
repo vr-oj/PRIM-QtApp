@@ -41,8 +41,6 @@ class DummySinkListener:
         return True
 
     def frames_queued(self, sink, userdata):
-        # This callback would be used if we weren't polling with pop_queued_buffer.
-        # log.debug(f"DummyListener: Frames queued (userdata: {userdata})")
         pass
 
     def sink_disconnected(self, sink):
@@ -212,11 +210,11 @@ class SDKCameraThread(QThread):
                     f"SDKCameraThread: ROI size change (req: {w}x{h}, curr: {current_w_cam}x{current_h_cam}) requested. Restart camera for new dimensions."
                 )
 
-            if x == 0 and y == 0 and w == 0 and h == 0:
+            if x == 0 and y == 0 and w == 0 and h == 0:  # Special case for reset
                 self._set_property_value(PROP_OFFSET_X, 0)
                 self._set_property_value(PROP_OFFSET_Y, 0)
                 log.info("ROI reset request: Set OFFSET_X and OFFSET_Y to 0.")
-            else:
+            else:  # Apply offsets based on ROI x,y
                 self._set_property_value(PROP_OFFSET_X, x)
                 self._set_property_value(PROP_OFFSET_Y, y)
             self._pending_roi = None
@@ -264,6 +262,7 @@ class SDKCameraThread(QThread):
                                 else bool(current_auto_val)
                             )
                             p_info["is_auto_on"] = is_auto_mode_on
+
                             if p_info["is_auto_on"] and name == "exposure":
                                 p_info["enabled"] = False
                         else:
@@ -296,7 +295,7 @@ class SDKCameraThread(QThread):
             props_dict["roi"] = roi_props_dict
         except (ic4.IC4Exception, AttributeError) as e:
             log.debug(f"Could not get ROI properties: {e}")
-            props_dict["roi"] = {}
+            props_dict["roi"] = {}  # Ensure it's at least an empty dict
         log.debug(f"Emitting camera_properties_updated: {props_dict}")
         self.camera_properties_updated.emit(props_dict)
 
@@ -480,18 +479,18 @@ class SDKCameraThread(QThread):
                 self._apply_pending_properties()
                 buf = None
                 try:
-                    # *** CORRECTED TO USE pop_queued_buffer ***
-                    buf = self.sink.pop_queued_buffer(timeout_ms=100)
+                    # *** CORRECTED TO USE pop_output_buffer as suggested by error ***
+                    buf = self.sink.pop_output_buffer(timeout_ms=100)
                 except ic4.IC4Exception as e:
                     if hasattr(e, "code") and e.code == ic4.ErrorCode.TIMEOUT:
                         null_buffer_counter += 1
                         if null_buffer_counter > 0 and null_buffer_counter % 100 == 0:
                             log.warning(
-                                f"Still no frames after {null_buffer_counter/10.0:.1f}s of polling (sink.pop_queued_buffer timed out)."
+                                f"Still no frames after {null_buffer_counter/10.0:.1f}s of polling (sink.pop_output_buffer timed out)."
                             )
                         continue
                     log.error(
-                        f"IC4Exception during sink.pop_queued_buffer: {e}",
+                        f"IC4Exception during sink.pop_output_buffer: {e}",
                         exc_info=True,
                     )
                     self.camera_error.emit(
@@ -503,7 +502,7 @@ class SDKCameraThread(QThread):
                     null_buffer_counter += 1
                     if null_buffer_counter > 0 and null_buffer_counter % 100 == 0:
                         log.warning(
-                            f"Still no frames after {null_buffer_counter/10.0:.1f}s of polling (buf is None from pop_queued_buffer)."
+                            f"Still no frames after {null_buffer_counter/10.0:.1f}s of polling (buf is None from pop_output_buffer)."
                         )
                     continue
 
