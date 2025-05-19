@@ -1,16 +1,10 @@
 import logging
-import time  # Keep time import
-
-# Change top-level import
+import time
 import imagingcontrol4 as ic4
 
-from PyQt5.QtCore import (
-    QThread,
-    pyqtSignal,
-)  # QMutex, QWaitCondition not used here currently
+from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 
-# Properties module import remains the same if it's structured as a submodule
 from imagingcontrol4.properties import (
     PropInteger,
     PropFloat,
@@ -22,11 +16,6 @@ log = logging.getLogger(__name__)
 
 
 class SDKCameraThread(QThread):
-    """
-    Thread handling TIS SDK camera grab and emitting live frames and camera properties.
-    Uses QueueSink for continuous streaming and frames with pop_buffer.
-    """
-
     frame_ready = pyqtSignal(QImage, object)
     camera_resolutions_available = pyqtSignal(list)
     camera_properties_updated = pyqtSignal(dict)
@@ -34,7 +23,7 @@ class SDKCameraThread(QThread):
 
     def __init__(
         self,
-        device_info: "ic4.DeviceInfo" = None,  # Use string literal for type hint if ic4 not fully available at parse time
+        device_info: "ic4.DeviceInfo" = None,
         target_fps: float = 20.0,
         desired_width: int = None,
         desired_height: int = None,
@@ -55,7 +44,7 @@ class SDKCameraThread(QThread):
         self._pending_roi = None
 
         self.grabber = None
-        self.sink = None  # Will be ic4.QueueSink
+        self.sink = None
         self.pm = None
 
         self.current_frame_width = 0
@@ -84,12 +73,15 @@ class SDKCameraThread(QThread):
         self._pending_roi = (x, y, w, h)
 
     def _apply_pending_properties(self):
-        if not self.pm or not self.grabber or not self.grabber.is_device_open:
+        if (
+            not self.pm or not self.grabber or not self.grabber.is_device_open
+        ):  # Corrected is_device_open
             return
 
         if self._pending_auto_exposure is not None:
             try:
-                current_auto = self.pm.get_value(ic4.PropId.EXPOSURE_AUTO)
+                # Get current value by finding property then accessing .value
+                current_auto = self.pm.find(ic4.PropId.EXPOSURE_AUTO).value
                 if current_auto != self._pending_auto_exposure:
                     self.pm.set_value(
                         ic4.PropId.EXPOSURE_AUTO, self._pending_auto_exposure
@@ -105,7 +97,7 @@ class SDKCameraThread(QThread):
 
         if self._pending_exposure_us is not None:
             try:
-                is_auto_on = self.pm.get_value(ic4.PropId.EXPOSURE_AUTO)
+                is_auto_on = self.pm.find(ic4.PropId.EXPOSURE_AUTO).value
                 if not is_auto_on:
                     self.pm.set_value(ic4.PropId.EXPOSURE, self._pending_exposure_us)
                     log.info(f"Set EXPOSURE to {self._pending_exposure_us} us")
@@ -130,20 +122,18 @@ class SDKCameraThread(QThread):
         if self._pending_roi is not None:
             x, y, w, h = self._pending_roi
             try:
-                # For QueueSink, ROI changes (especially size) generally require stream re-setup.
-                # This simplified version will only attempt to set offsets if width/height match current.
-                current_w_cam = self.pm.get_value(ic4.PropId.WIDTH)
-                current_h_cam = self.pm.get_value(ic4.PropId.HEIGHT)
+                current_w_cam = self.pm.find(ic4.PropId.WIDTH).value
+                current_h_cam = self.pm.find(ic4.PropId.HEIGHT).value
 
                 if w > 0 and h > 0 and (w != current_w_cam or h != current_h_cam):
                     log.warning(
                         f"ROI size change (req: {w}x{h}, curr: {current_w_cam}x{current_h_cam}) requires camera restart. Not applying on-the-fly."
                     )
-                elif w == 0 and h == 0:  # Special case to reset offset
+                elif w == 0 and h == 0:
                     self.pm.set_value(ic4.PropId.OFFSET_X, 0)
                     self.pm.set_value(ic4.PropId.OFFSET_Y, 0)
                     log.info(f"Reset OFFSET_X and OFFSET_Y to 0.")
-                else:  # Apply offsets if size matches or if w/h in ROI are not meant to change size
+                else:
                     self.pm.set_value(ic4.PropId.OFFSET_X, x)
                     self.pm.set_value(ic4.PropId.OFFSET_Y, y)
                     log.info(f"Set OFFSET_X={x}, OFFSET_Y={y}")
@@ -160,12 +150,12 @@ class SDKCameraThread(QThread):
             return
 
         props_dict = {"controls": {}, "roi": {}}
-        prop_map = {
+        prop_map_ids = {  # Renamed to avoid conflict with map function
             "exposure": (ic4.PropId.EXPOSURE, ic4.PropId.EXPOSURE_AUTO),
             "gain": (ic4.PropId.GAIN, None),
         }
 
-        for name, (val_pid, auto_pid) in prop_map.items():
+        for name, (val_pid, auto_pid) in prop_map_ids.items():
             try:
                 prop_val = self.pm.find(val_pid)
                 p_info = {"enabled": prop_val.is_available and prop_val.is_writable}
@@ -176,11 +166,15 @@ class SDKCameraThread(QThread):
                         p_info["value"] = prop_val.value
                     elif isinstance(prop_val, PropEnumeration):
                         p_info["options"] = prop_val.options
-                        p_info["value"] = prop_val.value
+                        p_info["value"] = (
+                            prop_val.value
+                        )  # For enums, .value often gives the string
 
                     if auto_pid:
                         prop_auto = self.pm.find(auto_pid)
-                        if prop_auto.is_available:
+                        if (
+                            prop_auto.is_available
+                        ):  # Check availability before accessing .value
                             p_info["is_auto_on"] = bool(prop_auto.value)
                             p_info["auto_available"] = True
                         else:
@@ -220,14 +214,12 @@ class SDKCameraThread(QThread):
 
         resolutions = []
         try:
-            w = self.pm.get_value(ic4.PropId.WIDTH)
-            h = self.pm.get_value(ic4.PropId.HEIGHT)
-            pf_prop = self.pm.find(ic4.PropId.PIXEL_FORMAT)  # This is a property object
-            pf_val_str = pf_prop.value  # Get current string value, e.g. "Mono 8"
+            w = self.pm.find(ic4.PropId.WIDTH).value
+            h = self.pm.find(ic4.PropId.HEIGHT).value
+            pf_prop = self.pm.find(ic4.PropId.PIXEL_FORMAT)
+            pf_val_str = pf_prop.value
 
             resolutions.append(f"{w}x{h} ({pf_val_str})")
-            # To list all available formats, one would iterate pf_prop.options if it's PropEnumeration
-            # For now, we only list the current active one. UI can offer standards.
         except ic4.IC4Exception as e:
             log.warning(f"Could not get current resolution details: {e}")
 
@@ -256,64 +248,56 @@ class SDKCameraThread(QThread):
             self.pm = self.grabber.device_property_map
 
             try:
-                current_pf_val = self.pm.get_value(ic4.PropId.PIXEL_FORMAT)
-                log.info(f"Current camera pixel format: {current_pf_val}")
-                desired_format_to_set = (
-                    self.desired_pixel_format_str
-                )  # Default to Mono 8
+                # Use find().value to get current property values
+                current_pf_prop = self.pm.find(ic4.PropId.PIXEL_FORMAT)
+                current_pf_val = current_pf_prop.value
 
-                # Try to set user's desired format, or "Mono 8" as a safe default for QImage
-                # The DMK33UX250 is monochrome. "Mono 8" is usually available.
+                log.info(f"Current camera pixel format: {current_pf_val}")
+                desired_format_to_set = self.desired_pixel_format_str
+
                 if (
                     self.desired_pixel_format_str
                     and current_pf_val != self.desired_pixel_format_str
                 ):
-                    pf_prop_obj = self.pm.find(ic4.PropId.PIXEL_FORMAT)
-                    if isinstance(pf_prop_obj, PropEnumeration):
-                        available_formats = pf_prop_obj.options
+                    if isinstance(current_pf_prop, PropEnumeration):
+                        available_formats = current_pf_prop.options
                         log.info(
                             f"Available pixel formats on camera: {available_formats}"
                         )
                         if self.desired_pixel_format_str in available_formats:
                             desired_format_to_set = self.desired_pixel_format_str
-                        elif (
-                            "Mono 8" in available_formats
-                        ):  # Fallback to Mono 8 if user's choice not there
+                        elif "Mono 8" in available_formats:
                             desired_format_to_set = "Mono 8"
                             log.warning(
                                 f"Desired format {self.desired_pixel_format_str} not found, falling back to 'Mono 8'"
                             )
-                        else:  # Neither desired nor Mono 8 available from list, use current
+                        else:
                             desired_format_to_set = current_pf_val
                             log.warning(
                                 f"Neither desired format '{self.desired_pixel_format_str}' nor 'Mono 8' found in options. Using camera current: {current_pf_val}"
                             )
-                    else:  # Not an enum, just try to set what was desired.
-                        desired_format_to_set = self.desired_pixel_format_str
+                    # If not enum, we'll try to set desired_format_to_set as is.
 
-                elif (
-                    current_pf_val != "Mono 8"
-                ):  # If no user preference, but not Mono 8, try to set Mono 8
-                    pf_prop_obj = self.pm.find(ic4.PropId.PIXEL_FORMAT)
+                elif current_pf_val != "Mono 8":
                     if (
-                        isinstance(pf_prop_obj, PropEnumeration)
-                        and "Mono 8" in pf_prop_obj.options
+                        isinstance(current_pf_prop, PropEnumeration)
+                        and "Mono 8" in current_pf_prop.options
                     ):
                         desired_format_to_set = "Mono 8"
-                    elif not isinstance(
-                        pf_prop_obj, PropEnumeration
-                    ):  # If not enum, can try setting
-                        desired_format_to_set = "Mono 8"
-                    else:  # Is enum, but "Mono 8" not in options. Keep current.
+                    elif not isinstance(current_pf_prop, PropEnumeration):
+                        desired_format_to_set = (
+                            "Mono 8"  # Try setting, might fail if not supported
+                        )
+                    else:
                         desired_format_to_set = current_pf_val
 
                 if desired_format_to_set != current_pf_val:
                     self.pm.set_value(ic4.PropId.PIXEL_FORMAT, desired_format_to_set)
                     log.info(f"Set PIXEL_FORMAT to {desired_format_to_set}")
 
-                self.current_pixel_format_name = self.pm.get_value(
+                self.current_pixel_format_name = self.pm.find(
                     ic4.PropId.PIXEL_FORMAT
-                )
+                ).value
                 if self.current_pixel_format_name == "Mono 8":
                     self.actual_qimage_format = QImage.Format_Grayscale8
                 else:
@@ -336,8 +320,9 @@ class SDKCameraThread(QThread):
                     self.pm.set_value(ic4.PropId.WIDTH, self.desired_width)
                 if self.desired_height is not None:
                     self.pm.set_value(ic4.PropId.HEIGHT, self.desired_height)
-                self.current_frame_width = self.pm.get_value(ic4.PropId.WIDTH)
-                self.current_frame_height = self.pm.get_value(ic4.PropId.HEIGHT)
+
+                self.current_frame_width = self.pm.find(ic4.PropId.WIDTH).value
+                self.current_frame_height = self.pm.find(ic4.PropId.HEIGHT).value
                 log.info(
                     f"Actual camera resolution: {self.current_frame_width}x{self.current_frame_height}"
                 )
@@ -345,16 +330,19 @@ class SDKCameraThread(QThread):
                 log.warning(
                     f"Could not set/get WIDTH/HEIGHT: {e}. Using camera defaults."
                 )
-                self.current_frame_width = self.pm.get_value(ic4.PropId.WIDTH)
-                self.current_frame_height = self.pm.get_value(ic4.PropId.HEIGHT)
+                self.current_frame_width = self.pm.find(ic4.PropId.WIDTH).value
+                self.current_frame_height = self.pm.find(ic4.PropId.HEIGHT).value
 
             try:
-                if self.pm.is_property_available(ic4.PropId.ACQUISITION_FRAME_RATE):
+                if self.pm.is_property_available(
+                    ic4.PropId.ACQUISITION_FRAME_RATE
+                ):  # is_property_available is correct
                     self.pm.set_value(
                         ic4.PropId.ACQUISITION_FRAME_RATE, float(self.target_fps)
                     )
+                    actual_fps = self.pm.find(ic4.PropId.ACQUISITION_FRAME_RATE).value
                     log.info(
-                        f"Set ACQUISITION_FRAME_RATE to {self.target_fps}, actual: {self.pm.get_value(ic4.PropId.ACQUISITION_FRAME_RATE)}"
+                        f"Set ACQUISITION_FRAME_RATE to {self.target_fps}, actual: {actual_fps}"
                     )
             except ic4.IC4Exception as e:
                 log.warning(f"Could not set frame rate: {e}")
@@ -363,17 +351,10 @@ class SDKCameraThread(QThread):
             self._emit_available_resolutions()
             self._emit_camera_properties()
 
-            # Use QueueSink for continuous capture
             self.sink = ic4.QueueSink.create(accept_incomplete_frames=False)
             log.info(
                 f"QueueSink created. Target format for sink: {self.current_pixel_format_name}"
             )
-
-            # It's good practice to set the sink's output format if known,
-            # though it often tries to match camera or convert.
-            # For "Mono 8" from camera, sink output should also be "Mono 8" or compatible.
-            # sink_pixel_format = ic4.PixelFormat.parse(self.current_pixel_format_name) # Requires PixelFormat to be Enum-like
-            # self.sink.set_pixel_format(sink_pixel_format) # If such a method exists on QueueSink
 
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
@@ -387,10 +368,9 @@ class SDKCameraThread(QThread):
             while not self._stop_requested:
                 self._apply_pending_properties()
                 try:
-                    # Pop buffer from QueueSink
-                    buf = self.sink.pop(timeout_ms=100)  # timeout_ms is argument name
+                    buf = self.sink.pop(timeout_ms=100)
                 except ic4.IC4Exception as e:
-                    if e.code == ic4.ErrorCode.TIMEOUT:
+                    if e.code == ic4.ErrorCode.TIMEOUT:  # Check specific error code
                         continue
                     else:
                         log.error(f"IC4Exception during sink.pop: {e} (Code: {e.code})")
@@ -399,29 +379,18 @@ class SDKCameraThread(QThread):
                         )
                         break
 
-                if (
-                    buf is None
-                ):  # Should be caught by timeout exception, but as a safeguard
+                if buf is None:
                     continue
-
-                # is_incomplete might not be on buffer from QueueSink.pop directly, often handled by create()
-                # if buf.is_incomplete: # Check documentation for QueueSink buffer properties
-                #     log.warning("Received incomplete frame, discarding.")
-                #     # buf.unlock() # QueueSink buffers might not need explicit unlock, check docs
-                #     continue
 
                 try:
                     frame_width = buf.image_type.width
                     frame_height = buf.image_type.height
-                    # pixel_format_name = buf.image_type.pixel_format.name # String like "Mono 8"
                     stride = buf.image_type.stride_bytes
 
-                    # Assuming actual_qimage_format was correctly set to Format_Grayscale8
                     if self.actual_qimage_format == QImage.Format_Invalid:
                         log.error(
                             f"Buffer received but QImage format is invalid. Current camera format: {self.current_pixel_format_name}"
                         )
-                        # buf.unlock() # If needed
                         continue
 
                     qimg = QImage(
@@ -437,17 +406,14 @@ class SDKCameraThread(QThread):
                     else:
                         self.frame_ready.emit(qimg.copy(), buf.mem_ptr)
                 finally:
-                    pass  # Buffers from QueueSink.pop are often managed by the sink/pool, explicit unlock might not be needed
-                    # or could be harmful. Consult TIS examples for QueueSink.
+                    pass
 
                 now = time.monotonic()
                 dt = now - last_frame_time
-                target_interval = (
-                    1.0 / self.target_fps if self.target_fps > 0 else 0.05
-                )  # Avoid div by zero
+                target_interval = 1.0 / self.target_fps if self.target_fps > 0 else 0.05
                 if dt < target_interval:
                     sleep_duration_ms = int((target_interval - dt) * 1000)
-                    if sleep_duration_ms > 5:  # Only sleep if significant
+                    if sleep_duration_ms > 5:
                         self.msleep(sleep_duration_ms)
                 last_frame_time = time.monotonic()
 
@@ -455,21 +421,26 @@ class SDKCameraThread(QThread):
             log.error(f"RuntimeError in camera thread: {e}")
             self.camera_error.emit(str(e), type(e).__name__)
         except ic4.IC4Exception as e:
-            log.error(f"IC4Exception in camera thread: {e} (Code: {e.code})")
-            self.camera_error.emit(str(e), f"IC4Exception ({e.code})")
+            log.error(
+                f"IC4Exception in camera thread: {e} (Code: {e.code if hasattr(e,'code') else 'N/A'})"
+            )
+            self.camera_error.emit(
+                str(e), f"IC4Exception ({e.code if hasattr(e,'code') else 'N/A'})"
+            )
         except Exception as e:
             log.exception("Unhandled exception in camera thread:")
             self.camera_error.emit(str(e), type(e).__name__)
         finally:
             log.info("Camera thread run() method finishing...")
             if self.grabber:
-                if self.grabber.is_streaming():
+                # Corrected: access as property, not method
+                if self.grabber.is_streaming:
                     try:
                         log.info("Stopping stream...")
                         self.grabber.stream_stop()
                     except ic4.IC4Exception as e:
                         log.error(f"Error stopping stream: {e}")
-                if self.grabber.is_device_open:
+                if self.grabber.is_device_open:  # Corrected
                     try:
                         log.info("Closing device...")
                         self.grabber.device_close()
