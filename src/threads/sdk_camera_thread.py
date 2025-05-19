@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 class SDKCameraThread(QThread):
     """
     Thread handling TIS SDK camera grab and emitting live frames and camera properties.
-    Uses SnapSink + stream_setup + stream_start for continuous capture.
+    Uses SnapSink with continuous snap_single calls for live preview.
     """
 
     frame_ready = pyqtSignal(QImage, object)
@@ -57,7 +57,6 @@ class SDKCameraThread(QThread):
         self._pending_auto_exposure = enable
 
     def run(self):
-        self._stop_requested = False
         grabber = None
         sink = None
         try:
@@ -125,7 +124,7 @@ class SDKCameraThread(QThread):
             except Exception:
                 pass
 
-            # Apply initial settings
+            # Apply initial settings (best-effort)
             for pid_attr, value in [
                 ("WIDTH", self.desired_width),
                 ("HEIGHT", self.desired_height),
@@ -138,12 +137,10 @@ class SDKCameraThread(QThread):
                     except Exception as e:
                         log.warning(f"Could not set {pid_attr}={value}: {e}")
 
-            # Setup streaming sink
+            # Prepare SnapSink for individual frames
             sink = SnapSink()
-            grabber.stream_setup(sink, setup_option=StreamSetupOption.ACQUISITION_START)
-            grabber.stream_start()
-            log.info("Streaming started via SnapSink.")
 
+            log.info("Entering live capture loop via SnapSink.")
             last_time = time.time()
             while not self._stop_requested:
                 # Handle pending updates
@@ -168,7 +165,7 @@ class SDKCameraThread(QThread):
                         log.warning(f"Error updating auto exposure: {e}")
                     self._pending_auto_exposure = None
 
-                # Grab a frame
+                # Grab a frame (one-shot)
                 try:
                     img_buf = sink.snap_single(1000)
                     if hasattr(img_buf, "as_bytearray"):
@@ -214,14 +211,12 @@ class SDKCameraThread(QThread):
             log.exception(f"Error in SDKCameraThread: {e}")
             self.camera_error.emit(str(e), type(e).__name__)
         finally:
-            try:
-                grabber.stream_stop()
-            except Exception:
-                pass
-            try:
-                grabber.device_close()
-            except Exception:
-                pass
+            # Cleanup
+            if grabber:
+                try:
+                    grabber.device_close()
+                except Exception:
+                    pass
             log.info("Camera thread finished.")
 
     def stop(self):
