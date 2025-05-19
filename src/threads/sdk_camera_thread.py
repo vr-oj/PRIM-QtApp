@@ -3,7 +3,7 @@ import imagingcontrol4 as ic4
 import time
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
-from imagingcontrol4 import BufferSink, StreamSetupOption, ErrorCode, IC4Exception
+from imagingcontrol4 import SnapSink, StreamSetupOption, ErrorCode, IC4Exception
 from imagingcontrol4.properties import (
     PropInteger,
     PropBoolean,
@@ -16,7 +16,8 @@ log = logging.getLogger(__name__)
 
 class SDKCameraThread(QThread):
     """
-    Thread handling TIS SDK camera grab and emitting frames, resolutions, and properties.
+    Thread handling TIS SDK camera grab and emitting live frames and camera properties.
+    Uses SnapSink + stream_setup + stream_start for continuous capture.
     """
 
     frame_ready = pyqtSignal(QImage, object)
@@ -60,7 +61,7 @@ class SDKCameraThread(QThread):
         grabber = None
         sink = None
         try:
-            # Enumerate and open camera
+            # Enumerate and open device
             devices = ic4.DeviceEnum.devices()
             if not devices:
                 raise RuntimeError("No TIS cameras found - please connect a camera.")
@@ -69,12 +70,11 @@ class SDKCameraThread(QThread):
             dev = devices[0]
             log.info(f"Selected camera [0]: {dev.model_name} (S/N {dev.serial})")
 
-            # Open grabber
             grabber = ic4.Grabber()
             grabber.device_open(dev)
             pm = grabber.device_property_map
 
-            # Gather and emit camera properties
+            # Emit initial properties
             controls = {}
 
             def try_prop(name, pid):
@@ -117,7 +117,7 @@ class SDKCameraThread(QThread):
                     try_prop(name, getattr(ic4.PropId, attr))
             self.camera_properties_updated.emit(controls)
 
-            # Emit current resolution
+            # Emit available resolution
             try:
                 w = pm.get_value(ic4.PropId.WIDTH)
                 h = pm.get_value(ic4.PropId.HEIGHT)
@@ -125,7 +125,7 @@ class SDKCameraThread(QThread):
             except Exception:
                 pass
 
-            # Apply initial settings with guards
+            # Apply initial settings
             for pid_attr, value in [
                 ("WIDTH", self.desired_width),
                 ("HEIGHT", self.desired_height),
@@ -138,80 +138,78 @@ class SDKCameraThread(QThread):
                     except Exception as e:
                         log.warning(f"Could not set {pid_attr}={value}: {e}")
 
-            # Setup continuous streaming
-            sink = BufferSink()
+            # Setup streaming sink
+            sink = SnapSink()
             grabber.stream_setup(sink, setup_option=StreamSetupOption.ACQUISITION_START)
             grabber.stream_start()
+            log.info("Streaming started via SnapSink.")
 
-            # Main grab loop
             last_time = time.time()
             while not self._stop_requested:
-                # Handle pending UI updates
-                if self._pending_exposure is not None:
+                # Handle pending property updates
+                if self._pending_exposure is not None and pm.is_property_available(
+                    ic4.PropId.EXPOSURE
+                ):
                     try:
-                        pid = ic4.PropId.EXPOSURE
-                        if pm.is_property_available(pid):
-                            pm.set_value(pid, self._pending_exposure)
-                        else:
-                            log.warning("Exposure property not available.")
+                        pm.set_value(ic4.PropId.EXPOSURE, self._pending_exposure)
                     except Exception as e:
                         log.warning(f"Error updating exposure: {e}")
                     self._pending_exposure = None
-                if self._pending_gain is not None:
+                if self._pending_gain is not None and pm.is_property_available(
+                    ic4.PropId.GAIN
+                ):
                     try:
-                        pid = ic4.PropId.GAIN
-                        if pm.is_property_available(pid):
-                            pm.set_value(pid, self._pending_gain)
-                        else:
-                            log.warning("Gain property not available.")
+                        pm.set_value(ic4.PropId.GAIN, self._pending_gain)
                     except Exception as e:
                         log.warning(f"Error updating gain: {e}")
                     self._pending_gain = None
-                if self._pending_auto_exposure is not None:
+                if (
+                    self._pending_auto_exposure is not None
+                    and pm.is_property_available(ic4.PropId.EXPOSURE_AUTO)
+                ):
                     try:
-                        pid = ic4.PropId.EXPOSURE_AUTO
-                        if pm.is_property_available(pid):
-                            pm.set_value(pid, self._pending_auto_exposure)
-                        else:
-                            log.warning("Auto exposure property not available.")
+                        pm.set_value(
+                            ic4.PropId.EXPOSURE_AUTO, self._pending_auto_exposure
+                        )
                     except Exception as e:
                         log.warning(f"Error updating auto exposure: {e}")
                     self._pending_auto_exposure = None
 
-                # Wait for next buffer
-                buffer = sink.wait_for_buffer(timeout_ms=1000)
-                if buffer is None:
-                    log.warning("Timeout waiting for buffer.")
-                else:
-                    # Extract raw data
-                    data = getattr(buffer, "buffer", None)
-                    if data is None and hasattr(buffer, "as_bytearray"):
-                        data = buffer.as_bytearray()
-                    if data is None:
-                        try:
-                            data = bytes(buffer)
-                        except Exception as e_buf:
-                            log.error(f"Failed to extract buffer data: {e_buf}")
-                            continue
-                    stride = getattr(buffer, "stride", buffer.width)
-                    # Create QImage and emit
+                # Grab frame
+                try:
+                    img_buf = sink.snap_single(1000)
+                    data = None
+                    if hasattr(img_buf, "as_bytearray"):
+                        data = img_buf.as_bytearray()
+                    elif hasattr(img_buf, "buffer"):
+                        data = bytearray(img_buf.buffer)
+                    else:
+                        data = bytes(img_buf)
+                    stride = getattr(img_buf, "stride", img_buf.width)
                     qimg = QImage(
                         data,
-                        buffer.width,
-                        buffer.height,
+                        img_buf.width,
+                        img_buf.height,
                         stride,
                         QImage.Format_Indexed8,
                     )
-                    if qimg.isNull():
-                        log.warning("Failed to create QImage from buffer.")
-                    else:
+                    if not qimg.isNull():
                         self.frame_ready.emit(qimg.copy(), None)
+                    else:
+                        log.warning("Null QImage from buffer.")
+                except IC4Exception as e:
+                    if e.code == ErrorCode.Timeout:
+                        log.warning("Frame grab timeout.")
+                    else:
+                        log.error(f"IC4Exception in snap_single: {e} (Code: {e.code})")
+                except Exception as e:
+                    log.exception(f"Unexpected error grabbing frame: {e}")
 
-                # Throttle to target fps
+                # Throttle
                 elapsed = time.time() - last_time
-                to_sleep = max(0, (1.0 / self.target_fps) - elapsed)
-                if to_sleep > 0:
-                    self.msleep(int(to_sleep * 1000))
+                delay = max(0, (1.0 / self.target_fps) - elapsed)
+                if delay > 0:
+                    self.msleep(int(delay * 1000))
                 last_time = time.time()
 
         except IC4Exception as e:
@@ -221,10 +219,9 @@ class SDKCameraThread(QThread):
             log.error(f"RuntimeError: {e}")
             self.camera_error.emit(str(e), type(e).__name__)
         except Exception as e:
-            log.exception(f"Unexpected error in SDKCameraThread: {e}")
+            log.exception(f"Error in SDKCameraThread: {e}")
             self.camera_error.emit(str(e), type(e).__name__)
         finally:
-            # Clean up streaming and device
             try:
                 grabber.stream_stop()
             except Exception:
@@ -237,6 +234,6 @@ class SDKCameraThread(QThread):
 
     def stop(self):
         """
-        Signal the thread to stop. Caller should then wait() on the thread.
+        Request thread stop; caller should then wait() on the thread.
         """
         self._stop_requested = True
