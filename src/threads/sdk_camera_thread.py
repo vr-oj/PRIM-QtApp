@@ -479,87 +479,62 @@ class SDKCameraThread(QThread):
                 self._apply_pending_properties()
                 buf = None
                 try:
-                    # *** Try pop_output_buffer() with NO arguments first ***
-                    # If this gives an error about missing arguments, then try with positional timeout next.
+                    # *** Try pop_output_buffer() with NO arguments (non-blocking) ***
                     buf = self.sink.pop_output_buffer()
-                except ic4.IC4Exception as e:
-                    # If pop_output_buffer() with no args is blocking and uses internal timeout,
-                    # then ErrorCode.TIMEOUT is the expected outcome if no frame.
-                    if hasattr(e, "code") and e.code == ic4.ErrorCode.TIMEOUT:
+                except (
+                    ic4.IC4Exception
+                ) as e_pop:  # Catch IC4Exception from pop_output_buffer
+                    if hasattr(e_pop, "code") and e_pop.code == ic4.ErrorCode.TIMEOUT:
+                        # This case might not be hit if no-arg pop_output_buffer doesn't timeout but returns None
                         null_buffer_counter += 1
                         if null_buffer_counter > 0 and null_buffer_counter % 100 == 0:
                             log.warning(
-                                f"Still no frames after {null_buffer_counter/10.0:.1f}s of polling (pop_output_buffer timed out)."
+                                f"Still no frames after {null_buffer_counter/10.0:.1f}s of polling (pop_output_buffer with no args resulted in TIMEOUT exception)."
                             )
                         continue
+                    # For other IC4Exceptions from pop_output_buffer
                     log.error(
-                        f"IC4Exception during pop_output_buffer: {e}", exc_info=True
+                        f"IC4Exception during pop_output_buffer (no-arg): {e_pop}",
+                        exc_info=True,
                     )
                     self.camera_error.emit(
-                        str(e), f"SinkPop ({e.code if hasattr(e,'code') else 'N/A'})"
+                        str(e_pop),
+                        f"SinkPopNoArgErr ({e_pop.code if hasattr(e_pop,'code') else 'N/A'})",
                     )
                     break
                 except (
                     TypeError
-                ) as te:  # Catch TypeError specifically if no-arg call is wrong
+                ) as te:  # If pop_output_buffer() with no args causes a TypeError (e.g. it NEEDS an arg)
                     log.error(
-                        f"TypeError calling pop_output_buffer(): {te}. Trying with timeout argument."
+                        f"TypeError calling pop_output_buffer(): {te}. This means it likely requires a timeout argument positionally."
                     )
-                    try:
-                        buf = self.sink.pop_output_buffer(
-                            100
-                        )  # Try with positional timeout
-                    except ic4.IC4Exception as e_timeout:
-                        if (
-                            hasattr(e_timeout, "code")
-                            and e_timeout.code == ic4.ErrorCode.TIMEOUT
-                        ):
-                            null_buffer_counter += 1
-                            if (
-                                null_buffer_counter > 0
-                                and null_buffer_counter % 100 == 0
-                            ):
-                                log.warning(
-                                    f"Still no frames after {null_buffer_counter/10.0:.1f}s of polling (pop_output_buffer(100) timed out)."
-                                )
-                            continue
-                        log.error(
-                            f"IC4Exception during pop_output_buffer(100): {e_timeout}",
-                            exc_info=True,
-                        )
-                        self.camera_error.emit(
-                            str(e_timeout),
-                            f"SinkPopTimeout ({e_timeout.code if hasattr(e_timeout,'code') else 'N/A'})",
-                        )
-                        break
-                    except (
-                        Exception
-                    ) as e_other_pop:  # Catch other errors from pop_output_buffer(100)
-                        log.error(
-                            f"Error during pop_output_buffer(100): {e_other_pop}",
-                            exc_info=True,
-                        )
-                        self.camera_error.emit(str(e_other_pop), f"SinkPopOther")
-                        break
+                    self.camera_error.emit(str(te), "SinkPopSignatureError")
+                    break  # Exit loop as we can't get frames
+                except Exception as e_generic_pop:  # Catch any other unexpected error
+                    log.error(
+                        f"Generic Exception during pop_output_buffer (no-arg): {e_generic_pop}",
+                        exc_info=True,
+                    )
+                    self.camera_error.emit(str(e_generic_pop), "SinkPopGenericError")
+                    break
 
                 if (
                     buf is None
-                ):  # If pop_output_buffer() (no-arg) returns None for no frame.
+                ):  # If pop_output_buffer() is non-blocking and returns None when no frame
                     null_buffer_counter += 1
                     if null_buffer_counter > 0 and null_buffer_counter % 100 == 0:
                         log.warning(
                             f"Still no frames after {null_buffer_counter/10.0:.1f}s of polling (buf is None from pop_output_buffer)."
                         )
-                    # Add a small sleep if pop_output_buffer() is truly non-blocking and returns None immediately
-                    # to avoid a very tight loop.
-                    self.msleep(10)  # Sleep 10ms to yield CPU
+                    self.msleep(10)  # Yield/sleep briefly if non-blocking and no frame
                     continue
 
+                # If we reach here, buf should be a valid buffer
                 frame_counter += 1
                 log.info(
                     f"Frame {frame_counter}: Buffer received! W: {buf.image_type.width}, H: {buf.image_type.height}, Format: {buf.image_type.pixel_format.name}"
                 )
-                null_buffer_counter = 0
+                null_buffer_counter = 0  # Reset counter
 
                 try:
                     qimg = QImage(
@@ -577,6 +552,9 @@ class SDKCameraThread(QThread):
                         )
                         self.frame_ready.emit(qimg.copy(), buf.mem_ptr)
                 finally:
+                    # For QueueSink, buffers are typically reference counted.
+                    # Explicit buf.unlock() or buf.release() might be needed if using older SDK patterns or specific buffer types.
+                    # For now, assuming pop_output_buffer gives a buffer that's okay until next pop or it goes out of scope.
                     pass
 
                 now = time.monotonic()
@@ -598,18 +576,21 @@ class SDKCameraThread(QThread):
                 try:
                     is_streaming_flag = self.grabber.is_streaming
                 except:
-                    pass
+                    pass  # Ignore error if grabber state is unstable
+
                 if is_streaming_flag:
                     try:
                         self.grabber.stream_stop()
                         log.info("Stream stopped.")
                     except Exception as e:
                         log.error(f"Error stopping stream: {e}")
+
                 is_open_flag = False
                 try:
                     is_open_flag = self.grabber.is_device_open
                 except:
                     pass
+
                 if is_open_flag:
                     try:
                         self.grabber.device_close()
