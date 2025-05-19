@@ -215,22 +215,19 @@ class SDKCameraThread(QThread):
             # Clean up resources
             if sink:
                 try:
-                    sink.release()
+                    # SnapSink has no explicit release; delete reference to allow cleanup
+                    del sink
                 except Exception as e_release:
-                    log.error(f"Error releasing sink: {e_release}")
+                    log.error(f"Error deleting sink: {e_release}")
             if streaming:
                 try:
                     grabber.stream_stop()
                 except Exception as e_stop:
                     log.error(f"Error stopping stream: {e_stop}")
-            if grabber and getattr(grabber, "is_device_open", lambda: False)():
-                try:
+            # Close device if open
+            try:
+                if grabber and getattr(grabber, "is_device_open", False):
                     grabber.device_close()
-                except Exception as e_close:
-                    log.error(f"Error closing device: {e_close}")
+            except Exception as e_close:
+                log.error(f"Error closing device: {e_close}")
             log.info("Camera thread finished.")
-
-    def stop(self):
-        self._mutex.lock()
-        self._stop_requested = True
-        self._mutex.unlock()
