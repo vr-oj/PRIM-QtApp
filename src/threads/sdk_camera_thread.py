@@ -13,6 +13,10 @@ from imagingcontrol4.properties import (
     PropEnumEntry,
 )
 
+# DEFAULT_FRAME_SIZE might be needed if reading current W/H fails catastrophically
+from config import DEFAULT_FRAME_SIZE
+
+
 log = logging.getLogger(__name__)
 
 # Standard GenICam Property Names
@@ -37,6 +41,8 @@ class DummySinkListener:
         return True
 
     def frames_queued(self, sink, userdata):
+        # This callback would be used if we weren't polling with pop_queued_buffer.
+        # log.debug(f"DummyListener: Frames queued (userdata: {userdata})")
         pass
 
     def sink_disconnected(self, sink):
@@ -117,14 +123,17 @@ class SDKCameraThread(QThread):
                 self.pm.set_value(prop_name, value_to_set)
                 log.info(f"Set {prop.name} to {value_to_set}")
                 return True
-            elif prop and prop.is_available:
+            elif prop and prop.is_available:  # Property found but not writable
                 log.warning(
                     f"Property {prop.name} found but not writable (is_readonly={getattr(prop, 'is_readonly', 'N/A')})."
                 )
+            # Removed redundant elses as find() failing or prop not available is handled by _is_prop_writable or initial check
         except ic4.IC4Exception as e:
             log.warning(f"IC4Exception setting {prop_name} to {value_to_set}: {e}")
         except AttributeError as e:
-            log.warning(f"AttributeError for {prop_name} during set: {e}")
+            log.warning(
+                f"AttributeError for {prop_name} during set (e.g. find failed, or property object malformed): {e}"
+            )
         except Exception as e:
             log.warning(f"Generic error setting {prop_name} to {value_to_set}: {e}")
         return False
@@ -139,6 +148,7 @@ class SDKCameraThread(QThread):
             )
             auto_value_to_set_bool = self._pending_auto_exposure
             prop_auto_exp = self.pm.find(PROP_EXPOSURE_AUTO)
+
             if prop_auto_exp and prop_auto_exp.is_available:
                 success = False
                 if isinstance(prop_auto_exp, PropEnumeration):
@@ -157,7 +167,7 @@ class SDKCameraThread(QThread):
                         PROP_EXPOSURE_AUTO, auto_value_to_set_str
                     )
                 if success and not self._pending_auto_exposure:
-                    self._emit_camera_properties()
+                    self._emit_camera_properties()  # Update UI if auto exposure was turned off
             else:
                 log.warning(f"Property {PROP_EXPOSURE_AUTO} not available for update.")
             self._pending_auto_exposure = None
@@ -171,6 +181,7 @@ class SDKCameraThread(QThread):
                     is_auto_on = current_auto_val != "Off"
                 elif isinstance(current_auto_val, bool):
                     is_auto_on = current_auto_val
+
             if not is_auto_on:
                 self._set_property_value(PROP_EXPOSURE_TIME, self._pending_exposure_us)
             else:
@@ -196,14 +207,17 @@ class SDKCameraThread(QThread):
                 if prop_h_cam_obj and prop_h_cam_obj.is_available
                 else 0
             )
+
             if w > 0 and h > 0 and (w != current_w_cam or h != current_h_cam):
                 log.warning(
                     f"SDKCameraThread: ROI size change (req: {w}x{h}, curr: {current_w_cam}x{current_h_cam}) requested. Restart camera for new dimensions."
                 )
-            if x == 0 and y == 0 and w == 0 and h == 0:
+
+            if x == 0 and y == 0 and w == 0 and h == 0:  # Special case for reset
                 self._set_property_value(PROP_OFFSET_X, 0)
                 self._set_property_value(PROP_OFFSET_Y, 0)
-            else:
+                log.info("ROI reset request: Set OFFSET_X and OFFSET_Y to 0.")
+            else:  # Apply offsets based on ROI x,y
                 self._set_property_value(PROP_OFFSET_X, x)
                 self._set_property_value(PROP_OFFSET_Y, y)
             self._pending_roi = None
@@ -239,6 +253,7 @@ class SDKCameraThread(QThread):
                                 str(entry) for entry in prop_val.entries
                             ]
                         p_info["value"] = prop_val.value
+
                     if auto_prop_name:
                         prop_auto = self.pm.find(auto_prop_name)
                         if prop_auto and prop_auto.is_available:
@@ -265,6 +280,7 @@ class SDKCameraThread(QThread):
                     "min": 0,
                     "max": 0,
                 }
+
         roi_props_dict = {}
         try:
             for key, prop_name_str in [
@@ -449,7 +465,6 @@ class SDKCameraThread(QThread):
             log.info("Pausing briefly before stream_setup with ACQUISITION_START...")
             time.sleep(0.2)
 
-            # Use ACQUISITION_START directly in stream_setup
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
@@ -457,7 +472,7 @@ class SDKCameraThread(QThread):
                 "Stream setup with ACQUISITION_START attempted, and acquisition should be starting."
             )
 
-            log.info("Entering frame acquisition loop...")  # Moved this log here
+            log.info("Entering frame acquisition loop...")
             frame_counter = 0
             null_buffer_counter = 0
             last_frame_time = time.monotonic()
@@ -466,16 +481,20 @@ class SDKCameraThread(QThread):
                 self._apply_pending_properties()
                 buf = None
                 try:
-                    buf = self.sink.pop(timeout_ms=100)
+                    # Corrected: Use pop_queued_buffer
+                    buf = self.sink.pop_queued_buffer(timeout_ms=100)
                 except ic4.IC4Exception as e:
                     if hasattr(e, "code") and e.code == ic4.ErrorCode.TIMEOUT:
                         null_buffer_counter += 1
-                        if null_buffer_counter % 100 == 0:
+                        if null_buffer_counter > 0 and null_buffer_counter % 100 == 0:
                             log.warning(
-                                f"Still no frames after {null_buffer_counter/10.0:.1f}s of polling (sink.pop timed out)."
+                                f"Still no frames after {null_buffer_counter/10.0:.1f}s of polling (sink.pop_queued_buffer timed out)."
                             )
                         continue
-                    log.error(f"IC4Exception during sink.pop: {e}", exc_info=True)
+                    log.error(
+                        f"IC4Exception during sink.pop_queued_buffer: {e}",
+                        exc_info=True,
+                    )
                     self.camera_error.emit(
                         str(e), f"SinkPop ({e.code if hasattr(e,'code') else 'N/A'})"
                     )
@@ -485,7 +504,7 @@ class SDKCameraThread(QThread):
                     null_buffer_counter += 1
                     if null_buffer_counter > 0 and null_buffer_counter % 100 == 0:
                         log.warning(
-                            f"Still no frames after {null_buffer_counter/10.0:.1f}s of polling (buf is None)."
+                            f"Still no frames after {null_buffer_counter/10.0:.1f}s of polling (buf is None from pop_queued_buffer)."
                         )
                     continue
 
@@ -511,6 +530,9 @@ class SDKCameraThread(QThread):
                         )
                         self.frame_ready.emit(qimg.copy(), buf.mem_ptr)
                 finally:
+                    # With QueueSink, buffers are often reference counted or need specific release if not using context manager.
+                    # For now, assume pop_queued_buffer gives a buffer that's okay until next pop or thread stops.
+                    # If memory issues or buffer exhaustion occurs, buf.release() or similar might be needed.
                     pass
 
                 now = time.monotonic()
@@ -521,7 +543,7 @@ class SDKCameraThread(QThread):
                     if sleep_ms > 5:
                         self.msleep(sleep_ms)
                 last_frame_time = time.monotonic()
-            log.info("Exited frame acquisition loop.")  # Added this log
+            log.info("Exited frame acquisition loop.")
         except Exception as e:
             log.exception("Unhandled exception in SDKCameraThread.run():")
             self.camera_error.emit(str(e), type(e).__name__)
