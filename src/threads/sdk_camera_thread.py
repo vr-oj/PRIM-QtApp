@@ -1,5 +1,6 @@
 import logging
 import time
+import ctypes
 import imagingcontrol4 as ic4
 
 from PyQt5.QtCore import QThread, pyqtSignal
@@ -37,10 +38,8 @@ class DummySinkListener:
         )
         return True
 
-    # The QueueSink now only passes one argument here (the sink),
-    # so we drop the userdata parameter.
+    # The QueueSink now only passes one argument here.
     def frames_queued(self, sink):
-        # nothing to do
         pass
 
     def sink_disconnected(self, sink):
@@ -139,7 +138,6 @@ class SDKCameraThread(QThread):
                         else self._pending_auto_exposure
                     ),
                 )
-                # if turning auto off, emit updated exposure range
                 if not self._pending_auto_exposure:
                     self._emit_camera_properties()
             self._pending_auto_exposure = None
@@ -188,7 +186,7 @@ class SDKCameraThread(QThread):
                 pv = self.pm.find(pn_val)
                 if pv and pv.is_available:
                     info["enabled"] = self._is_prop_writable(pv)
-                    if isinstance(pv, PropInteger) or isinstance(pv, PropFloat):
+                    if isinstance(pv, (PropInteger, PropFloat)):
                         info.update(min=pv.minimum, max=pv.maximum, value=pv.value)
                     elif isinstance(pv, PropEnumeration):
                         info.update(
@@ -269,7 +267,6 @@ class SDKCameraThread(QThread):
                     if desired_pf in opts:
                         self._set_property_value(PROP_PIXEL_FORMAT, desired_pf)
                     else:
-                        # fallback to whatever is available
                         desired_pf = current_pf
                 self.current_pixel_format_name = self.pm.find(PROP_PIXEL_FORMAT).value
                 if self.current_pixel_format_name.replace(" ", "") != "Mono8":
@@ -321,7 +318,7 @@ class SDKCameraThread(QThread):
                 self.sink.accept_incomplete_frames = False
             log.info("QueueSink created.")
 
-            # *** FIX: pass None for the Display parameter ***
+            # start streaming to the sink (no Display)
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
@@ -338,18 +335,14 @@ class SDKCameraThread(QThread):
                 try:
                     buf = self.sink.pop_output_buffer()
                 except ic4.IC4Exception as e_pop:
-                    # extract the enum member name
                     code_name = getattr(e_pop, "code", None)
                     code_name = code_name.name if code_name else ""
-                    # treat NoData and timeout both as "no frame yet"
                     if "NoData" in code_name or "Time" in code_name:
                         nbc += 1
                         if nbc % 200 == 0:
-                            sec = nbc * 0.05
-                            log.warning(f"No frames after ~{sec:.1f}s of polling.")
+                            log.warning(f"No frames after ~{nbc*0.05:.1f}s polling")
                         self.msleep(50)
                         continue
-                    # unexpected error
                     log.error("IC4Exception during pop_output_buffer", exc_info=True)
                     self.camera_error.emit(str(e_pop), f"SinkPop ({code_name})")
                     break
@@ -357,9 +350,8 @@ class SDKCameraThread(QThread):
                 if buf is None:
                     nbc += 1
                     if nbc % 200 == 0:
-                        sec = nbc * 0.05
                         log.warning(
-                            f"pop_output_buffer returned None after ~{sec:.1f}s"
+                            f"pop_output_buffer returned None after ~{nbc*0.05:.1f}s"
                         )
                     self.msleep(50)
                     continue
@@ -376,35 +368,39 @@ class SDKCameraThread(QThread):
                     w = buf.image_type.width
                     h = buf.image_type.height
                     fmt = self.actual_qimage_format
-                    # Mono8 = 1 byte per pixel, so stride = width * 1
-                    stride = w
+                    stride = w  # Mono8 = 1 byte/pixel
 
-                    if hasattr(buf, "mem_ptr"):
-                        # older versions
-                        data_src = buf.mem_ptr
-                    elif hasattr(buf, "buffer_ptr"):
-                        # some versions
-                        data_src = buf.buffer_ptr
-                    elif hasattr(buf, "buffer"):
-                        # Python buffer (bytes/bytearray/memoryview)
-                        data_src = buf.buffer
-                    elif hasattr(buf, "data"):
-                        # alternate Python buffer attribute
-                        data_src = buf.data
-                    else:
-                        # last resort, hope it supports buffer protocol
-                        data_src = memoryview(buf)
+                    # On the first frame, dump attrs so we know what to pick
+                    if fc == 1:
+                        log.debug(f"ImageBuffer attrs: {dir(buf)}")
 
-                    img = QImage(data_src, w, h, stride, fmt)
+                    raw = None
+                    for attr in ("buffer", "data", "mem_ptr", "buffer_ptr"):
+                        if hasattr(buf, attr):
+                            raw = getattr(buf, attr)
+                            if attr in ("mem_ptr", "buffer_ptr"):
+                                raw = ctypes.string_at(raw, w * h)
+                            break
+
+                    if raw is None:
+                        log.error(
+                            f"No buffer-like attribute on ImageBuffer; attrs: {dir(buf)}"
+                        )
+                        continue
+
+                    if not isinstance(raw, (bytes, bytearray, memoryview)):
+                        raw = bytes(raw)
+
+                    img = QImage(raw, w, h, stride, fmt)
                     if img.isNull():
                         log.warning(f"Frame {fc}: QImage isNull.")
                     else:
-                        # copy it off the temporary backing
-                        self.frame_ready.emit(img.copy(), data_src)
+                        self.frame_ready.emit(img.copy(), raw)
+
                 except Exception as e_img:
                     log.error(f"Error constructing QImage: {e_img}", exc_info=True)
 
-                # pace ourselves
+                # pacing
                 now = time.monotonic()
                 dt = now - last_ft
                 target_interval = 1.0 / self.target_fps if self.target_fps > 0 else 0.05
