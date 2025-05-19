@@ -35,16 +35,11 @@ class SDKCameraThread(QThread):
         self._mutex = QMutex()
         self._stop_requested = False
         self.target_fps = target_fps
-
-        # Desired settings
         self.desired_width = width
         self.desired_height = height
-        self.desired_pixel_format = pixel_format
         self.desired_exposure = exposure_us
         self.desired_gain = None
         self.desired_auto_exposure = None
-
-        # Pending updates from the UI
         self._pending_exposure = None
         self._pending_gain = None
         self._pending_auto_exposure = None
@@ -59,14 +54,11 @@ class SDKCameraThread(QThread):
         self._pending_auto_exposure = enable
 
     def run(self):
-        """
-        Main thread loop: open device, configure it, setup stream, and grab frames via a SnapSink.
-        """
         self._stop_requested = False
         grabber = None
         sink = None
+        use_stream = False
         try:
-            # Enumerate and open camera
             devices = ic4.DeviceEnum.devices()
             if not devices:
                 raise RuntimeError("No TIS cameras found - please connect a camera.")
@@ -79,7 +71,7 @@ class SDKCameraThread(QThread):
             grabber.device_open(dev)
             pm = grabber.device_property_map
 
-            # Gather and emit initial properties
+            # Emit initial properties and resolutions
             controls = {}
 
             def try_prop(name, pid):
@@ -122,14 +114,12 @@ class SDKCameraThread(QThread):
                 if hasattr(ic4.PropId, attr):
                     try_prop(name, getattr(ic4.PropId, attr))
             self.camera_properties_updated.emit(controls)
-            # Emit current resolution if available
-            if hasattr(ic4.PropId, "WIDTH") and hasattr(ic4.PropId, "HEIGHT"):
-                try:
-                    w = pm.get_value(ic4.PropId.WIDTH)
-                    h = pm.get_value(ic4.PropId.HEIGHT)
-                    self.camera_resolutions_available.emit([(w, h)])
-                except Exception:
-                    pass
+            try:
+                w = pm.get_value(ic4.PropId.WIDTH)
+                h = pm.get_value(ic4.PropId.HEIGHT)
+                self.camera_resolutions_available.emit([(w, h)])
+            except Exception:
+                pass
 
             # Safely apply settings
             for pid_attr, value in [
@@ -143,16 +133,23 @@ class SDKCameraThread(QThread):
                     except Exception as e:
                         log.warning(f"Could not set {pid_attr}={value}: {e}")
 
-            # Setup SnapSink for streaming
-            sink = ic4.SnapSink()
-            grabber.stream_setup(
-                sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
-            )
+            # Try stream setup
+            try:
+                sink = ic4.SnapSink()
+                grabber.stream_setup(
+                    sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
+                )
+                use_stream = True
+                log.info("Using SnapSink streaming mode.")
+            except Exception as e:
+                log.warning(
+                    f"Could not start streaming mode, falling back to snap_single: {e}"
+                )
+                sink = None
 
             import time
 
             last_time = time.time()
-            # Grabbing loop
             while True:
                 self._mutex.lock()
                 if self._stop_requested:
@@ -160,7 +157,7 @@ class SDKCameraThread(QThread):
                     break
                 self._mutex.unlock()
 
-                # Handle UI-driven updates
+                # Pending updates
                 if self._pending_exposure is not None and hasattr(
                     ic4.PropId, "EXPOSURE"
                 ):
@@ -186,8 +183,12 @@ class SDKCameraThread(QThread):
                         log.warning(f"Error updating auto_exposure: {e}")
                     self._pending_auto_exposure = None
 
-                # Snap a single image
-                result = sink.snap_single(ic4.Timeout(1000))
+                # Acquire frame
+                if use_stream and sink:
+                    result = sink.snap_single(ic4.Timeout(1000))
+                else:
+                    result = grabber.snap_single(ic4.Timeout(1000))
+
                 if result.is_ok:
                     img = result.image
                     frame = img.as_bytearray()
@@ -196,7 +197,6 @@ class SDKCameraThread(QThread):
                 else:
                     log.warning("Frame grab timeout or error.")
 
-                # Throttle to target FPS
                 elapsed = time.time() - last_time
                 to_sleep = max(0, (1.0 / self.target_fps) - elapsed)
                 if to_sleep > 0:
@@ -207,22 +207,24 @@ class SDKCameraThread(QThread):
             log.exception(f"Error in SDKCameraThread: {e}")
             try:
                 self.camera_error.emit(str(e), type(e).__name__)
-            except Exception:
+            except:
                 pass
         finally:
-            # Clean up
             if sink:
                 try:
                     sink.release()
-                except Exception:
+                except:
                     pass
             if grabber:
                 try:
                     if grabber.is_streaming:
                         grabber.stream_stop()
+                except:
+                    pass
+                try:
                     if grabber.is_device_open:
                         grabber.device_close()
-                except Exception:
+                except:
                     pass
             log.info("Camera thread finished.")
 
