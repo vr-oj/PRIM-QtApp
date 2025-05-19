@@ -373,29 +373,33 @@ class SDKCameraThread(QThread):
 
                 # build a QImage directly from the buffer
                 try:
-                    # FIX: new API uses .buffer_ptr (or .buffer) instead of .mem_ptr
-                    if hasattr(buf, "buffer_ptr"):
-                        ptr = buf.buffer_ptr
-                    elif hasattr(buf, "mem_ptr"):
-                        ptr = buf.mem_ptr
-                    elif hasattr(buf, "buffer"):
-                        ptr = buf.buffer
-                    else:
-                        raise AttributeError(
-                            "Cannot find buffer pointer on ImageBuffer"
-                        )
+                    w = buf.image_type.width
+                    h = buf.image_type.height
+                    stride = buf.image_type.stride_bytes
+                    fmt = self.actual_qimage_format
 
-                    img = QImage(
-                        ptr,
-                        buf.image_type.width,
-                        buf.image_type.height,
-                        buf.image_type.stride_bytes,
-                        self.actual_qimage_format,
-                    )
-                    if not img.isNull():
-                        self.frame_ready.emit(img.copy(), ptr)
+                    if hasattr(buf, "mem_ptr"):
+                        # older versions
+                        data_src = buf.mem_ptr
+                    elif hasattr(buf, "buffer_ptr"):
+                        # some versions
+                        data_src = buf.buffer_ptr
+                    elif hasattr(buf, "buffer"):
+                        # Python buffer (bytes/bytearray/memoryview)
+                        data_src = buf.buffer
+                    elif hasattr(buf, "data"):
+                        # alternate Python buffer attribute
+                        data_src = buf.data
                     else:
+                        # last resort, hope it supports buffer protocol
+                        data_src = memoryview(buf)
+
+                    img = QImage(data_src, w, h, stride, fmt)
+                    if img.isNull():
                         log.warning(f"Frame {fc}: QImage isNull.")
+                    else:
+                        # copy it off the temporary backing
+                        self.frame_ready.emit(img.copy(), data_src)
                 except Exception as e_img:
                     log.error(f"Error constructing QImage: {e_img}", exc_info=True)
 
