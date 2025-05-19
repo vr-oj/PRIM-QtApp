@@ -17,7 +17,6 @@ class SDKCameraThread(QThread):
     Thread handling TIS SDK camera grab and emitting frames, resolutions, and properties.
     """
 
-    # Signals for frame delivery, errors, resolutions, and properties
     frame_ready = pyqtSignal(QImage, object)
     camera_resolutions_available = pyqtSignal(list)
     camera_properties_updated = pyqtSignal(dict)
@@ -60,10 +59,14 @@ class SDKCameraThread(QThread):
         self._pending_auto_exposure = enable
 
     def run(self):
+        """
+        Main thread loop: open device, configure it, setup stream, and grab frames via a SnapSink.
+        """
         self._stop_requested = False
         grabber = None
+        sink = None
         try:
-            # ─── Enumerate and open camera ─────────────────────────
+            # Enumerate and open camera
             devices = ic4.DeviceEnum.devices()
             if not devices:
                 raise RuntimeError("No TIS cameras found - please connect a camera.")
@@ -76,28 +79,80 @@ class SDKCameraThread(QThread):
             grabber.device_open(dev)
             pm = grabber.device_property_map
 
-            # ─── Apply desired settings with safeguards ────────────
-            if hasattr(ic4.PropId, "WIDTH"):
-                try:
-                    pm.set_value(ic4.PropId.WIDTH, self.desired_width)
-                except Exception as e:
-                    log.warning(f"Could not set WIDTH={self.desired_width}: {e}")
-            if hasattr(ic4.PropId, "HEIGHT"):
-                try:
-                    pm.set_value(ic4.PropId.HEIGHT, self.desired_height)
-                except Exception as e:
-                    log.warning(f"Could not set HEIGHT={self.desired_height}: {e}")
-            if hasattr(ic4.PropId, "EXPOSURE"):
-                try:
-                    pm.set_value(ic4.PropId.EXPOSURE, self.desired_exposure)
-                except Exception as e:
-                    log.warning(f"Could not set EXPOSURE={self.desired_exposure}: {e}")
+            # Gather and emit initial properties
+            controls = {}
 
-            # ─── Start acquisition ──────────────────────────────────
-            grabber.stream_start()
+            def try_prop(name, pid):
+                try:
+                    prop = pm.find(pid)
+                    if isinstance(prop, PropInteger):
+                        controls[name] = {
+                            "enabled": True,
+                            "min": int(prop.minimum),
+                            "max": int(prop.maximum),
+                            "value": int(prop.value),
+                        }
+                    elif isinstance(prop, PropFloat):
+                        controls[name] = {
+                            "enabled": True,
+                            "min": float(prop.minimum),
+                            "max": float(prop.maximum),
+                            "value": float(prop.value),
+                        }
+                    elif isinstance(prop, PropBoolean):
+                        controls[name] = {"enabled": True, "value": bool(prop.value)}
+                    elif isinstance(prop, PropEnumeration):
+                        choices = prop.options
+                        controls[name] = {
+                            "enabled": True,
+                            "options": choices,
+                            "value": prop.get_value_str(),
+                        }
+                except Exception:
+                    pass
+
+            prop_map = {
+                "width": "WIDTH",
+                "height": "HEIGHT",
+                "exposure": "EXPOSURE",
+                "gain": "GAIN",
+                "auto_exposure": "EXPOSURE_AUTO",
+            }
+            for name, attr in prop_map.items():
+                if hasattr(ic4.PropId, attr):
+                    try_prop(name, getattr(ic4.PropId, attr))
+            self.camera_properties_updated.emit(controls)
+            # Emit current resolution if available
+            if hasattr(ic4.PropId, "WIDTH") and hasattr(ic4.PropId, "HEIGHT"):
+                try:
+                    w = pm.get_value(ic4.PropId.WIDTH)
+                    h = pm.get_value(ic4.PropId.HEIGHT)
+                    self.camera_resolutions_available.emit([(w, h)])
+                except Exception:
+                    pass
+
+            # Safely apply settings
+            for pid_attr, value in [
+                ("WIDTH", self.desired_width),
+                ("HEIGHT", self.desired_height),
+                ("EXPOSURE", self.desired_exposure),
+            ]:
+                if hasattr(ic4.PropId, pid_attr):
+                    try:
+                        pm.set_value(getattr(ic4.PropId, pid_attr), value)
+                    except Exception as e:
+                        log.warning(f"Could not set {pid_attr}={value}: {e}")
+
+            # Setup SnapSink for streaming
+            sink = ic4.SnapSink()
+            grabber.stream_setup(
+                sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
+            )
+
             import time
 
             last_time = time.time()
+            # Grabbing loop
             while True:
                 self._mutex.lock()
                 if self._stop_requested:
@@ -105,7 +160,7 @@ class SDKCameraThread(QThread):
                     break
                 self._mutex.unlock()
 
-                # Pending UI updates
+                # Handle UI-driven updates
                 if self._pending_exposure is not None and hasattr(
                     ic4.PropId, "EXPOSURE"
                 ):
@@ -131,8 +186,8 @@ class SDKCameraThread(QThread):
                         log.warning(f"Error updating auto_exposure: {e}")
                     self._pending_auto_exposure = None
 
-                # Snap a frame
-                result = grabber.snap_single(ic4.Timeout(1000))
+                # Snap a single image
+                result = sink.snap_single(ic4.Timeout(1000))
                 if result.is_ok:
                     img = result.image
                     frame = img.as_bytearray()
@@ -156,6 +211,11 @@ class SDKCameraThread(QThread):
                 pass
         finally:
             # Clean up
+            if sink:
+                try:
+                    sink.release()
+                except Exception:
+                    pass
             if grabber:
                 try:
                     if grabber.is_streaming:
