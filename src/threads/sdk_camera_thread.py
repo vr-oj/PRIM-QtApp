@@ -72,6 +72,10 @@ class SDKCameraThread(QThread):
         self._pending_auto_exposure = None
         self._pending_roi = None
 
+        # throttle applying camera‐properties (sec)
+        self._prop_throttle_interval = 0.1
+        self._last_prop_apply_time = 0.0
+
         # runtime state
         self.grabber = None
         self.sink = None
@@ -114,6 +118,23 @@ class SDKCameraThread(QThread):
         return False
 
     def _apply_pending_properties(self):
+        # throttle so we only ever hit the driver ~10×/s at most
+        now = time.monotonic()
+        any_pending = any(
+            x is not None
+            for x in (
+                self._pending_auto_exposure,
+                self._pending_exposure_us,
+                self._pending_gain_db,
+                self._pending_roi,
+            )
+        )
+        if not any_pending:
+            return
+        if now - self._last_prop_apply_time < self._prop_throttle_interval:
+            return
+        self._last_prop_apply_time = now
+
         if not (self.pm and self.grabber and self.grabber.is_device_open):
             return
 
@@ -272,7 +293,7 @@ class SDKCameraThread(QThread):
                 if hp and hp.is_available and self._is_prop_writable(hp):
                     self._set_property_value(PROP_HEIGHT, hp.maximum)
 
-                # reset any ROI offsets
+                # reset any ROI
                 self._set_property_value(PROP_OFFSET_X, 0)
                 self._set_property_value(PROP_OFFSET_Y, 0)
 
@@ -313,8 +334,10 @@ class SDKCameraThread(QThread):
             no_data_count = 0
 
             while not self._stop_requested:
+                # only apply properties at most 10×/s
                 self._apply_pending_properties()
 
+                # pull next frame
                 try:
                     buf = self.sink.pop_output_buffer()
                 except ic4.IC4Exception as ex:
@@ -346,26 +369,25 @@ class SDKCameraThread(QThread):
                     f"Frame {frame_count}: {w}×{h}, {buf.image_type.pixel_format.name}"
                 )
 
-                # ── extract raw Mono8 bytes ─────────────────
+                # extract raw Mono8 bytes
                 try:
                     fmt = self.actual_qimage_format
                     stride = w
-
                     raw = None
 
-                    # try numpy_wrap first
+                    # 1) numpy_wrap
                     if hasattr(buf, "numpy_wrap"):
                         arr = buf.numpy_wrap()
                         stride = arr.strides[0]
                         raw = arr.tobytes()
 
-                    # fallback to numpy_copy
+                    # 2) numpy_copy
                     elif hasattr(buf, "numpy_copy"):
                         arr = buf.numpy_copy()
                         stride = arr.strides[0]
                         raw = arr.tobytes()
 
-                    # last fallback: pointer + pitch
+                    # 3) pointer + pitch
                     elif hasattr(buf, "pointer"):
                         ptr = buf.pointer
                         pitch = getattr(buf, "pitch", w)
@@ -384,7 +406,7 @@ class SDKCameraThread(QThread):
                 except Exception:
                     log.error("QImage construction failed", exc_info=True)
 
-                # pacing to target FPS
+                # pace to target FPS
                 now = time.monotonic()
                 dt = now - last
                 target = 1.0 / self.target_fps if self.target_fps > 0 else 0.05
