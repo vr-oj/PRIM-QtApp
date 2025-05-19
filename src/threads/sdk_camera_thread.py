@@ -375,8 +375,9 @@ class SDKCameraThread(QThread):
                 try:
                     w = buf.image_type.width
                     h = buf.image_type.height
-                    stride = buf.image_type.stride_bytes
                     fmt = self.actual_qimage_format
+                    # Mono8 = 1 byte per pixel, so stride = width * 1
+                    stride = w
 
                     if hasattr(buf, "mem_ptr"):
                         # older versions
