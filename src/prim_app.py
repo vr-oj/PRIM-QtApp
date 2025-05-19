@@ -5,18 +5,14 @@ import traceback
 import logging
 
 # --- Module-level IC4 Initialization Block ---
-# Define defaults first
 IC4_AVAILABLE = False
-IC4_INITIALIZED = False  # This will be the single source of truth
-ic4_library_module = None  # To hold the imported 'ic4' module
-_ic4_init_attempt_complete = (
-    False  # Flag to ensure the init logic runs only once effectively
+IC4_INITIALIZED = False
+ic4_library_module = None
+_ic4_init_has_run_successfully_this_session = (
+    False  # Tracks if init() has ever succeeded
 )
 
-# Configure basic logging here for module-level activities BEFORE config.py might reconfigure it.
-# This ensures these early logs are captured.
-module_log = logging.getLogger("prim_app_module_setup")  # Specific logger name
-# Avoid adding handlers if root logger already has them from a previous import or if this runs multiple times
+module_log = logging.getLogger("prim_app.setup")
 if not module_log.handlers:
     handler = logging.StreamHandler(sys.stdout)
     formatter = logging.Formatter(
@@ -24,73 +20,71 @@ if not module_log.handlers:
     )
     handler.setFormatter(formatter)
     module_log.addHandler(handler)
-    module_log.setLevel(logging.INFO)  # Default to INFO for these setup logs
+    module_log.setLevel(logging.INFO)
 
 
 def _initialize_ic4_globally():
-    """
-    Tries to initialize the IC4 library. Should only effectively run init() once.
-    Sets global IC4_AVAILABLE, IC4_INITIALIZED, and ic4_library_module.
-    """
-    global IC4_AVAILABLE, IC4_INITIALIZED, ic4_library_module, _ic4_init_attempt_complete
+    global IC4_AVAILABLE, IC4_INITIALIZED, ic4_library_module, _ic4_init_has_run_successfully_this_session
 
-    if (
-        _ic4_init_attempt_complete and IC4_INITIALIZED
-    ):  # If successfully initialized once, do nothing more.
-        module_log.info(
-            "IC4 library already successfully initialized. Skipping re-init attempt."
-        )
-        return
+    # If we know it succeeded at any point in this Python session, ensure flags reflect that.
+    # This handles the case where this function is called again after __main__ already succeeded.
+    if _ic4_init_has_run_successfully_this_session:
+        IC4_AVAILABLE = True  # It must have been available if init succeeded
+        IC4_INITIALIZED = True
+        if (
+            ic4_library_module is None and IC4_AVAILABLE
+        ):  # Re-import ic4 if not set (e.g. in new module scope)
+            try:
+                import imagingcontrol4 as ic4
 
-    if (
-        _ic4_init_attempt_complete and not IC4_INITIALIZED
-    ):  # If attempted and failed, don't retry.
+                ic4_library_module = ic4
+            except ImportError:
+                IC4_AVAILABLE = False  # Should not happen if it was available before
+                IC4_INITIALIZED = False
         module_log.info(
-            "IC4 library initialization previously attempted and failed. Skipping re-init attempt."
+            "IC4 library previously initialized successfully in this session."
         )
         return
 
     module_log.info("Attempting IC4 library initialization sequence...")
-    _ic4_init_attempt_complete = True  # Mark that we are attempting/have attempted.
 
     try:
         import imagingcontrol4 as ic4
 
-        ic4_library_module = ic4  # Store the imported module reference
+        ic4_library_module = ic4
         IC4_AVAILABLE = True
         module_log.info("imagingcontrol4 library module imported.")
         try:
             ic4.Library.init()
-            IC4_INITIALIZED = True  # Set to True on successful init
+            IC4_INITIALIZED = True
+            _ic4_init_has_run_successfully_this_session = (
+                True  # Mark success for this session
+            )
             module_log.info("ic4.Library.init() called successfully.")
-        except ic4.IC4Exception as e:
-            # Check if the specific error is that it's already initialized
-            # The error message from the log is: "Library.init was already called"
-            err_msg_lower = str(e).lower()
+        except Exception as e_init:  # Catch any exception from init()
+            err_msg_lower = str(e_init).lower()
+            # Check for common phrases indicating already initialized
             if (
                 "already called" in err_msg_lower
                 or "already been initialized" in err_msg_lower
+                or "library is already initialized" in err_msg_lower
             ):
                 module_log.warning(
-                    f"ic4.Library.init() indicated already initialized: {e}. Considering this a success."
+                    f"ic4.Library.init() failed but indicates already initialized: {e_init}. Considering this a success."
                 )
-                IC4_INITIALIZED = (
-                    True  # If already initialized by a previous load, treat as success
-                )
+                IC4_INITIALIZED = True
+                _ic4_init_has_run_successfully_this_session = True  # Mark success
             else:
                 module_log.error(
-                    f"Failed to initialize imagingcontrol4 library: {e} (Code: {e.code if hasattr(e,'code') else 'N/A'})"
+                    f"Failed to initialize imagingcontrol4 library during init(): {e_init}"
                 )
-                IC4_INITIALIZED = False  # Explicitly False on other errors
-        except Exception as e:  # Other errors during init()
-            module_log.error(f"Unexpected error during ic4.Library.init(): {e}")
-            IC4_INITIALIZED = False
+                IC4_INITIALIZED = False
     except ImportError:
         module_log.warning("imagingcontrol4 library (ic4) not found on import.")
         IC4_AVAILABLE = False
         IC4_INITIALIZED = False
-    except Exception as e:  # Other errors during import imagingcontrol4
-        module_log.error(f"Unexpected error importing imagingcontrol4: {e}")
+    except Exception as e_import:
+        module_log.error(f"Unexpected error importing imagingcontrol4: {e_import}")
         IC4_AVAILABLE = False
         IC4_INITIALIZED = False
 
@@ -99,7 +93,6 @@ def _initialize_ic4_globally():
     )
 
 
-# Call the initialization function when this module (prim_app.py) is first loaded.
 _initialize_ic4_globally()
 # --- End of module-level IC4 initialization ---
 
@@ -107,28 +100,21 @@ _initialize_ic4_globally()
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication, QLoggingCategory
 
-# Configuration & logging (this might reconfigure logging if config.py is found)
-# The main application logger 'log' will be set up here.
 try:
     from config import APP_NAME, LOG_LEVEL, APP_VERSION as CONFIG_APP_VERSION
 
-    # Reconfigure ROOT logging based on config.py
-    # This ensures all subsequent loggers inherit this configuration.
-    # Remove existing handlers from root to avoid duplicate messages if this is re-run in some context
     root_logger = logging.getLogger()
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-        handler.close()  # Explicitly close handler
+    for handler_item in root_logger.handlers[:]:  # Use different var name
+        root_logger.removeHandler(handler_item)
+        handler_item.close()
 
     level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
     logging.basicConfig(
         level=level,
         format="%(asctime)s - %(levelname)s [%(name)s:%(lineno)d] %(threadName)s - %(message)s",
-        force=True,  # force=True (Python 3.8+) reconfigures root logger
+        force=True,
     )
-    log = logging.getLogger(
-        __name__
-    )  # Get logger for the current module (__main__ or prim_app)
+    log = logging.getLogger(__name__)
     log.info("Root logging reconfigured from config.py.")
 except ImportError:
     APP_NAME = "PRIM Application"
@@ -141,9 +127,7 @@ except Exception as e:
     log = logging.getLogger(__name__)
     log.error(f"Error loading config.py or reconfiguring logging: {e}")
 
-
 log.info(f"After config, prim_app module's IC4_INITIALIZED state: {IC4_INITIALIZED}")
-
 
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 QLoggingCategory.setFilterRules("qt.qss.styleSheet=false")
@@ -190,8 +174,6 @@ def _cleanup_ic4():
 
 
 def main_app_entry():
-    # Ensure _initialize_ic4_globally() has run. It runs on module import.
-    # Log the state again here for clarity when main_app_entry starts.
     log.info(
         f"main_app_entry started. IC4_AVAILABLE: {IC4_AVAILABLE}, IC4_INITIALIZED: {IC4_INITIALIZED}"
     )
@@ -203,17 +185,15 @@ def main_app_entry():
 
     app = QApplication(sys.argv)
 
-    if (
-        not IC4_INITIALIZED
-    ):  # Show warning if not successfully initialized for any reason
-        if IC4_AVAILABLE:  # Found but failed to init
+    if not IC4_INITIALIZED:
+        if IC4_AVAILABLE:
             QMessageBox.warning(
                 None,
                 "Camera SDK Problem",
                 f"TIS camera SDK (imagingcontrol4) was found but could not be initialized.\n"
                 "TIS camera functionality will be unavailable. Please check logs for details.",
             )
-        else:  # Not found at all
+        else:
             QMessageBox.warning(
                 None,
                 "Camera SDK Missing",
@@ -269,7 +249,7 @@ def main_app_entry():
 
 
 if __name__ == "__main__":
-    # The _initialize_ic4_globally() function runs when this module is first imported or run.
-    # So, IC4_INITIALIZED reflects the state of that single attempt.
-    log.info(f"Running prim_app.py as __main__. IC4_INITIALIZED is: {IC4_INITIALIZED}")
+    log.info(
+        f"Running prim_app.py as __main__. IC4_INITIALIZED at this point: {IC4_INITIALIZED}"
+    )
     main_app_entry()
