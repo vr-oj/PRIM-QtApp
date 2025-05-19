@@ -37,10 +37,9 @@ try:
     _IC4_INITIALIZED = getattr(prim_app, "IC4_INITIALIZED", False)
 
     if _IC4_INITIALIZED:
-        # _ic4_module should be assigned from prim_app.ic4_library_module
         if hasattr(prim_app, "ic4_library_module"):
             _ic4_module = prim_app.ic4_library_module
-        else:  # Fallback if prim_app structure changes, though less ideal
+        else:
             import imagingcontrol4 as ic4_sdk
 
             _ic4_module = ic4_sdk
@@ -70,7 +69,9 @@ log = logging.getLogger(__name__)
 
 class CameraControlPanel(QGroupBox):
     camera_selected = pyqtSignal(object)
-    resolution_selected = pyqtSignal(str)
+    resolution_selected = pyqtSignal(
+        str
+    )  # This signal will carry the string from the combobox
     exposure_changed = pyqtSignal(int)
     gain_changed = pyqtSignal(float)
     auto_exposure_toggled = pyqtSignal(bool)
@@ -197,19 +198,15 @@ class CameraControlPanel(QGroupBox):
             self.cam_selector.count() > 1
             or (
                 self.cam_selector.count() == 1
-                and self.cam_selector.itemData(0).value()
-                is not None  # Check if the placeholder is the only item
+                and self.cam_selector.itemData(0).value() is not None
             )
         )
         self.cam_selector.blockSignals(False)
 
-        # If only one actual camera is found (plus "Select Camera..."), select it by default
-        # Or if a default camera logic is preferred. For now, just trigger if current index is valid.
         if self.cam_selector.currentIndex() >= 0:
             self._on_camera_selection_changed(self.cam_selector.currentIndex())
 
     def _on_camera_selection_changed(self, index):
-        # --- THIS IS THE CORRECTED PART for AttributeError ---
         selected_data_variant = self.cam_selector.itemData(index)
         device_info = None
         actual_data = None
@@ -237,56 +234,65 @@ class CameraControlPanel(QGroupBox):
                 f"Unexpected data type from cam_selector: {type(actual_data)}. Treating as no selection."
             )
             device_info = None
-        # --- End of corrected part ---
 
         self.camera_selected.emit(device_info)
         if device_info is None:
             self.disable_all_controls()
 
     def _on_resolution_selection_changed(self, index):
-        res_str_variant = self.res_selector.itemData(index)
-        if res_str_variant is not None:
-            res_str = res_str_variant.value()
-            if res_str and isinstance(res_str, str):  # Ensure it's a non-empty string
-                self.resolution_selected.emit(res_str)
-            elif res_str is not None:  # It was a QVariant but contained something else
-                log.warning(
-                    f"Resolution combobox data was not a string: {type(res_str)}"
-                )
+        # --- THIS IS THE CORRECTED PART for AttributeError ---
+        current_data = self.res_selector.itemData(index)  # itemData for current index
+        res_str = None
+        if isinstance(current_data, QVariant):
+            res_str = current_data.value()
+        else:  # Assume it's already the string if not QVariant
+            res_str = current_data
+        # --- End of corrected part ---
+
+        if res_str and isinstance(res_str, str):
+            self.resolution_selected.emit(res_str)
+        elif res_str is not None:
+            log.warning(f"Resolution combobox data was not a string: {type(res_str)}")
 
     @pyqtSlot(list)
     def update_camera_resolutions_list(self, resolution_strings: list):
-        current_res_str_variant = self.res_selector.currentData()
-        current_res_str = (
-            current_res_str_variant.value()
-            if current_res_str_variant and isinstance(current_res_str_variant, QVariant)
-            else None
-        )
+        # --- THIS METHOD IS CORRECTED ---
+        current_selection_data = self.res_selector.currentData()
+        current_res_str = None
+        if isinstance(current_selection_data, QVariant):
+            current_res_str = current_selection_data.value()
+        else:
+            current_res_str = current_selection_data
 
         self.res_selector.blockSignals(True)
         self.res_selector.clear()
 
         if resolution_strings:
-            for res_str in resolution_strings:
-                self.res_selector.addItem(res_str, QVariant(res_str))
+            for res_str_item in resolution_strings:  # Iterate through the input list
+                self.res_selector.addItem(
+                    res_str_item, QVariant(res_str_item)
+                )  # Store string in QVariant
 
-            idx = (
-                self.res_selector.findData(QVariant(current_res_str))
-                if current_res_str
-                else -1
-            )
+            # Try to reselect previous or default
+            idx = -1
+            if current_res_str and isinstance(current_res_str, str):
+                idx = self.res_selector.findData(QVariant(current_res_str))
+
             if idx != -1:
                 self.res_selector.setCurrentIndex(idx)
             elif self.res_selector.count() > 0:
                 self.res_selector.setCurrentIndex(0)
 
             self.res_selector.setEnabled(True)
-            if self.res_selector.currentIndex() >= 0:
+            if (
+                self.res_selector.currentIndex() >= 0
+            ):  # Ensure valid index before emitting
                 self._on_resolution_selection_changed(self.res_selector.currentIndex())
         else:
-            self.res_selector.addItem("N/A", QVariant())
+            self.res_selector.addItem("N/A", QVariant())  # Store QVariant for "N/A"
             self.res_selector.setEnabled(False)
         self.res_selector.blockSignals(False)
+        # --- End of corrected method ---
 
     def _on_exposure_slider_changed(self, value):
         self.exposure_spinbox.blockSignals(True)
@@ -312,9 +318,7 @@ class CameraControlPanel(QGroupBox):
         if slider_range > 0:
             proportion = (slider_value - self.gain_slider.minimum()) / slider_range
             float_value = min_val + proportion * (max_val - min_val)
-        elif (
-            slider_value == self.gain_slider.minimum()
-        ):  # Handle cases where slider range is 0
+        elif slider_value == self.gain_slider.minimum():
             float_value = min_val
         elif slider_value == self.gain_slider.maximum():
             float_value = max_val
@@ -339,7 +343,7 @@ class CameraControlPanel(QGroupBox):
                 slider_min_int + proportion * (slider_max_int - slider_min_int)
             )
             slider_val = max(slider_min_int, min(slider_val, slider_max_int))
-        elif value_float <= min_val_spin:  # Use <= and >= for single point ranges
+        elif value_float <= min_val_spin:
             slider_val = slider_min_int
         elif value_float >= max_val_spin:
             slider_val = slider_max_int
@@ -406,10 +410,8 @@ class CameraControlPanel(QGroupBox):
 
             slider_current_min = self.gain_slider.minimum()
             slider_current_max = self.gain_slider.maximum()
-            if (
-                slider_current_max == slider_current_min
-            ):  # If slider not yet ranged by specific values
-                self.gain_slider.setRange(0, 1000)  # Set a default precision range
+            if slider_current_max == slider_current_min:
+                self.gain_slider.setRange(0, 1000)
                 slider_current_min, slider_current_max = 0, 1000
 
             slider_val = slider_current_min
@@ -420,7 +422,7 @@ class CameraControlPanel(QGroupBox):
                     slider_current_min
                     + proportion * (slider_current_max - slider_current_min)
                 )
-            elif current_gain <= min_gain:  # Use <= for single point or at min
+            elif current_gain <= min_gain:
                 slider_val = slider_current_min
             elif current_gain >= max_gain:
                 slider_val = slider_current_max
@@ -512,6 +514,6 @@ class CameraControlPanel(QGroupBox):
 
         self.res_selector.blockSignals(True)
         self.res_selector.clear()
-        self.res_selector.addItem("N/A", QVariant())
+        self.res_selector.addItem("N/A", QVariant())  # Store QVariant for N/A
         self.res_selector.setEnabled(False)
         self.res_selector.blockSignals(False)
