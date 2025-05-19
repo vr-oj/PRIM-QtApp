@@ -5,7 +5,7 @@ import traceback
 import logging
 
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
-from PyQt5.QtCore import Qt, QCoreApplication
+from PyQt5.QtCore import Qt, QCoreApplication, QLoggingCategory
 
 # ─── Configuration & logging ────────────────────────────────────────────────
 try:
@@ -19,11 +19,14 @@ try:
 except ImportError:
     APP_NAME = "PRIM Application"
     logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
     )
 
 # ─── Reduce matplotlib logging noise ───────────────────────────────────────
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
+# ─── Suppress Qt QSS parsing warnings ──────────────────────────────────────
+QLoggingCategory.setFilterRules("qt.qss.styleSheet=false")
 
 log = logging.getLogger(__name__)
 

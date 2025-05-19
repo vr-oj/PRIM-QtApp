@@ -76,74 +76,24 @@ class SDKCameraThread(QThread):
             grabber.device_open(dev)
             pm = grabber.device_property_map
 
-            # ─── Gather control properties dynamically ─────────────
-            controls = {}
-
-            def try_prop(name, pid):
+            # ─── Apply desired settings with safeguards ────────────
+            if hasattr(ic4.PropId, "WIDTH"):
                 try:
-                    prop = pm.find(pid)
-                    if isinstance(prop, PropInteger):
-                        controls[name] = {
-                            "enabled": True,
-                            "min": int(prop.minimum),
-                            "max": int(prop.maximum),
-                            "value": int(prop.value),
-                        }
-                    elif isinstance(prop, PropFloat):
-                        controls[name] = {
-                            "enabled": True,
-                            "min": float(prop.minimum),
-                            "max": float(prop.maximum),
-                            "value": float(prop.value),
-                        }
-                    elif isinstance(prop, PropBoolean):
-                        controls[name] = {"enabled": True, "value": bool(prop.value)}
-                    elif isinstance(prop, PropEnumeration):
-                        choices = prop.options
-                        current = prop.get_value_str()
-                        controls[name] = {
-                            "enabled": True,
-                            "options": choices,
-                            "value": current,
-                        }
-                except Exception:
-                    log.debug(f"Property '{name}' (PID {pid}) not available.")
-
-            # Map desired control names to PropId attributes, if available
-            prop_map = {
-                "width": "WIDTH",
-                "height": "HEIGHT",
-                "exposure": "EXPOSURE",
-                "gain": "GAIN",
-                "auto_exposure": "EXPOSURE_AUTO",
-            }
-            for name, attr in prop_map.items():
-                if hasattr(ic4.PropId, attr):
-                    pid = getattr(ic4.PropId, attr)
-                    try_prop(name, pid)
-                else:
-                    log.debug(
-                        f"PropId has no attribute '{attr}'; skipping '{name}' property."
-                    )
-
-            # Emit properties and resolutions
-            self.camera_properties_updated.emit(controls)
-            if hasattr(ic4.PropId, "WIDTH") and hasattr(ic4.PropId, "HEIGHT"):
+                    pm.set_value(ic4.PropId.WIDTH, self.desired_width)
+                except Exception as e:
+                    log.warning(f"Could not set WIDTH={self.desired_width}: {e}")
+            if hasattr(ic4.PropId, "HEIGHT"):
                 try:
-                    w = pm.get_value(ic4.PropId.WIDTH)
-                    h = pm.get_value(ic4.PropId.HEIGHT)
-                    self.camera_resolutions_available.emit([(w, h)])
-                except Exception:
-                    pass
+                    pm.set_value(ic4.PropId.HEIGHT, self.desired_height)
+                except Exception as e:
+                    log.warning(f"Could not set HEIGHT={self.desired_height}: {e}")
+            if hasattr(ic4.PropId, "EXPOSURE"):
+                try:
+                    pm.set_value(ic4.PropId.EXPOSURE, self.desired_exposure)
+                except Exception as e:
+                    log.warning(f"Could not set EXPOSURE={self.desired_exposure}: {e}")
 
-            # Apply desired settings if available
-            if "WIDTH" in prop_map.values() and hasattr(ic4.PropId, "WIDTH"):
-                pm.set_value(ic4.PropId.WIDTH, self.desired_width)
-            if "HEIGHT" in prop_map.values() and hasattr(ic4.PropId, "HEIGHT"):
-                pm.set_value(ic4.PropId.HEIGHT, self.desired_height)
-            if "EXPOSURE" in prop_map.values() and hasattr(ic4.PropId, "EXPOSURE"):
-                pm.set_value(ic4.PropId.EXPOSURE, self.desired_exposure)
-
+            # ─── Start acquisition ──────────────────────────────────
             grabber.stream_start()
             import time
 
@@ -159,17 +109,29 @@ class SDKCameraThread(QThread):
                 if self._pending_exposure is not None and hasattr(
                     ic4.PropId, "EXPOSURE"
                 ):
-                    pm.set_value(ic4.PropId.EXPOSURE, self._pending_exposure)
+                    try:
+                        pm.set_value(ic4.PropId.EXPOSURE, self._pending_exposure)
+                    except Exception as e:
+                        log.warning(f"Error updating exposure: {e}")
                     self._pending_exposure = None
                 if self._pending_gain is not None and hasattr(ic4.PropId, "GAIN"):
-                    pm.set_value(ic4.PropId.GAIN, self._pending_gain)
+                    try:
+                        pm.set_value(ic4.PropId.GAIN, self._pending_gain)
+                    except Exception as e:
+                        log.warning(f"Error updating gain: {e}")
                     self._pending_gain = None
                 if self._pending_auto_exposure is not None and hasattr(
                     ic4.PropId, "EXPOSURE_AUTO"
                 ):
-                    pm.set_value(ic4.PropId.EXPOSURE_AUTO, self._pending_auto_exposure)
+                    try:
+                        pm.set_value(
+                            ic4.PropId.EXPOSURE_AUTO, self._pending_auto_exposure
+                        )
+                    except Exception as e:
+                        log.warning(f"Error updating auto_exposure: {e}")
                     self._pending_auto_exposure = None
 
+                # Snap a frame
                 result = grabber.snap_single(ic4.Timeout(1000))
                 if result.is_ok:
                     img = result.image
@@ -193,6 +155,7 @@ class SDKCameraThread(QThread):
             except Exception:
                 pass
         finally:
+            # Clean up
             if grabber:
                 try:
                     if grabber.is_streaming:
