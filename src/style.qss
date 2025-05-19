@@ -2,30 +2,6 @@
  * PRIMalyzer Style Sheet
  * Color palette and typography definitions
  ******************************************************************/
-
-/*── Color Palette ───────────────────────────────────────────────*/
-/* Spartan Greens */
-/*@spartan-dark: */    #18453B;  /* Main background */
-@spartan-mid:      #40634A;  /* Panels, selected tabs */
-@spartan-light:    #2E674E;  /* Hover accents */
-
-/* Gold Accent */
-@spartan-gold:     #D6C832;
-
-/* Neutrals */
-@neutral-light:    #F9F9F9;  /* Widget backgrounds */
-@neutral-mid:      #7A8C8F;  /* Default text */
-@neutral-dark:     #2E3440;  /* Dark text */
-
-/* Plot colors */
-@plot-bg:          #ECEFF4;  /* axes facecolor */
-@plot-grid:        #D8DEE9;  /* gridlines */
-
-/*── Typography ──────────────────────────────────────────────────*/
-@font-family:      'Segoe UI', Arial, sans-serif;
-@base-font-size:   12px;
-@heading-font-size:13px;
-
 /******************************************************************
  * Base styles (applied to all widgets)
  ******************************************************************/
