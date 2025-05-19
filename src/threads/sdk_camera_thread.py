@@ -1,6 +1,5 @@
 import logging
 import imagingcontrol4 as ic4
-from imagingcontrol4 import Timeout, StreamSetupOption
 from PyQt5.QtCore import QThread, pyqtSignal, QMutex
 from PyQt5.QtGui import QImage
 from imagingcontrol4.properties import (
@@ -36,15 +35,11 @@ class SDKCameraThread(QThread):
         self._mutex = QMutex()
         self._stop_requested = False
         self.target_fps = target_fps
-
-        # Desired settings
         self.desired_width = width
         self.desired_height = height
         self.desired_exposure = exposure_us
         self.desired_gain = None
         self.desired_auto_exposure = None
-
-        # Pending updates from the UI
         self._pending_exposure = None
         self._pending_gain = None
         self._pending_auto_exposure = None
@@ -146,7 +141,7 @@ class SDKCameraThread(QThread):
             try:
                 # Start live streaming
                 grabber.stream_setup(
-                    sink, setup_option=StreamSetupOption.ACQUISITION_START
+                    sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
                 )
                 streaming = True
                 log.info("Streaming mode enabled.")
@@ -185,8 +180,8 @@ class SDKCameraThread(QThread):
                         log.warning(f"Error updating auto_exposure: {e}")
                     self._pending_auto_exposure = None
 
-                # Acquire frame via SnapSink
-                result = sink.snap_single(Timeout(1000))
+                # Acquire frame via SnapSink with integer timeout
+                result = sink.snap_single(1000)
                 if result.is_ok:
                     img = result.image
                     frame = img.as_bytearray()
