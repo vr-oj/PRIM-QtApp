@@ -69,9 +69,7 @@ log = logging.getLogger(__name__)
 
 class CameraControlPanel(QGroupBox):
     camera_selected = pyqtSignal(object)
-    resolution_selected = pyqtSignal(
-        str
-    )  # This signal will carry the string from the combobox
+    resolution_selected = pyqtSignal(str)
     exposure_changed = pyqtSignal(int)
     gain_changed = pyqtSignal(float)
     auto_exposure_toggled = pyqtSignal(bool)
@@ -241,11 +239,11 @@ class CameraControlPanel(QGroupBox):
 
     def _on_resolution_selection_changed(self, index):
         # --- THIS IS THE CORRECTED PART for AttributeError ---
-        current_data = self.res_selector.itemData(index)  # itemData for current index
+        current_data = self.res_selector.itemData(index)
         res_str = None
         if isinstance(current_data, QVariant):
             res_str = current_data.value()
-        else:  # Assume it's already the string if not QVariant
+        else:
             res_str = current_data
         # --- End of corrected part ---
 
@@ -259,24 +257,24 @@ class CameraControlPanel(QGroupBox):
         # --- THIS METHOD IS CORRECTED ---
         current_selection_data = self.res_selector.currentData()
         current_res_str = None
+        # Correctly unwrap QVariant if present
         if isinstance(current_selection_data, QVariant):
             current_res_str = current_selection_data.value()
-        else:
+        else:  # If it's already the direct data (e.g. string, or None for placeholder)
             current_res_str = current_selection_data
 
         self.res_selector.blockSignals(True)
         self.res_selector.clear()
 
         if resolution_strings:
-            for res_str_item in resolution_strings:  # Iterate through the input list
-                self.res_selector.addItem(
-                    res_str_item, QVariant(res_str_item)
-                )  # Store string in QVariant
+            for res_str_item in resolution_strings:
+                self.res_selector.addItem(res_str_item, QVariant(res_str_item))
 
-            # Try to reselect previous or default
             idx = -1
             if current_res_str and isinstance(current_res_str, str):
-                idx = self.res_selector.findData(QVariant(current_res_str))
+                idx = self.res_selector.findData(
+                    QVariant(current_res_str)
+                )  # Find data by QVariant(string)
 
             if idx != -1:
                 self.res_selector.setCurrentIndex(idx)
@@ -284,12 +282,12 @@ class CameraControlPanel(QGroupBox):
                 self.res_selector.setCurrentIndex(0)
 
             self.res_selector.setEnabled(True)
-            if (
-                self.res_selector.currentIndex() >= 0
-            ):  # Ensure valid index before emitting
+            # Emit current selection only if list is not empty and something is selected.
+            # Check currentIndex before calling itemData to avoid issues if list is empty after clear
+            if self.res_selector.count() > 0 and self.res_selector.currentIndex() >= 0:
                 self._on_resolution_selection_changed(self.res_selector.currentIndex())
         else:
-            self.res_selector.addItem("N/A", QVariant())  # Store QVariant for "N/A"
+            self.res_selector.addItem("N/A", QVariant())
             self.res_selector.setEnabled(False)
         self.res_selector.blockSignals(False)
         # --- End of corrected method ---
@@ -514,6 +512,6 @@ class CameraControlPanel(QGroupBox):
 
         self.res_selector.blockSignals(True)
         self.res_selector.clear()
-        self.res_selector.addItem("N/A", QVariant())  # Store QVariant for N/A
+        self.res_selector.addItem("N/A", QVariant())
         self.res_selector.setEnabled(False)
         self.res_selector.blockSignals(False)
