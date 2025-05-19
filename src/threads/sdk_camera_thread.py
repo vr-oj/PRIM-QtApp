@@ -15,7 +15,7 @@ from config import DEFAULT_FRAME_SIZE
 
 log = logging.getLogger(__name__)
 
-# camera-property names
+# camera‐property names
 PROP_WIDTH = "Width"
 PROP_HEIGHT = "Height"
 PROP_PIXEL_FORMAT = "PixelFormat"
@@ -264,16 +264,20 @@ class SDKCameraThread(QThread):
                         want_pf = cur_pf
                 self.actual_qimage_format = QImage.Format_Grayscale8
 
-                # size
+                # full‐sensor resolution
                 wp = self.pm.find(PROP_WIDTH)
                 hp = self.pm.find(PROP_HEIGHT)
-                if self.desired_width and self._is_prop_writable(wp):
-                    self._set_property_value(PROP_WIDTH, self.desired_width)
-                if self.desired_height and self._is_prop_writable(hp):
-                    self._set_property_value(PROP_HEIGHT, self.desired_height)
+                if wp and wp.is_available and self._is_prop_writable(wp):
+                    self._set_property_value(PROP_WIDTH, wp.maximum)
+                if hp and hp.is_available and self._is_prop_writable(hp):
+                    self._set_property_value(PROP_HEIGHT, hp.maximum)
+
+                # reset any ROI offsets
+                self._set_property_value(PROP_OFFSET_X, 0)
+                self._set_property_value(PROP_OFFSET_Y, 0)
 
                 log.info(
-                    f"Res: {wp.value}x{hp.value}, PF={self.pm.find(PROP_PIXEL_FORMAT).value}"
+                    f"Res: {wp.value}×{hp.value}, PF={self.pm.find(PROP_PIXEL_FORMAT).value}"
                 )
 
                 # streaming params
@@ -303,6 +307,7 @@ class SDKCameraThread(QThread):
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
             log.info("Streaming started")
+
             last = time.monotonic()
             frame_count = 0
             no_data_count = 0
@@ -344,23 +349,23 @@ class SDKCameraThread(QThread):
                 # ── extract raw Mono8 bytes ─────────────────
                 try:
                     fmt = self.actual_qimage_format
-                    stride = w  # default for a flat bytes buffer
+                    stride = w
 
                     raw = None
 
-                    # 1) try numpy_wrap() (zero-copy)
+                    # try numpy_wrap first
                     if hasattr(buf, "numpy_wrap"):
                         arr = buf.numpy_wrap()
                         stride = arr.strides[0]
                         raw = arr.tobytes()
 
-                    # 2) try numpy_copy()
+                    # fallback to numpy_copy
                     elif hasattr(buf, "numpy_copy"):
                         arr = buf.numpy_copy()
                         stride = arr.strides[0]
                         raw = arr.tobytes()
 
-                    # 3) pointer + pitch
+                    # last fallback: pointer + pitch
                     elif hasattr(buf, "pointer"):
                         ptr = buf.pointer
                         pitch = getattr(buf, "pitch", w)
@@ -370,15 +375,13 @@ class SDKCameraThread(QThread):
                     else:
                         raise RuntimeError("No image-buffer interface found")
 
-                    # build the QImage
                     img = QImage(raw, w, h, stride, fmt)
                     if img.isNull():
                         log.warning("Built QImage is null")
                     else:
-                        # hand off a deep copy to the UI
                         self.frame_ready.emit(img.copy(), raw)
 
-                except Exception as e_img:
+                except Exception:
                     log.error("QImage construction failed", exc_info=True)
 
                 # pacing to target FPS
