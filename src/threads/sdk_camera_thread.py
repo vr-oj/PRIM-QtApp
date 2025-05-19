@@ -67,22 +67,16 @@ class SDKCameraThread(QThread):
             devices = ic4.DeviceEnum.devices()
             if not devices:
                 raise RuntimeError("No TIS cameras found - please connect a camera.")
-            # List all found devices
             for idx, dev in enumerate(devices):
                 log.info(f"Camera device {idx}: {dev.model_name} (S/N {dev.serial})")
-            # Select the first device by default
-            selected_idx = 0
-            dev = devices[selected_idx]
-            log.info(
-                f"Selected camera [{selected_idx}]: {dev.model_name} (S/N {dev.serial})"
-            )
+            dev = devices[0]
+            log.info(f"Selected camera [0]: {dev.model_name} (S/N {dev.serial})")
 
-            # Create and open grabber
             grabber = ic4.Grabber()
             grabber.device_open(dev)
             pm = grabber.device_property_map
 
-            # ─── Gather initial control ranges/values ────────────
+            # ─── Gather control properties dynamically ─────────────
             controls = {}
 
             def try_prop(name, pid):
@@ -113,33 +107,43 @@ class SDKCameraThread(QThread):
                             "value": current,
                         }
                 except Exception:
-                    log.debug(f"Property {name} not available.")
+                    log.debug(f"Property '{name}' (PID {pid}) not available.")
 
-            # Initialize common properties
-            try_prop("width", ic4.PropId.WIDTH)
-            try_prop("height", ic4.PropId.HEIGHT)
-            try_prop("exposure", ic4.PropId.EXPOSURE)
-            try_prop("gain", ic4.PropId.GAIN)
-            try_prop("auto_exposure", ic4.PropId.EXPOSURE_AUTO)
+            # Map desired control names to PropId attributes, if available
+            prop_map = {
+                "width": "WIDTH",
+                "height": "HEIGHT",
+                "exposure": "EXPOSURE",
+                "gain": "GAIN",
+                "auto_exposure": "EXPOSURE_AUTO",
+            }
+            for name, attr in prop_map.items():
+                if hasattr(ic4.PropId, attr):
+                    pid = getattr(ic4.PropId, attr)
+                    try_prop(name, pid)
+                else:
+                    log.debug(
+                        f"PropId has no attribute '{attr}'; skipping '{name}' property."
+                    )
 
-            # Emit available resolutions and properties to UI
-            try:
-                cur_w = pm.get_value(ic4.PropId.WIDTH)
-                cur_h = pm.get_value(ic4.PropId.HEIGHT)
-                self.camera_resolutions_available.emit([(cur_w, cur_h)])
-            except Exception:
-                pass
+            # Emit properties and resolutions
             self.camera_properties_updated.emit(controls)
+            if hasattr(ic4.PropId, "WIDTH") and hasattr(ic4.PropId, "HEIGHT"):
+                try:
+                    w = pm.get_value(ic4.PropId.WIDTH)
+                    h = pm.get_value(ic4.PropId.HEIGHT)
+                    self.camera_resolutions_available.emit([(w, h)])
+                except Exception:
+                    pass
 
-            # ─── Apply desired settings ────────────────────────────
-            if self.desired_width and "width" in controls:
+            # Apply desired settings if available
+            if "WIDTH" in prop_map.values() and hasattr(ic4.PropId, "WIDTH"):
                 pm.set_value(ic4.PropId.WIDTH, self.desired_width)
-            if self.desired_height and "height" in controls:
+            if "HEIGHT" in prop_map.values() and hasattr(ic4.PropId, "HEIGHT"):
                 pm.set_value(ic4.PropId.HEIGHT, self.desired_height)
-            if self.desired_exposure and "exposure" in controls:
+            if "EXPOSURE" in prop_map.values() and hasattr(ic4.PropId, "EXPOSURE"):
                 pm.set_value(ic4.PropId.EXPOSURE, self.desired_exposure)
 
-            # Start acquisition
             grabber.stream_start()
             import time
 
@@ -151,18 +155,21 @@ class SDKCameraThread(QThread):
                     break
                 self._mutex.unlock()
 
-                # Apply any pending UI updates
-                if self._pending_exposure is not None:
+                # Pending UI updates
+                if self._pending_exposure is not None and hasattr(
+                    ic4.PropId, "EXPOSURE"
+                ):
                     pm.set_value(ic4.PropId.EXPOSURE, self._pending_exposure)
                     self._pending_exposure = None
-                if self._pending_gain is not None:
+                if self._pending_gain is not None and hasattr(ic4.PropId, "GAIN"):
                     pm.set_value(ic4.PropId.GAIN, self._pending_gain)
                     self._pending_gain = None
-                if self._pending_auto_exposure is not None:
+                if self._pending_auto_exposure is not None and hasattr(
+                    ic4.PropId, "EXPOSURE_AUTO"
+                ):
                     pm.set_value(ic4.PropId.EXPOSURE_AUTO, self._pending_auto_exposure)
                     self._pending_auto_exposure = None
 
-                # Snap a frame
                 result = grabber.snap_single(ic4.Timeout(1000))
                 if result.is_ok:
                     img = result.image
@@ -172,22 +179,20 @@ class SDKCameraThread(QThread):
                 else:
                     log.warning("Frame grab timeout or error.")
 
-                # Maintain target FPS
+                # Throttle to target FPS
                 elapsed = time.time() - last_time
-                sleep = max(0, (1.0 / self.target_fps) - elapsed)
-                if sleep > 0:
-                    time.sleep(sleep)
+                to_sleep = max(0, (1.0 / self.target_fps) - elapsed)
+                if to_sleep > 0:
+                    time.sleep(to_sleep)
                 last_time = time.time()
 
         except Exception as e:
             log.exception(f"Error in SDKCameraThread: {e}")
-            # Notify UI of the camera error
             try:
                 self.camera_error.emit(str(e), type(e).__name__)
             except Exception:
                 pass
         finally:
-            # Clean up SDK resources
             if grabber:
                 try:
                     if grabber.is_streaming:
