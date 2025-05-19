@@ -15,6 +15,7 @@ from imagingcontrol4.properties import (
 
 log = logging.getLogger(__name__)
 
+# Standard GenICam Property Names
 PROP_WIDTH = "Width"
 PROP_HEIGHT = "Height"
 PROP_PIXEL_FORMAT = "PixelFormat"
@@ -56,7 +57,7 @@ class SDKCameraThread(QThread):
 
         self.grabber = None
         self.sink = None
-        self.pm = None
+        self.pm = None  # PropertyMap
 
         self.current_frame_width = 0
         self.current_frame_height = 0
@@ -79,70 +80,44 @@ class SDKCameraThread(QThread):
     def update_roi(self, x: int, y: int, w: int, h: int):
         self._pending_roi = (x, y, w, h)
 
-    def _is_prop_writable(self, prop_name_or_id_or_obj):
-        """Checks if a property is available and not read-only."""
-        if not self.pm:
-            return False
-        prop = None
-        if isinstance(prop_name_or_id_or_obj, str) or hasattr(
-            prop_name_or_id_or_obj, "value"
-        ):  # Check if it's an ID/name or already a prop object
-            if isinstance(
-                prop_name_or_id_or_obj, str
-            ):  # or isinstance(prop_name_or_id_or_obj, ic4.PropId): # PropId might not be a type to check against always
-                prop = self.pm.find(prop_name_or_id_or_obj)
-            else:  # Already a property object
-                prop = prop_name_or_id_or_obj
-
-        if prop and prop.is_available:
-            if hasattr(prop, "is_readonly"):  # Check if is_readonly attribute exists
-                return not prop.is_readonly
-            else:  # Fallback if is_readonly is not present (should not happen with standard props)
+    def _is_prop_writable(self, prop_object):
+        """Checks if a found property object is available and not read-only."""
+        if prop_object and prop_object.is_available:
+            if hasattr(prop_object, "is_readonly"):
+                return not prop_object.is_readonly
+            else:
+                # If is_readonly is not present, we might assume writable if available,
+                # but this could be risky. Log a warning.
                 log.warning(
-                    f"Property '{prop.name if hasattr(prop,'name') else prop_name_or_id_or_obj}' lacks 'is_readonly' attribute. Assuming writable if available."
+                    f"Property '{prop_object.name}' lacks 'is_readonly' attribute. Assuming writable if available."
                 )
-                return True
+                return True  # Defaulting to True if is_readonly is missing but property is available
         return False
 
-    def _set_property_value(self, prop_name_or_id, value):
+    def _set_property_value(self, prop_name: str, value):
         """Helper to set property if available and writable."""
         try:
-            prop = self.pm.find(prop_name_or_id)  # Find first to check attributes
-            if prop and prop.is_available:
-                # Use the more robust writability check
-                is_writable = False
-                if hasattr(prop, "is_readonly"):
-                    is_writable = not prop.is_readonly
-                else:  # Fallback, assume writable if is_readonly is missing
-                    is_writable = True
-                    log.debug(
-                        f"Property '{prop.name}' missing 'is_readonly', assuming writable."
-                    )
-
-                if is_writable:
-                    self.pm.set_value(
-                        prop_name_or_id, value
-                    )  # Use original name/id for set_value
-                    log.info(f"Set {prop.name} to {value}")
-                    return True
-                else:
-                    log.warning(
-                        f"Property {prop.name} found but not writable (is_readonly={getattr(prop, 'is_readonly', 'N/A')})."
-                    )
-            elif not prop:
-                log.warning(f"Property {prop_name_or_id} not found.")
-            else:  # Not available
+            prop = self.pm.find(prop_name)
+            if self._is_prop_writable(prop):  # Use the helper
+                self.pm.set_value(prop_name, value)
+                log.info(f"Set {prop.name} to {value}")
+                return True
+            elif prop and prop.is_available:  # Found but not writable
                 log.warning(
-                    f"Property {prop.name if hasattr(prop,'name') else prop_name_or_id} found but not available."
+                    f"Property {prop.name} found but not writable (is_readonly={getattr(prop, 'is_readonly', 'N/A')})."
                 )
+            elif not prop:
+                log.warning(f"Property {prop_name} not found.")
+            else:  # Not available
+                log.warning(f"Property {prop.name} found but not available.")
         except ic4.IC4Exception as e:
-            log.warning(f"IC4Exception setting {prop_name_or_id} to {value}: {e}")
+            log.warning(f"IC4Exception setting {prop_name} to {value}: {e}")
         except AttributeError as e:
             log.warning(
-                f"AttributeError for {prop_name_or_id} (e.g. find failed or attribute missing): {e}"
+                f"AttributeError for {prop_name} (e.g. find failed or attribute missing): {e}"
             )
         except Exception as e:
-            log.warning(f"Generic error setting {prop_name_or_id} to {value}: {e}")
+            log.warning(f"Generic error setting {prop_name} to {value}: {e}")
         return False
 
     def _apply_pending_properties(self):
@@ -154,11 +129,11 @@ class SDKCameraThread(QThread):
             prop_auto_exp = self.pm.find(PROP_EXPOSURE_AUTO)
 
             if prop_auto_exp and prop_auto_exp.is_available:
-                if isinstance(prop_auto_exp, PropEnumeration):  # Set as string
+                if isinstance(prop_auto_exp, PropEnumeration):
                     if self._set_property_value(PROP_EXPOSURE_AUTO, auto_value_to_set):
                         if not self._pending_auto_exposure:
                             self._emit_camera_properties()
-                elif isinstance(prop_auto_exp, PropBoolean):  # Set as boolean
+                elif isinstance(prop_auto_exp, PropBoolean):
                     if self._set_property_value(
                         PROP_EXPOSURE_AUTO, self._pending_auto_exposure
                     ):
@@ -194,13 +169,17 @@ class SDKCameraThread(QThread):
 
         if self._pending_roi is not None:
             x, y, w, h = self._pending_roi
-            prop_w_cam = self.pm.find(PROP_WIDTH)
-            prop_h_cam = self.pm.find(PROP_HEIGHT)
+            prop_w_cam_obj = self.pm.find(PROP_WIDTH)  # Get property object
+            prop_h_cam_obj = self.pm.find(PROP_HEIGHT)
             current_w_cam = (
-                prop_w_cam.value if prop_w_cam and prop_w_cam.is_available else 0
+                prop_w_cam_obj.value
+                if prop_w_cam_obj and prop_w_cam_obj.is_available
+                else 0
             )
             current_h_cam = (
-                prop_h_cam.value if prop_h_cam and prop_h_cam.is_available else 0
+                prop_h_cam_obj.value
+                if prop_h_cam_obj and prop_h_cam_obj.is_available
+                else 0
             )
 
             if w > 0 and h > 0 and (w != current_w_cam or h != current_h_cam):
@@ -233,8 +212,9 @@ class SDKCameraThread(QThread):
                 p_info = {"enabled": False}
                 prop_val = self.pm.find(val_prop_name)
                 if prop_val and prop_val.is_available:
-                    # Use helper for writability check
-                    p_info["enabled"] = self._is_prop_writable(prop_val)
+                    p_info["enabled"] = self._is_prop_writable(
+                        prop_val
+                    )  # Correctly use helper
                     if isinstance(prop_val, (PropInteger, PropFloat)):
                         p_info["min"] = prop_val.minimum
                         p_info["max"] = prop_val.maximum
@@ -246,9 +226,7 @@ class SDKCameraThread(QThread):
                     if auto_prop_name:
                         prop_auto = self.pm.find(auto_prop_name)
                         if prop_auto and prop_auto.is_available:
-                            p_info["auto_available"] = (
-                                True  # Auto switch itself is available
-                            )
+                            p_info["auto_available"] = True
                             current_auto_val = prop_auto.value
                             is_auto_mode_on = False
                             if isinstance(current_auto_val, str):
@@ -402,7 +380,6 @@ class SDKCameraThread(QThread):
                         desired_format_to_set = current_pf_val
 
                 if desired_format_to_set != current_pf_val:
-                    # Use helper for robust setting
                     self._set_property_value(PROP_PIXEL_FORMAT, desired_format_to_set)
                     self.current_pixel_format_name = self.pm.find(
                         PROP_PIXEL_FORMAT
@@ -436,9 +413,13 @@ class SDKCameraThread(QThread):
                 prop_w = self.pm.find(PROP_WIDTH)
                 prop_h = self.pm.find(PROP_HEIGHT)
 
-                if self.desired_width is not None and self._is_prop_writable(prop_w):
+                if self.desired_width is not None and self._is_prop_writable(
+                    prop_w
+                ):  # Use helper
                     self.pm.set_value(PROP_WIDTH, self.desired_width)
-                if self.desired_height is not None and self._is_prop_writable(prop_h):
+                if self.desired_height is not None and self._is_prop_writable(
+                    prop_h
+                ):  # Use helper
                     self.pm.set_value(PROP_HEIGHT, self.desired_height)
 
                 self.current_frame_width = (
@@ -478,13 +459,11 @@ class SDKCameraThread(QThread):
             # --- Frame Rate Configuration ---
             try:
                 prop_fps = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
-                if self._is_prop_writable(
-                    prop_fps
-                ):  # Check if prop_fps itself is writable
+                if self._is_prop_writable(prop_fps):  # Use helper
                     self.pm.set_value(
                         PROP_ACQUISITION_FRAME_RATE, float(self.target_fps)
                     )
-                    actual_fps = prop_fps.value  # Read value after setting
+                    actual_fps = prop_fps.value
                     log.info(
                         f"Set ACQUISITION_FRAME_RATE to {self.target_fps}, actual: {actual_fps}"
                     )
@@ -503,7 +482,13 @@ class SDKCameraThread(QThread):
 
             # --- Corrected QueueSink instantiation ---
             self.sink = ic4.QueueSink()
-            self.sink.accept_incomplete_frames = False  # Set property if available
+            # accept_incomplete_frames is a property of the sink object, not a constructor argument in all wrappers
+            if hasattr(self.sink, "accept_incomplete_frames"):
+                self.sink.accept_incomplete_frames = False
+            else:
+                log.warning(
+                    "QueueSink does not have 'accept_incomplete_frames' attribute. Using default."
+                )
             # --- End of correction ---
             log.info(f"QueueSink created.")
 
