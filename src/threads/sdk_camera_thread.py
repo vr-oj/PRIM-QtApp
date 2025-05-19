@@ -127,12 +127,11 @@ class SDKCameraThread(QThread):
                 log.warning(
                     f"Property {prop.name} found but not writable (is_readonly={getattr(prop, 'is_readonly', 'N/A')})."
                 )
-            # Removed redundant elses as find() failing or prop not available is handled by _is_prop_writable or initial check
         except ic4.IC4Exception as e:
             log.warning(f"IC4Exception setting {prop_name} to {value_to_set}: {e}")
         except AttributeError as e:
             log.warning(
-                f"AttributeError for {prop_name} during set (e.g. find failed, or property object malformed): {e}"
+                f"AttributeError for {prop_name} during set (e.g. find failed or property attribute missing): {e}"
             )
         except Exception as e:
             log.warning(f"Generic error setting {prop_name} to {value_to_set}: {e}")
@@ -167,7 +166,7 @@ class SDKCameraThread(QThread):
                         PROP_EXPOSURE_AUTO, auto_value_to_set_str
                     )
                 if success and not self._pending_auto_exposure:
-                    self._emit_camera_properties()  # Update UI if auto exposure was turned off
+                    self._emit_camera_properties()
             else:
                 log.warning(f"Property {PROP_EXPOSURE_AUTO} not available for update.")
             self._pending_auto_exposure = None
@@ -213,11 +212,11 @@ class SDKCameraThread(QThread):
                     f"SDKCameraThread: ROI size change (req: {w}x{h}, curr: {current_w_cam}x{current_h_cam}) requested. Restart camera for new dimensions."
                 )
 
-            if x == 0 and y == 0 and w == 0 and h == 0:  # Special case for reset
+            if x == 0 and y == 0 and w == 0 and h == 0:
                 self._set_property_value(PROP_OFFSET_X, 0)
                 self._set_property_value(PROP_OFFSET_Y, 0)
                 log.info("ROI reset request: Set OFFSET_X and OFFSET_Y to 0.")
-            else:  # Apply offsets based on ROI x,y
+            else:
                 self._set_property_value(PROP_OFFSET_X, x)
                 self._set_property_value(PROP_OFFSET_Y, y)
             self._pending_roi = None
@@ -481,7 +480,7 @@ class SDKCameraThread(QThread):
                 self._apply_pending_properties()
                 buf = None
                 try:
-                    # Corrected: Use pop_queued_buffer
+                    # *** CORRECTED TO USE pop_queued_buffer ***
                     buf = self.sink.pop_queued_buffer(timeout_ms=100)
                 except ic4.IC4Exception as e:
                     if hasattr(e, "code") and e.code == ic4.ErrorCode.TIMEOUT:
@@ -530,9 +529,6 @@ class SDKCameraThread(QThread):
                         )
                         self.frame_ready.emit(qimg.copy(), buf.mem_ptr)
                 finally:
-                    # With QueueSink, buffers are often reference counted or need specific release if not using context manager.
-                    # For now, assume pop_queued_buffer gives a buffer that's okay until next pop or thread stops.
-                    # If memory issues or buffer exhaustion occurs, buf.release() or similar might be needed.
                     pass
 
                 now = time.monotonic()
