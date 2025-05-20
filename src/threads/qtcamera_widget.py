@@ -135,8 +135,6 @@ class QtCameraWidget(QWidget):
         self.viewfinder.setText(f"Connecting to {device_info.model_name}...")
         QTimer.singleShot(100, self._start_new_camera_thread)
 
-        self._start_new_camera_thread()
-
     def _start_new_camera_thread(self):
         if self._camera_thread:
             log.warning("Cleaning up stray camera thread before starting a new one.")
