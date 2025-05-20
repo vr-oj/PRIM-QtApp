@@ -45,7 +45,7 @@ class QtCameraWidget(QWidget):
         self._last_scaled = None
         self._active_device_info: ic4.DeviceInfo = None  # Store TIS DeviceInfo object
 
-        # --- new: debounce timers & pending values for exposure/gain ---
+        # Debounce timers & pending values for exposure/gain
         self._exp_pending = None
         self._gain_pending = None
 
@@ -58,9 +58,8 @@ class QtCameraWidget(QWidget):
         self._gain_timer.setSingleShot(True)
         self._gain_timer.setInterval(100)
         self._gain_timer.timeout.connect(self._apply_pending_gain)
-        # ----------------------------------------------------------------
 
-        # viewfinder
+        # Viewfinder setup
         self.viewfinder = QLabel("No Camera Selected", self)
         self.viewfinder.setAlignment(Qt.AlignCenter)
         self.viewfinder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -70,7 +69,6 @@ class QtCameraWidget(QWidget):
         self.viewfinder.setStyleSheet(
             "QLabel { background-color : black; color : white; }"
         )
-        # let Qt scale the content efficiently
         self.viewfinder.setScaledContents(True)
 
         layout = QVBoxLayout(self)
@@ -82,20 +80,17 @@ class QtCameraWidget(QWidget):
         log.debug("Attempting to cleanup existing camera thread...")
         if self._camera_thread:
             thread_to_clean = self._camera_thread
-            self._camera_thread = None  # Dereference early
-
+            self._camera_thread = None
             if thread_to_clean.isRunning():
                 log.info(
                     f"Stopping camera thread ({thread_to_clean.device_info.model_name if thread_to_clean.device_info else 'N/A'})..."
                 )
                 thread_to_clean.request_stop()
-                if not thread_to_clean.wait(3000):  # Wait up to 3s
+                if not thread_to_clean.wait(3000):
                     log.warning("Camera thread did not stop gracefully, terminating.")
                     thread_to_clean.terminate()
                 else:
                     log.info("Camera thread stopped gracefully.")
-
-            # Disconnect old signals
             try:
                 thread_to_clean.frame_ready.disconnect(self._on_sdk_frame_received)
                 thread_to_clean.camera_error.disconnect(
@@ -109,7 +104,6 @@ class QtCameraWidget(QWidget):
                 )
             except Exception:
                 pass
-
             thread_to_clean.deleteLater()
             log.debug("Old camera thread scheduled for deletion.")
         else:
@@ -123,14 +117,12 @@ class QtCameraWidget(QWidget):
         self._cleanup_camera_thread()
         self._active_device_info = device_info
         self._last_pixmap = None
-
         if self._active_device_info is None:
             self.viewfinder.setText("No Camera Selected")
             self._update_viewfinder_display()
             self.camera_resolutions_updated.emit([])
             self.camera_properties_updated.emit({})
             return
-
         self.viewfinder.setText(
             f"Connecting to {self._active_device_info.model_name}..."
         )
@@ -138,13 +130,10 @@ class QtCameraWidget(QWidget):
 
     def _start_new_camera_thread(self):
         if self._camera_thread:
-            log.warning("Cleaning up stray camera thread before starting a new one.")
             self._cleanup_camera_thread()
-
         if not self._active_device_info:
             self.viewfinder.setText("No Camera Selected")
             return
-
         log.info(
             f"Starting new SDKCameraThread for {self._active_device_info.model_name} with WxH: {self.current_width}x{self.current_height}"
         )
@@ -156,8 +145,6 @@ class QtCameraWidget(QWidget):
             desired_pixel_format=self.current_pixel_format,
             parent=self,
         )
-
-        # wire up signals
         self._camera_thread.frame_ready.connect(self._on_sdk_frame_received)
         self._camera_thread.camera_error.connect(self._on_camera_thread_error_received)
         self._camera_thread.camera_resolutions_available.connect(
@@ -167,7 +154,6 @@ class QtCameraWidget(QWidget):
             self.camera_properties_updated
         )
         self._camera_thread.finished.connect(self._on_camera_thread_finished)
-
         self._camera_thread.start()
         log.info(
             f"SDKCameraThread for {self._active_device_info.model_name} initiated."
@@ -178,23 +164,79 @@ class QtCameraWidget(QWidget):
         if not resolution_str or "x" not in resolution_str:
             log.warning(f"Invalid resolution string: {resolution_str}")
             return
-
         try:
             w_str, h_rest = resolution_str.split("x", 1)
             h_str = h_rest.split(" ")[0]
             w, h = int(w_str), int(h_str)
-
-            log.info(f"QtCameraWidget: Set active resolution to W:{w}, H:{h}")
             if (w, h) != (self.current_width, self.current_height):
                 self.current_width, self.current_height = w, h
                 if self._active_device_info:
-                    log.info("Resolution changed, restarting camera thread.")
                     self._cleanup_camera_thread()
                     self._start_new_camera_thread()
         except ValueError:
             log.error(f"Could not parse resolution string: {resolution_str}")
 
-    # ... rest of the class unchanged ...
+    @pyqtSlot(int)
+    def set_exposure(self, exposure_us: int):
+        self._exp_pending = exposure_us
+        self._exp_timer.start()
+
+    @pyqtSlot(float)
+    def set_gain(self, gain_db: float):
+        self._gain_pending = gain_db
+        self._gain_timer.start()
+
+    @pyqtSlot(bool)
+    def set_auto_exposure(self, enable_auto: bool):
+        if self._camera_thread and self._camera_thread.isRunning():
+            self._camera_thread.update_auto_exposure(enable_auto)
+
+    @pyqtSlot()
+    def _apply_pending_exposure(self):
+        if self._camera_thread and self._exp_pending is not None:
+            log.info(f"Applying exposure: {self._exp_pending} µs (manual mode)")
+            self._camera_thread.update_auto_exposure(False)
+            self._camera_thread.update_exposure(self._exp_pending)
+        self._exp_pending = None
+
+    @pyqtSlot()
+    def _apply_pending_gain(self):
+        if self._camera_thread and self._gain_pending is not None:
+            log.info(f"Applying gain: {self._gain_pending} dB")
+            self._camera_thread.update_gain(self._gain_pending)
+        self._gain_pending = None
+
+    @pyqtSlot(int, int, int, int)
+    def set_software_roi(self, x: int, y: int, w: int, h: int):
+        self._current_roi = (x, y, w, h)
+        if self._camera_thread and self._camera_thread.isRunning():
+            self._camera_thread.update_roi(x, y, w, h)
+
+    @pyqtSlot()
+    def reset_roi_to_default(self):
+        self.set_software_roi(0, 0, 0, 0)
+
+    @pyqtSlot(QImage, object)
+    def _on_sdk_frame_received(self, qimg: QImage, frame_data: object):
+        if self.viewfinder.text() and not qimg.isNull():
+            self.viewfinder.setText("")
+        if qimg and not qimg.isNull():
+            self._last_pixmap = QPixmap.fromImage(qimg)
+            self._update_viewfinder_display()
+            self.frame_ready.emit(qimg, frame_data)
+
+    @pyqtSlot(str, str)
+    def _on_camera_thread_error_received(self, message: str, code: str):
+        display = f"Camera Error: {message}" if len(message) < 50 else f"Error ({code})"
+        self.viewfinder.setText(display)
+        self._last_pixmap = None
+        self._update_viewfinder_display()
+        self.camera_error.emit(message, code)
+
+    @pyqtSlot()
+    def _on_camera_thread_finished(self):
+        # Thread cleanup handled elsewhere
+        pass
 
     def _update_viewfinder_display(self):
         if self._last_pixmap and not self._last_pixmap.isNull():
@@ -216,7 +258,6 @@ class QtCameraWidget(QWidget):
         self._update_viewfinder_display()
 
     def closeEvent(self, event):
-        log.info("QtCameraWidget: closeEvent, cleaning up camera thread.")
         self._cleanup_camera_thread()
         super().closeEvent(event)
 
