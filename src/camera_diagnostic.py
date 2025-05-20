@@ -84,7 +84,12 @@ def main():
 
         report["devices"].append(entry)
 
-    json.dump(report, sys.stdout, indent=2)
+    import os
+
+    out_path = os.path.join(os.path.dirname(__file__), "camera_report.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2)
+    print(f"Wrote camera report to {out_path!r}")
 
 
 if __name__ == "__main__":
