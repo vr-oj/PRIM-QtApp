@@ -606,7 +606,7 @@ class MainWindow(QMainWindow):
                 video_ext=video_ext,
                 video_codec=codec,
             )
-            if not self.trial_recorder.is_recording:
+            if not self.trial_recorder.is_recording_active:
                 raise RuntimeError("Recorder failed to start.")
         except Exception as e:
             log.exception("Failed to initialize TrialRecorder.")
