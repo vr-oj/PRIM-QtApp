@@ -181,9 +181,14 @@ class SDKCameraThread(QThread):
             self.camera_resolutions_available.emit([])
 
     def run(self):
+        # **reset** any stale stop request:
+        self._stop_requested = False
+
         log.info(f"SDKCameraThread start: {self.device_info}")
         self.grabber = ic4.Grabber()
+
         try:
+            # open first device if none specified
             if not self.device_info:
                 devs = ic4.DeviceEnum.devices()
                 if not devs:
@@ -194,7 +199,7 @@ class SDKCameraThread(QThread):
             self.pm = self.grabber.device_property_map
             log.info(f"Opened {self.device_info.model_name}")
 
-            # choose Y800 / Mono8 first
+            # ── pick “Y800” (Mono8) if available ──
             pfp = self.pm.find(PROP_PIXEL_FORMAT)
             if isinstance(pfp, PropEnumeration) and pfp.is_available:
                 opts = [e.name for e in pfp.entries]
@@ -210,50 +215,52 @@ class SDKCameraThread(QThread):
             else:
                 self.actual_qimg_fmt = QImage.Format_Grayscale8
 
-            # full sensor
+            # ── now read the *current* width/height (camera’s native full‐frame for that PF) ──
             wp = self.pm.find(PROP_WIDTH)
             hp = self.pm.find(PROP_HEIGHT)
-            if self._is_writable(wp):
-                self._set_prop(PROP_WIDTH, wp.maximum)
-            if self._is_writable(hp):
-                self._set_prop(PROP_HEIGHT, hp.maximum)
+            w_full = wp.value
+            h_full = hp.value
+            self._set_prop(PROP_WIDTH, w_full)
+            self._set_prop(PROP_HEIGHT, h_full)
             self._set_prop(PROP_OFFSET_X, 0)
             self._set_prop(PROP_OFFSET_Y, 0)
-            log.info(f"Full-frame: {wp.maximum}x{hp.maximum}")
+            log.info(f"Full-frame: {w_full}×{h_full}")
 
             # continuous, free-run
             self._set_prop(PROP_ACQUISITION_MODE, "Continuous")
             self._set_prop(PROP_TRIGGER_MODE, "Off")
 
-            # frame rate (may clamp)
+            # frame rate (driver may clamp)
             self._set_prop(PROP_ACQUISITION_FRAME_RATE, float(self.target_fps))
             log.info(f"Configured continuous, free-run @ {self.target_fps}fps")
 
-            # initial UI emits
+            # one‐time UI emits
             self._emit_res()
             self._emit_props()
 
-            # create sink + queue buffers in sink_connected callback
+            # create sink (it will call sink_connected → queue buffers)
             self.sink = ic4.QueueSink(self.listener)
             self.sink.accept_incomplete_frames = False
             log.info("QueueSink created")
 
-            # start stream
+            # start the stream
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
             log.info("Streaming started")
 
-            # acquisition loop
+            # ── main acquisition loop ──
             frame_interval = 1.0 / self.target_fps
             last_emit = time.monotonic()
+
             while not self._stop_requested:
                 buf = None
                 try:
                     buf = self.sink.pop_output_buffer()
                 except ic4.IC4Exception as ex:
-                    name = ex.code.name if getattr(ex, "code", None) else ""
-                    if "NoData" in name or "Time" in name:
+                    # swallow no‐data errors
+                    nm = ex.code.name if getattr(ex, "code", None) else ""
+                    if "NoData" in nm or "Time" in nm:
                         time.sleep(0.01)
                         continue
                     log.exception("Stream popped error")
@@ -262,10 +269,9 @@ class SDKCameraThread(QThread):
                 if buf is None:
                     continue
 
-                # got buffer
+                # convert to QImage
                 w = buf.image_type.width
                 h = buf.image_type.height
-                # map raw -> QImage
                 try:
                     if hasattr(buf, "numpy_wrap"):
                         arr = buf.numpy_wrap()
@@ -276,7 +282,9 @@ class SDKCameraThread(QThread):
                         raw = ctypes.string_at(buf.pointer, pitch * h)
                         stride = pitch
                     else:
+                        buf.release()
                         continue
+
                     img = QImage(raw, w, h, stride, self.actual_qimg_fmt)
                     if (
                         not img.isNull()
@@ -284,6 +292,7 @@ class SDKCameraThread(QThread):
                     ):
                         last_emit = time.monotonic()
                         self.frame_ready.emit(img.copy(), raw)
+
                 except Exception:
                     log.exception("Failed to build QImage")
                 finally:

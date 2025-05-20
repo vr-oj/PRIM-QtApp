@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QGraphicsPixmapItem,
     QOpenGLWidget,
 )
-from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot, QTimer
+from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot, QTimer, QRectF
 from PyQt5.QtGui import QImage, QPixmap
 
 from .sdk_camera_thread import SDKCameraThread
@@ -31,11 +31,18 @@ class GLCameraView(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setAlignment(Qt.AlignCenter)
+        # ensure smooth scaling
+        self.setRenderHints(self.renderHints() | Qt.SmoothPixmapTransform)
 
     def update_frame(self, qimg: QImage):
         pix = QPixmap.fromImage(qimg)
         self._item.setPixmap(pix)
-        # the view will auto-scale to fit
+        # update scene rect and fit entire image
+        rect = QRectF(pix.rect())
+        self.scene().setSceneRect(rect)
+        # reset any previous transform, then fit
+        self.resetTransform()
+        self.fitInView(rect, Qt.KeepAspectRatio)
 
 
 class QtCameraWidget(QWidget):
