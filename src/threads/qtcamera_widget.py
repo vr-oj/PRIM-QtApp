@@ -113,22 +113,26 @@ class QtCameraWidget(QWidget):
 
     @pyqtSlot(ic4.DeviceInfo)
     def set_active_camera_device(self, device_info: ic4.DeviceInfo = None):
+        from PyQt5.QtCore import QTimer
+
         log.info(
             f"QtCameraWidget: Set active camera to: {device_info.model_name if device_info else 'None'}"
         )
-
+        # stop any existing thread
         self._cleanup_camera_thread()
         self._active_device_info = device_info
         self._last_pixmap = None
 
+        # if no camera, clear viewfinder and emit empty signals
         if self._active_device_info is None:
-            # same early return
+            self.viewfinder.setText("No Camera Selected")
+            self._update_viewfinder_display()
+            self.camera_resolutions_updated.emit([])
+            self.camera_properties_updated.emit({})
             return
 
-        self.viewfinder.setText(
-            f"Connecting to {self._active_device_info.model_name}..."
-        )
-        # delay starting the new thread by 100 ms
+        # otherwise, show “Connecting…” then start after a short delay
+        self.viewfinder.setText(f"Connecting to {device_info.model_name}...")
         QTimer.singleShot(100, self._start_new_camera_thread)
 
         self._start_new_camera_thread()
