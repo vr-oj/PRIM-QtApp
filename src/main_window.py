@@ -61,7 +61,7 @@ except Exception as e:
 
 from threads.qtcamera_widget import QtCameraWidget
 from threads.serial_thread import SerialThread
-from recording import TrialRecorder
+from recording import TrialRecorder, RecordingWorker
 from utils import list_serial_ports
 
 from control_panels.top_control_panel import TopControlPanel
@@ -86,7 +86,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self._serial_thread = None
-        self.trial_recorder = None
+        self._recording_worker = None
         self._is_recording = False
         self.last_trial_basepath = ""
 
@@ -472,13 +472,13 @@ class MainWindow(QMainWindow):
             )
 
         # Write CSV if recording
-        if self._is_recording and self.trial_recorder:
+        if self._is_recording and self._recording_worker: 
             try:
-                self.trial_recorder.write_csv_data(t, idx, p)
-            except Exception:
-                log.exception("Error writing CSV during recording.")
+                self._recording_worker.add_csv_data(t, idx, p)
+            except Exception: # Should be rare if queue.put is used
+                log.exception("Error queueing CSV data for recording.")
                 self.statusBar().showMessage(
-                    "CSV write error. Stopping recording.", 5000
+                    "CSV queue error. Stopping recording.", 5000
                 )
                 self._trigger_stop_recording()
 
@@ -504,7 +504,7 @@ class MainWindow(QMainWindow):
             self.current_camera_frame_height = qimage.height()
             log.info(f"Actual camera frame size: {qimage.width()}x{qimage.height()}")
 
-        if self._is_recording and self.trial_recorder and not qimage.isNull():
+        if self._is_recording and self._recording_worker and not qimage.isNull():
             try:
                 # Convert to numpy
                 numpy_frame = None
@@ -524,8 +524,7 @@ class MainWindow(QMainWindow):
                     )
 
                 if numpy_frame is not None:
-                    self.trial_recorder.write_video_frame(numpy_frame.copy())
-                else:
+                    self._recording_worker.add_video_frame(numpy_frame.copy())
                     log.warning("Unsupported QImage format for video frame.")
 
             except Exception:
@@ -599,19 +598,27 @@ class MainWindow(QMainWindow):
 
         log.info(f"Starting recording: {base}, {DEFAULT_FPS} FPS, {w}x{h}, {video_ext}")
         try:
-            self.trial_recorder = TrialRecorder(
+            self._recording_worker = RecordingWorker(
                 basepath=base,
                 fps=DEFAULT_FPS,
                 frame_size=(w, h),
                 video_ext=video_ext,
                 video_codec=codec,
+                parent=self
             )
-            if not self.trial_recorder.is_recording:
-                raise RuntimeError("Recorder failed to start.")
+            QApplication.processEvents() # Give thread a moment to start
+            time.sleep(0.2) # Small delay, not ideal for production but helps for demo
+            
+            if not (self._recording_worker and self._recording_worker.is_ready_to_record): # is_ready_to_record is a new property
+                 raise RuntimeError("Recording worker failed to initialize TrialRecorder.")
+
         except Exception as e:
-            log.exception("Failed to initialize TrialRecorder.")
+            log.exception("Failed to initialize or start RecordingWorker.")
             QMessageBox.critical(self, "Recording Error", str(e))
-            self.trial_recorder = None
+            if self._recording_worker:
+                self._recording_worker.stop_worker()
+                self._recording_worker.wait() # Ensure it stops
+            self._recording_worker = None
             return
 
         self._is_recording = True
@@ -621,34 +628,38 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Recording Started: {safe}", 0)
 
     def _trigger_stop_recording(self):
-        if not self._is_recording:
+        if not self._is_recording or not self._recording_worker: # MODIFIED
             return
 
-        log.info("Stopping recording.")
-        if self.trial_recorder:
-            try:
-                self.trial_recorder.stop()
-                count = self.trial_recorder.video_frame_count
-                self.statusBar().showMessage(f"Recording Stopped. {count} frames", 7000)
-                reply = QMessageBox.information(
-                    self,
-                    "Recording Saved",
-                    f"Saved to:\n{self.last_trial_basepath}\nOpen folder?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No,
-                )
-                if reply == QMessageBox.Yes:
+        log.info("Stopping recording worker.")
+        try:
+            self._recording_worker.stop_worker()
+            if not self._recording_worker.wait(5000): # Wait for thread to finish
+                 log.warning("Recording worker did not stop gracefully.")
+                 self._recording_worker.terminate() # Force if necessary
+
+            count = self._recording_worker.video_frame_count # MODIFIED: Get count from worker
+            self.statusBar().showMessage(f"Recording Stopped. {count} frames", 7000)
+            reply = QMessageBox.information(
+                self,
+                "Recording Saved",
+                f"Saved to:\n{self.last_trial_basepath}\nOpen folder?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply == QMessageBox.Yes:
                     if sys.platform == "win32":
                         os.startfile(self.last_trial_basepath)
                     elif sys.platform == "darwin":
                         os.system(f'open "{self.last_trial_basepath}"')
                     else:
                         os.system(f'xdg-open "{self.last_trial_basepath}"')
+                    pass
             except Exception:
                 log.exception("Error stopping recorder.")
                 self.statusBar().showMessage("Error stopping recording.", 5000)
             finally:
-                self.trial_recorder = None
+                self._recording_worker = None
 
         self._is_recording = False
         self.start_recording_action.setIcon(self.icon_record_start)
@@ -709,17 +720,28 @@ class MainWindow(QMainWindow):
                 QMessageBox.No,
             )
             if reply == QMessageBox.Yes:
-                self._trigger_stop_recording()
+                self._trigger_stop_recording() # This will handle the recording worker
             else:
                 event.ignore()
                 return
 
+        # Stop Recording Worker if it's still around (e.g., if recording was not active but worker exists)
+        if self._recording_worker and self._recording_worker.isRunning():
+            log.info("Stopping recording worker on exit...")
+            self._recording_worker.stop_worker()
+            if not self._recording_worker.wait(3000): # Increased wait time slightly
+                log.warning("Recording worker did not stop gracefully on exit, terminating.")
+                self._recording_worker.terminate()
+            self._recording_worker = None
+
+        # Stop Serial Thread
         if self._serial_thread and self._serial_thread.isRunning():
             log.info("Stopping serial thread on exit...")
             self._serial_thread.stop()
             if not self._serial_thread.wait(2000):
+                log.warning("Serial thread did not stop gracefully on exit, terminating.")
                 self._serial_thread.terminate()
-                self._serial_thread.wait(500)
+                self._serial_thread.wait(500) # Wait after terminate
             self._serial_thread = None
 
         log.info("Closing camera widget.")

@@ -4,8 +4,103 @@ import csv
 import logging
 import imageio  # For AVI and potentially other formats
 import tifffile  # For TIFF stacks
+import queue
 
-log = logging.getLogger(__name__)  # Make sure logger is defined
+log = logging.getLogger(__name__)
+
+
+class RecordingWorker(QThread):  # New QThread worker
+    def __init__(self, basepath, fps, frame_size, video_ext, video_codec, parent=None):
+        super().__init__(parent)
+        self.basepath = basepath
+        self.fps = fps
+        self.frame_size = frame_size
+        self.video_ext = video_ext
+        self.video_codec = video_codec
+        self.trial_recorder = None
+        self.data_queue = queue.Queue()
+        self._is_running = False
+        self.video_frame_count_internal = 0
+
+    def run(self):
+        self._is_running = True
+        try:
+            self.trial_recorder = TrialRecorder(
+                basepath=self.basepath,
+                fps=self.fps,
+                frame_size=self.frame_size,
+                video_ext=self.video_ext,
+                video_codec=self.video_codec,
+            )
+            if not self.trial_recorder.is_recording:
+                # Propagate error if TrialRecorder failed to init
+                # (Consider adding an error signal to RecordingWorker)
+                log.error("TrialRecorder failed to initialize within RecordingWorker.")
+                self._is_running = False
+                return
+
+            log.info(f"RecordingWorker started for {self.basepath}")
+            while self._is_running or not self.data_queue.empty():
+                try:
+                    item_type, data = self.data_queue.get(
+                        timeout=0.1
+                    )  # Timeout to check _is_running
+                    if item_type == "stop":
+                        break
+                    if item_type == "video":
+                        self.trial_recorder.write_video_frame(data)
+                        self.video_frame_count_internal = (
+                            self.trial_recorder.video_frame_count
+                        )
+                    elif item_type == "csv":
+                        t, idx, p = data
+                        self.trial_recorder.write_csv_data(t, idx, p)
+                    self.data_queue.task_done()
+                except queue.Empty:
+                    if not self._is_running and self.data_queue.empty():
+                        break  # Exit if stopped and queue is empty
+                    continue  # Continue waiting if running or queue has pending items
+                except Exception as e:
+                    log.exception(f"Error processing queue in RecordingWorker: {e}")
+                    # Optionally emit an error signal
+
+        except Exception as e:
+            log.exception(f"Failed to initialize TrialRecorder in RecordingWorker: {e}")
+            # Optionally emit an error signal
+        finally:
+            if self.trial_recorder:
+                self.trial_recorder.stop()
+                self.video_frame_count_internal = (
+                    self.trial_recorder.video_frame_count
+                )  # Update one last time
+            log.info("RecordingWorker finished.")
+            self._is_running = False
+
+    def add_video_frame(self, frame_numpy):
+        if self._is_running:
+            self.data_queue.put(("video", frame_numpy))
+
+    def add_csv_data(self, t, idx, p):
+        if self._is_running:
+            self.data_queue.put(("csv", (t, idx, p)))
+
+    def stop_worker(self):
+        log.info("RecordingWorker: Stop requested.")
+        if self._is_running:
+            self.data_queue.put(("stop", None))  # Sentinel to stop processing
+        self._is_running = False
+
+    @property
+    def video_frame_count(self):
+        if self.trial_recorder:  # Get from TrialRecorder if possible
+            return self.trial_recorder.video_frame_count
+        return self.video_frame_count_internal  # Fallback to worker's count
+
+    @property
+    def is_ready_to_record(self):  # Check if TrialRecorder was successfully initialized
+        return (
+            self.trial_recorder is not None and self.trial_recorder.is_recording_active
+        )
 
 
 class SimpleVideoRecorder:
@@ -26,9 +121,6 @@ class SimpleVideoRecorder:
             os.makedirs(".", exist_ok=True)
 
         if self.video_ext == "avi":
-            # imageio uses ffmpeg for AVI. Common codecs: 'mjpeg', 'libx264'
-            # 'MJPG' from your config.py should work if ffmpeg is properly installed with imageio-ffmpeg.
-            # The 'quality' parameter is for lossy codecs like MJPEG (0-10, 10 is best)
             self.writer = imageio.get_writer(
                 self.out_path, fps=self.fps, codec=video_codec, quality=8
             )
@@ -40,12 +132,10 @@ class SimpleVideoRecorder:
             raise ValueError(f"Unsupported video extension: {self.video_ext}")
         log.info(f"SimpleVideoRecorder initialized for {self.out_path}")
 
-    def write_frame(self, frame_numpy):  # Expects a numpy array
+    def write_frame(self, frame_numpy):
         if self.video_ext == "avi" and self.writer:
             self.writer.append_data(frame_numpy)
         elif self.video_ext in ("tif", "tiff"):
-            # For the first frame, 'append' should be False.
-            # For subsequent frames, append must be True.
             tifffile.imwrite(
                 self.out_path, frame_numpy, append=(self.frames_written > 0)
             )
