@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import time
 import sys
@@ -8,6 +7,19 @@ import imagingcontrol4 as ic4
 os.environ["IC4_DLL_PATH"] = (
     r"C:\Program Files\The Imaging Source Europe GmbH\IC4 GenTL Driver for USB3Vision Devices 1.4\bin\ic4-gentl-u3v_x64.cti"
 )
+
+
+class DummySinkListener:
+    def sink_connected(self, sink, image_type, min_buffers_required):
+        # Must return True to allow streaming
+        print(f"🔗 Sink connected: {image_type}, buffers={min_buffers_required}")
+        return True
+
+    def frames_queued(self, sink):
+        pass
+
+    def sink_disconnected(self, sink):
+        print("🔌 Sink disconnected")
 
 
 def main():
@@ -36,20 +48,21 @@ def main():
         sys.exit(1)
 
     # ── start streaming ──
-    sink = ic4.QueueSink(None)
+    listener = DummySinkListener()
+    sink = ic4.QueueSink(listener)
     if hasattr(sink, "accept_incomplete_frames"):
         sink.accept_incomplete_frames = False
 
     try:
         g.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
+        print("✅ Streaming started.")
     except Exception as e:
         print("❌ stream_setup failed:", e)
         g.device_close()
         sys.exit(1)
 
-    print("✅ Streaming started. Grabbing up to 10 frames…")
-
     # ── grab a few frames ──
+    print("📸 Grabbing up to 10 frames…")
     got = 0
     t0 = time.monotonic()
     while got < 10 and (time.monotonic() - t0) < 5:
@@ -64,9 +77,8 @@ def main():
             break
 
         if buf:
-            w = buf.image_type.width
-            h = buf.image_type.height
-            print(f"📸 Frame {got+1}: {w}×{h}")
+            w, h = buf.image_type.width, buf.image_type.height
+            print(f"  • Frame {got+1}: {w}×{h}")
             got += 1
         else:
             time.sleep(0.05)
