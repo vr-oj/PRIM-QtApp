@@ -187,5 +187,5 @@ QTableWidget::item:selected {
 QFrame#camera_view, QLabel#camera_placeholder {
     background-color: #40634A;
     color:            #F9F9F9;
-    border:           1px solid #D6C832;
+    border:           1px solid #40634A;
 }
