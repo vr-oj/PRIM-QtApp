@@ -1,163 +1,445 @@
-/******************************************************************
- * PRIMalyzer Style Sheet
- * Color palette and typography definitions
- ******************************************************************/
-/******************************************************************
- * Base styles (applied to all widgets)
- ******************************************************************/
+/*
+ * PRIMalyzer - Michigan State Spartan Green Theme
+ */
+
+/* MSU Color Palette Variables */
+@spartanGreen: #18453B;
+@msuWhite: #FFFFFF;
+@msuLightGray: #F0F0F0;
+@msuMediumGray: #C1C1C1;
+@msuDarkGray: #535054;
+@msuCharcoal: #2F2F2F;
+@msuAccentGreen: #0B9A6D; /* Brighter green for highlights/hovers */
+@msuBlack: #000000;
+
+/* Theme Semantic Variables */
+@appWindowBackground: @msuLightGray; /* Overall window background */
+@panelBackground: @spartanGreen;    /* Background for control panels, group boxes */
+@panelTextColor: @msuWhite;        /* Text color on panels */
+
+@widgetBackground: @msuWhite;      /* Background for input fields, lists etc. on light theme parts */
+@widgetTextColor: @msuCharcoal;     /* Text color for input fields etc. on light theme parts */
+
+@textOnDark: @msuWhite;
+@textOnLight: @msuCharcoal;
+
+@borderColor: @msuMediumGray;
+@borderColorDarker: @msuDarkGray;
+@borderColorFocused: @msuAccentGreen;
+
+@buttonBackground: @msuAccentGreen; /* A slightly lighter green for buttons */
+@buttonTextColor: @msuWhite;
+@buttonHoverBackground: #0EAA7A; /* Slightly lighter version of accent green */
+@buttonPressedBackground: #088A5F;/* Slightly darker version of accent green */
+@buttonDisabledBackground: @msuMediumGray;
+@buttonDisabledTextColor: @msuDarkGray;
+
+@toolbarBackground: @spartanGreen;
+@statusBarBackground: @spartanGreen;
+
+@tabBackgroundColor: #2A554F; /* Slightly lighter than Spartan Green for non-selected tabs */
+@tabSelectedBackgroundColor: @msuAccentGreen;
+@tabTextColor: @msuLightGray;
+@tabSelectedTextColor: @msuWhite;
+
+@viewfinderBackground: @msuBlack;
+@viewfinderTextColor: @msuWhite; /* For "No Camera Selected" text */
+
+/* Global Widget Styles */
 QWidget {
-    background-color: #18453B;
-    color: #7A8C8F;
-    font-family: 'Segoe UI', Arial, sans-serif;
-    font-size: 12px;
+    font-family: "Segoe UI", Arial, sans-serif; /* Or your preferred font */
+    font-size: 9pt;
+    color: @textOnLight; /* Default text color for widgets on light backgrounds */
 }
 
-/*── Main window and containers ─────────────────────────────────*/
 QMainWindow {
-    background: #18453B;
+    background-color: @appWindowBackground;
 }
 
-QToolBar {
-    background-color: #40634A;
-    spacing: 6px;
-    padding: 2px;
+QSplitter::handle {
+    background-color: @msuMediumGray;
+    border: 1px solid @borderColorDarker;
+}
+QSplitter::handle:horizontal {
+    width: 3px;
+}
+QSplitter::handle:vertical {
+    height: 3px;
+}
+QSplitter::handle:pressed {
+    background-color: @msuAccentGreen;
 }
 
-QStatusBar {
-    background-color: #40634A;
-    color: #F9F9F9;
-    font-size: 11px;
+
+/* Top Control Panel & GroupBoxes */
+TopControlPanel, PlotControlPanel, CameraControlPanel { /* Targeting your custom panel classes by name */
+    background-color: transparent; /* Make them transparent if QGroupBox is styled */
 }
 
-/******************************************************************
- * Group boxes & tabs (Camera panel, Device status, Plot controls)
- ******************************************************************/
 QGroupBox {
-    background-color: #F9F9F9;
-    border: 1px solid #40634A;
-    border-radius: 4px;
-    margin-top: 1.2em;
-    padding: 6px;
+    background-color: @panelBackground;
+    color: @panelTextColor; /* Title text color */
+    border: 1px solid @borderColorDarker;
+    border-radius: 5px;
+    margin-top: 12px; /* Space for the title */
+    padding: 5px;
 }
+
 QGroupBox::title {
     subcontrol-origin: margin;
-    subcontrol-position: top center;
-    padding: 0 4px;
-    color: #18453B;
+    subcontrol-position: top left;
+    padding: 2px 8px;
+    background-color: @panelBackground; /* Same as groupbox or slightly different */
+    border-radius: 4px;
+    color: @panelTextColor;
     font-weight: bold;
-    font-size: 13px;
+    margin-left: 5px;
 }
 
-QTabWidget::pane {
-    border: 1px solid #40634A;
-    border-radius: 4px;
-    background-color: #40634A;
-    padding: 4px;
-}
-QTabBar::tab {
-    background: #2E674E;
-    color: #F9F9F9;
-    padding: 4px 8px;
-    border: 1px solid #2E674E;
-    border-bottom: none;
-    border-top-left-radius:4px;
-    border-top-right-radius:4px;
-    min-width: 50px;
-}
-QTabBar::tab:selected {
-    background: #40634A;
-    border-color: #40634A;
-}
-QTabBar::tab:hover {
-    background: #18453B;
+/* Labels */
+QLabel {
+    background-color: transparent; /* Default for most labels */
+    color: @textOnLight; /* Default color, will be overridden in dark panels */
 }
 
-/******************************************************************
- * Input widgets (combos, spinboxes, text edits)
- ******************************************************************/
-QComboBox, QSpinBox, QDoubleSpinBox,
-QLineEdit, QTextEdit {
-    background-color: #F9F9F9;
-    border: 1px solid #CCCCCC;
+/* Labels within dark panels (e.g. QGroupBox) need light text */
+QGroupBox QLabel, TopControlPanel QLabel {
+    color: @panelTextColor;
+    font-size: 9pt;
+}
+
+/* Specific labels in TopControlPanel from your screenshot */
+/* Example: For the "Connection: Disconnected" label if it needs special styling */
+/* QLabel#conn_lbl { font-weight:bold; color:@msuWhite; } */
+/* Your Python code already sets stylesheets for these dynamically based on status,
+   so these QSS rules might be overridden or might provide a base. */
+
+
+/* Buttons */
+QPushButton {
+    background-color: @buttonBackground;
+    color: @buttonTextColor;
+    border: 1px solid @buttonBackground; /* Make border same as bg or slightly darker */
+    border-radius: 4px;
+    padding: 6px 12px;
+    min-width: 80px;
+    font-weight: bold;
+}
+
+QPushButton:hover {
+    background-color: @buttonHoverBackground;
+    border-color: @buttonHoverBackground;
+}
+
+QPushButton:pressed {
+    background-color: @buttonPressedBackground;
+    border-color: @buttonPressedBackground;
+}
+
+QPushButton:disabled {
+    background-color: @buttonDisabledBackground;
+    color: @buttonDisabledTextColor;
+    border-color: @msuMediumGray;
+}
+
+/* ComboBoxes */
+QComboBox {
+    border: 1px solid @borderColor;
     border-radius: 4px;
     padding: 4px;
-    color: #2E3440;
+    background-color: @widgetBackground;
+    color: @widgetTextColor;
+    min-height: 20px; /* Ensure height matches other inputs */
 }
-QComboBox:hover, QSpinBox:hover, QLineEdit:hover, QTextEdit:hover {
-    border-color: #40634A;
+
+QComboBox:hover {
+    border-color: @borderColorFocused;
 }
+
 QComboBox::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
-    width: 16px;
-    border-left: 1px solid #CCCCCC;
-}
-QComboBox::down-arrow {
-    image: url(:/icons/arrow-down.svg);
+    width: 20px;
+    border-left-width: 1px;
+    border-left-color: @borderColor;
+    border-left-style: solid;
+    border-top-right-radius: 3px;
+    border-bottom-right-radius: 3px;
 }
 
-/******************************************************************
- * Buttons & checkboxes
- ******************************************************************/
-QPushButton {
-    background-color: #5E81AC;
-    color: #F9F9F9;
+QComboBox::down-arrow {
+    image: url(icons/down_arrow.svg); /* You'll need an icon for this, or use a default Qt one */
+    width: 12px;
+    height: 12px;
+}
+/* Style the QComboBox popup list */
+QComboBox QAbstractItemView {
+    border: 1px solid @borderColorDarker;
+    background-color: @widgetBackground;
+    color: @widgetTextColor;
+    selection-background-color: @msuAccentGreen;
+    selection-color: @msuWhite;
+}
+
+
+/* SpinBoxes and LineEdits (generic input fields) */
+QSpinBox, QDoubleSpinBox, QLineEdit {
+    border: 1px solid @borderColor;
     border-radius: 4px;
-    padding: 6px 12px;
-    min-height: 24px;
+    padding: 4px;
+    background-color: @widgetBackground;
+    color: @widgetTextColor;
+    min-height: 20px;
 }
-QPushButton:hover {
-    background-color: #81A1C1;
+
+QSpinBox:hover, QDoubleSpinBox:hover, QLineEdit:hover {
+    border-color: @borderColorFocused;
 }
+QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {
+    border-color: @msuAccentGreen;
+}
+
+/* CheckBoxes */
 QCheckBox {
-    spacing: 6px;
+    color: @panelTextColor; /* Assuming checkboxes are mostly on dark panels */
+    spacing: 5px; /* Space between checkbox and text */
 }
 QCheckBox::indicator {
     width: 16px;
     height: 16px;
+    border: 1px solid @msuMediumGray;
+    border-radius: 3px;
+    background-color: @msuLightGray;
 }
-QCheckBox::indicator:unchecked {
-    image: url(:/icons/checkbox-unchecked.svg);
+QCheckBox::indicator:hover {
+    border-color: @msuAccentGreen;
 }
 QCheckBox::indicator:checked {
-    image: url(:/icons/checkbox-checked.svg);
+    background-color: @msuAccentGreen;
+    border-color: @msuAccentGreen;
+    image: url(icons/checkmark.svg); /* Provide a white checkmark SVG */
+}
+QCheckBox::indicator:disabled {
+    background-color: @msuDarkGray;
+    border-color: @msuDarkGray;
+}
+QCheckBox[auto_x_cb="true"] QLabel, QCheckBox[auto_y_cb="true"] QLabel { /* Example if you set object names */
+    color: @panelTextColor;
 }
 
-/******************************************************************
- * Sliders
- ******************************************************************/
-QSlider::groove:horizontal {
-    height: 6px;
-    background: #CCCCCC;
+
+/* TabWidget */
+QTabWidget::pane {
+    border: 1px solid @borderColorDarker;
+    border-radius: 4px;
+    background-color: @panelBackground; /* Background of the content area of the tab */
+    padding: 5px;
+}
+
+QTabBar::tab {
+    background-color: @tabBackgroundColor;
+    color: @tabTextColor;
+    border: 1px solid @borderColorDarker;
+    border-bottom: none; /* Or a different color to merge with pane */
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    padding: 8px 15px;
+    margin-right: 2px;
+    font-weight: bold;
+}
+
+QTabBar::tab:selected {
+    background-color: @tabSelectedBackgroundColor;
+    color: @tabSelectedTextColor;
+    border-bottom: 1px solid @tabSelectedBackgroundColor; /* Make it blend with the pane */
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: @msuAccentGreen;
+    color: @msuWhite;
+}
+
+/* Toolbar */
+QToolBar {
+    background-color: @toolbarBackground;
+    border: none;
+    padding: 2px;
+    spacing: 3px;
+}
+QToolBar QToolButton {
+    color: @msuWhite;
+    background-color: transparent;
+    border: 1px solid transparent;
+    padding: 4px 6px;
+    font-weight: bold;
+}
+QToolBar QToolButton:hover {
+    background-color: @msuAccentGreen;
     border-radius: 3px;
 }
-QSlider::handle:horizontal {
+QToolBar QToolButton:pressed {
+    background-color: @buttonPressedBackground;
+}
+QToolBar QLabel { /* For any labels in toolbar */
+    color: @msuWhite;
+    background-color: transparent;
+}
+QToolBar QComboBox { /* ComboBoxes in toolbar */
+    background-color: @msuLightGray; /* Lighter background for contrast */
+    color: @msuCharcoal;
+    border: 1px solid @msuDarkGray;
+    padding: 3px;
+    min-height: 18px;
+}
+
+
+/* Status Bar */
+QStatusBar {
+    background-color: @statusBarBackground;
+    color: @msuWhite;
+    font-weight: bold;
+}
+QStatusBar::item {
+    border: none; /* No border between items */
+}
+
+/* Console Log (QTextEdit in a QDockWidget) */
+QDockWidget {
+    titlebar-close-icon: url(icons/close.svg); /* Needs icons */
+    titlebar-normal-icon: url(icons/float.svg);/* Needs icons */
+    font-weight: bold;
+}
+QDockWidget::title {
+    text-align: left;
+    background: @spartanGreen;
+    color: @msuWhite;
+    padding: 5px;
+    border: 1px solid @borderColorDarker;
+    border-bottom: 2px solid @msuAccentGreen;
+}
+QTextEdit { /* Specifically for the console output */
+    background-color: #E8E8E8; /* A very light gray, almost white */
+    color: @msuCharcoal;
+    border: 1px solid @borderColor;
+    border-radius: 4px;
+    font-family: "Consolas", "Monaco", monospace;
+}
+
+/* Camera Viewfinder (QLabel in QtCameraWidget) */
+/* Your Python code sets this: "QLabel { background-color : black; color : white; }" */
+/* This QSS provides a default if you remove the Python inline style */
+/* Or you can give it an object name and style it: QLabel#cameraViewfinderLabel */
+QtCameraWidget QLabel { /* If the QLabel inside QtCameraWidget is the direct child */
+    background-color: @viewfinderBackground;
+    color: @viewfinderTextColor;
+    border: 1px solid @borderColorDarker; /* Optional border */
+}
+
+
+/* Pressure Plot Widget (Matplotlib canvas in a QWidget) */
+PressurePlotWidget {
+    background-color: @msuWhite; /* Background of the QWidget holding the plot */
+    border: 1px solid @borderColor;
+    border-radius: 4px;
+}
+/* The placeholder text "Waiting for PRIM device data..." color is set in pressure_plot_widget.py */
+/* You might want to ensure its color contrasts well or update it in the Python code too. */
+/* The placeholder currently uses: color="gray", bbox=dict(boxstyle="round,pad=0.5", fc="#ECEFF4", alpha=0.8) */
+/* This QSS won't directly style the Matplotlib plot lines/axes colors. That's done in Python. */
+
+/* ScrollBars (often appear with QTextEdit, QComboBox lists, etc.) */
+QScrollBar:vertical {
+    border: 1px solid @borderColor;
+    background: @msuLightGray;
     width: 12px;
-    margin: -3px 0;
-    border-radius: 6px;
-    background: #D6C832;
-    border: 1px solid #7A8C8F;
+    margin: 12px 0 12px 0; /* Space for up/down buttons */
+}
+QScrollBar::handle:vertical {
+    background: @msuMediumGray;
+    min-height: 20px;
+    border-radius: 5px;
+}
+QScrollBar::handle:vertical:hover {
+    background: @msuDarkGray;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    border: 1px solid @borderColor;
+    background: @msuLightGray;
+    height: 12px;
+    subcontrol-origin: margin;
+}
+QScrollBar::add-line:vertical:hover, QScrollBar::sub-line:vertical:hover {
+    background: @msuAccentGreen;
+}
+QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
+    /* Use SVG icons or standard characters */
+    /* image: url(icons/up_arrow.svg); */
+    /* image: url(icons/down_arrow.svg); */
+    width: 8px;
+    height: 8px;
+}
+/* Horizontal Scrollbar (similar styling) */
+QScrollBar:horizontal {
+    border: 1px solid @borderColor;
+    background: @msuLightGray;
+    height: 12px;
+    margin: 0 12px 0 12px;
+}
+QScrollBar::handle:horizontal {
+    background: @msuMediumGray;
+    min-width: 20px;
+    border-radius: 5px;
+}
+QScrollBar::handle:horizontal:hover {
+    background: @msuDarkGray;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    border: 1px solid @borderColor;
+    background: @msuLightGray;
+    width: 12px;
+    subcontrol-origin: margin;
+}
+QScrollBar::add-line:horizontal:hover, QScrollBar::sub-line:horizontal:hover {
+    background: @msuAccentGreen;
 }
 
-/******************************************************************
- * Table views (if you have any QTableWidget in future)
- ******************************************************************/
-QTableWidget, QTreeView {
-    background: #F9F9F9;
-    alternate-background-color: #ECEFF4;
-    gridline-color: #D8DEE9;
+/* Menu Bar */
+QMenuBar {
+    background-color: @spartanGreen;
+    color: @msuWhite;
+    border-bottom: 1px solid @msuAccentGreen;
 }
-QHeaderView::section {
-    background-color: #40634A;
-    color: #F9F9F9;
-    padding: 4px;
-    border: none;
+QMenuBar::item {
+    background-color: transparent;
+    padding: 4px 8px;
+    color: @msuWhite;
 }
-QTableWidget::item:selected {
-    background-color: #81A1C1;
-    color: #F9F9F9;
+QMenuBar::item:selected { /* When hovered or open */
+    background-color: @msuAccentGreen;
+    color: @msuWhite;
+}
+QMenuBar::item:pressed {
+    background-color: @buttonPressedBackground;
 }
 
-/******************************************************************
- * Plot Canvas is styled in code—see notes below.
- ******************************************************************/
+/* Menus */
+QMenu {
+    background-color: @msuLightGray; /* Menu dropdown background */
+    color: @msuCharcoal;         /* Menu item text color */
+    border: 1px solid @borderColorDarker;
+    padding: 5px;
+}
+QMenu::item {
+    padding: 5px 20px 5px 10px; /* top, right, bottom, left */
+    min-width: 120px;
+}
+QMenu::item:selected {
+    background-color: @msuAccentGreen;
+    color: @msuWhite;
+    border-radius: 3px;
+}
+QMenu::separator {
+    height: 1px;
+    background: @msuMediumGray;
+    margin: 4px 0;
+}
