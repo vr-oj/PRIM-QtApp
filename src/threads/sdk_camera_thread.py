@@ -14,7 +14,7 @@ from imagingcontrol4.properties import (
 
 log = logging.getLogger(__name__)
 
-# camera-property names
+# camera‐property names
 PROP_WIDTH = "Width"
 PROP_HEIGHT = "Height"
 PROP_PIXEL_FORMAT = "PixelFormat"
@@ -45,13 +45,10 @@ class DummySinkListener:
 class SDKCameraThread(QThread):
     # emitted whenever a new frame is ready: (QImage copy, raw_buffer)
     frame_ready = pyqtSignal(QImage, object)
-
     # emitted once after opening, with a list of resolution strings
     camera_resolutions_available = pyqtSignal(list)
-
     # emitted whenever exposure/gain/ROI props change, to repopulate your UI
     camera_properties_updated = pyqtSignal(dict)
-
     # emitted on any camera error: (message, code)
     camera_error = pyqtSignal(str, str)
 
@@ -65,53 +62,42 @@ class SDKCameraThread(QThread):
         parent=None,
     ):
         super().__init__(parent)
-
-        # user-requested parameters
         self.device_info = device_info
         self.target_fps = target_fps
         self.desired_width = desired_width
         self.desired_height = desired_height
         self.desired_pixel_format_str = desired_pixel_format
 
-        # internal flags & throttling
         self._stop_requested = False
         self._pending_exposure_us = None
         self._pending_gain_db = None
         self._pending_auto_exposure = None
         self._pending_roi = None
 
-        # debounce apply interval
         self._prop_throttle_interval = 0.1
         self._last_prop_apply_time = 0.0
 
-        # runtime objects
         self.grabber = None
         self.sink = None
         self.pm = None
         self.actual_qimage_format = QImage.Format_Invalid
 
-        # listener for QueueSink
         self.dummy_listener = DummySinkListener()
 
     def request_stop(self):
-        log.debug("SDKCameraThread: Stop requested")
         self._stop_requested = True
+        log.debug("SDKCameraThread: Stop requested")
 
-    # these are called from the GUI thread
     def update_exposure(self, exp_us: int):
-        log.debug(f"Queued exposure update: {exp_us} µs")
         self._pending_exposure_us = float(exp_us)
 
     def update_gain(self, gain_db: float):
-        log.debug(f"Queued gain update: {gain_db} dB")
         self._pending_gain_db = gain_db
 
     def update_auto_exposure(self, auto: bool):
-        log.debug(f"Queued auto-exposure: {auto}")
         self._pending_auto_exposure = auto
 
     def update_roi(self, x: int, y: int, w: int, h: int):
-        log.debug(f"Queued ROI update: x={x}, y={y}, w={w}, h={h}")
         self._pending_roi = (x, y, w, h)
 
     def _is_prop_writable(self, prop):
@@ -141,7 +127,7 @@ class SDKCameraThread(QThread):
         if not (self.pm and self.grabber and self.grabber.is_device_open):
             return
 
-        # auto-exposure toggle
+        # Auto‐exposure toggle
         if self._pending_auto_exposure is not None:
             pa = self.pm.find(PROP_EXPOSURE_AUTO)
             if pa and pa.is_available:
@@ -158,7 +144,7 @@ class SDKCameraThread(QThread):
                     self._emit_camera_properties()
             self._pending_auto_exposure = None
 
-        # manual exposure
+        # Manual exposure
         if self._pending_exposure_us is not None:
             pa = self.pm.find(PROP_EXPOSURE_AUTO)
             auto_on = False
@@ -169,7 +155,7 @@ class SDKCameraThread(QThread):
                 self._set_property_value(PROP_EXPOSURE_TIME, self._pending_exposure_us)
             self._pending_exposure_us = None
 
-        # gain
+        # Gain
         if self._pending_gain_db is not None:
             self._set_property_value(PROP_GAIN, self._pending_gain_db)
             self._pending_gain_db = None
@@ -189,9 +175,8 @@ class SDKCameraThread(QThread):
         if not self.pm:
             self.camera_properties_updated.emit({})
             return
-
         info = {"controls": {}, "roi": {}}
-        # ... existing property emission logic ...
+        # — your existing property‐gathering code goes here —
         self.camera_properties_updated.emit(info)
 
     def _emit_available_resolutions(self):
@@ -209,12 +194,11 @@ class SDKCameraThread(QThread):
 
     def run(self):
         log.info(
-            f"SDKCameraThread starting for {self.device_info.model_name if self.device_info else 'Unknown'}"
+            f"SDKCameraThread starting for "
+            f"{self.device_info.model_name if self.device_info else 'Unknown'}"
         )
-        self._stop_requested = False
         self.grabber = ic4.Grabber()
         try:
-            # pick first camera if none given
             if not self.device_info:
                 devs = ic4.DeviceEnum.devices()
                 if not devs:
@@ -225,14 +209,12 @@ class SDKCameraThread(QThread):
             self.pm = self.grabber.device_property_map
             log.info(f"Opened {self.device_info.model_name}")
 
-            # ── initial setup: pick a working pixel format ──
+            # ── initial setup: pick PF, full‐sensor, continuous mode ──
             try:
                 pfp = self.pm.find(PROP_PIXEL_FORMAT)
                 if isinstance(pfp, PropEnumeration) and pfp.is_available:
                     opts = [e.name for e in pfp.entries]
-                    # choose Mono8 if supported, else first listed
-                    chosen_pf = opts[0]
-                    for candidate in ("Mono8", "Mono 8"):
+                    for candidate in ("Mono8", "Mono 8", opts[0]):
                         if candidate in opts:
                             chosen_pf = candidate
                             break
@@ -245,13 +227,12 @@ class SDKCameraThread(QThread):
                         self.actual_qimage_format = QImage.Format_RGB888
                     else:
                         log.warning(
-                            f"Unrecognized PF '{chosen_pf}', defaulting to gray"
+                            f"Unrecognized PF '{chosen_pf}', defaulting to gray8"
                         )
                         self.actual_qimage_format = QImage.Format_Grayscale8
                 else:
                     self.actual_qimage_format = QImage.Format_Grayscale8
 
-                # full-sensor ROI
                 wp = self.pm.find(PROP_WIDTH)
                 hp = self.pm.find(PROP_HEIGHT)
                 if self._is_prop_writable(wp):
@@ -263,7 +244,6 @@ class SDKCameraThread(QThread):
                 log.info(
                     f"Res: {wp.value}×{hp.value}, PF={self.pm.find(PROP_PIXEL_FORMAT).value}"
                 )
-
                 self._set_property_value(PROP_ACQUISITION_MODE, "Continuous")
                 self._set_property_value(PROP_TRIGGER_MODE, "Off")
                 self._set_property_value(
@@ -274,12 +254,12 @@ class SDKCameraThread(QThread):
                 self.camera_error.emit(f"Config: {e}", type(e).__name__)
                 return
 
-            # push initial state
+            # push initial UI state
             self._apply_pending_properties()
             self._emit_available_resolutions()
             self._emit_camera_properties()
 
-            # start sink & streaming
+            # start sink + streaming
             self.sink = ic4.QueueSink(self.dummy_listener)
             if hasattr(self.sink, "accept_incomplete_frames"):
                 self.sink.accept_incomplete_frames = False
@@ -293,11 +273,11 @@ class SDKCameraThread(QThread):
                 f"About to enter acquisition loop; stop_requested={self._stop_requested}"
             )
 
-            # acquisition loop
             frame_count = 0
             no_data_count = 0
             last_emit = time.monotonic()
             frame_interval = 1.0 / self.target_fps
+
             while not self._stop_requested:
                 log.debug(
                     f"Loop iteration start; stop_requested={self._stop_requested}"
@@ -306,7 +286,6 @@ class SDKCameraThread(QThread):
 
                 try:
                     buf = self.sink.pop_output_buffer()
-                    log.debug(f"pop_output_buffer returned: {buf}")
                 except ic4.IC4Exception as ex:
                     name = ex.code.name if getattr(ex, "code", None) else ""
                     log.debug(f"pop_output_buffer raised IC4Exception: {name}")
@@ -316,17 +295,14 @@ class SDKCameraThread(QThread):
                             log.warning(f"No frames for ~{no_data_count*0.05:.1f}s")
                         self.msleep(50)
                         continue
-                    log.error("Sink pop failed, retrying", exc_info=True)
+                    log.error("Sink pop failed (will retry)", exc_info=True)
                     self.camera_error.emit(str(ex), name)
                     self.msleep(50)
                     continue
 
                 if buf is None:
                     no_data_count += 1
-                    if no_data_count % 200 == 0:
-                        log.warning(
-                            f"pop_output_buffer returned None for ~{no_data_count*0.05:.1f}s"
-                        )
+                    log.debug("pop_output_buffer returned None")
                     self.msleep(50)
                     continue
 
@@ -353,17 +329,16 @@ class SDKCameraThread(QThread):
                         raw = ctypes.string_at(ptr, pitch * h)
                         stride = pitch
                     else:
-                        raise RuntimeError("No image-buffer interface found")
+                        raise RuntimeError("No image‐buffer interface found")
 
                     img = QImage(raw, w, h, stride, fmt)
                     if not img.isNull():
                         now = time.monotonic()
                         if now - last_emit >= frame_interval:
                             last_emit = now
-                            log.debug(f"Emitting frame {frame_count}")
                             self.frame_ready.emit(img.copy(), raw)
                     else:
-                        log.warning("Built QImage is null (check format)")
+                        log.warning("Built QImage is null (check fmt mapping)")
                 except Exception:
                     log.error("QImage construction failed", exc_info=True)
 
@@ -377,13 +352,13 @@ class SDKCameraThread(QThread):
             log.info("Shutting down grabber")
             if self.grabber:
                 try:
-                    if self.grabber.is_streaming:
+                    if getattr(self.grabber, "is_streaming", False):
                         self.grabber.stream_stop()
                         log.info("Stream stopped")
                 except Exception:
                     pass
                 try:
-                    if self.grabber.is_device_open:
+                    if getattr(self.grabber, "is_device_open", False):
                         self.grabber.device_close()
                         log.info("Device closed")
                 except Exception:
