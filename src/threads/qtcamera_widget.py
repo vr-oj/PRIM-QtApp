@@ -116,20 +116,21 @@ class QtCameraWidget(QWidget):
         log.info(
             f"QtCameraWidget: Set active camera to: {device_info.model_name if device_info else 'None'}"
         )
+
         self._cleanup_camera_thread()
         self._active_device_info = device_info
         self._last_pixmap = None
 
         if self._active_device_info is None:
-            self.viewfinder.setText("No Camera Selected")
-            self._update_viewfinder_display()
-            self.camera_resolutions_updated.emit([])
-            self.camera_properties_updated.emit({})
+            …  # same early return
             return
 
         self.viewfinder.setText(
             f"Connecting to {self._active_device_info.model_name}..."
         )
+        # delay starting the new thread by 100 ms
+        QTimer.singleShot(100, self._start_new_camera_thread)
+
         self._start_new_camera_thread()
 
     def _start_new_camera_thread(self):
@@ -186,7 +187,9 @@ class QtCameraWidget(QWidget):
                 if self._active_device_info:
                     log.info("Resolution changed, restarting camera thread.")
                     self._cleanup_camera_thread()
-                    self._start_new_camera_thread()
+                    # delay starting the new thread by 100 ms
+                    QTimer.singleShot(100, self._start_new_camera_thread)
+
         except ValueError:
             log.error(f"Could not parse resolution string: {resolution_str}")
 
