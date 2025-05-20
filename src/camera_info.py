@@ -1,88 +1,62 @@
-#!/usr/bin/env python3
 import json
-import sys
 import platform
+import ctypes
+import os
 import imagingcontrol4 as ic4
 
 
-def dump_prop(p):
-    info = {
-        "type": type(p).__name__,
-        "available": getattr(p, "is_available", False),
-        "readonly": getattr(p, "is_readonly", False),
-        "value": None,
-    }
-    # Enumeration entries
-    if hasattr(p, "entries"):
-        try:
-            info["entries"] = [e.name for e in p.entries]
-        except Exception:
-            info["entries"] = "<error reading entries>"
-
-    # Numeric limits & increment
-    for attr in ("minimum", "maximum", "increment", "value"):
-        if hasattr(p, attr):
-            try:
-                info[attr] = getattr(p, attr)
-            except Exception:
-                info[attr] = f"<error reading {attr}>"
-    return info
-
-
 def main():
-    # 1) Init library
-    try:
-        ic4.Library.init()
-    except Exception:
-        # already initialized? ignore
-        pass
-
-    # 2) Base report structure
+    # System info
     report = {
         "system": {
             "platform": platform.platform(),
             "python_version": platform.python_version(),
             "architecture": platform.machine(),
         },
-        "library": {
-            # if the binding exposes a version API
-            "imagingcontrol4_version": getattr(ic4.Library, "version", lambda: None)()
-        },
+        "library": {},
         "devices": [],
     }
 
-    # 3) Enumerate cameras
-    devices = ic4.DeviceEnum.devices()
-    if not devices:
-        print("No cameras found", file=sys.stderr)
-        sys.exit(1)
+    # ImagingControl4 version
+    try:
+        lib = ic4.Library.core
+        # If version attribute exists
+        ver = getattr(ic4.Library, "__version__", None)
+        report["library"]["imagingcontrol4_version"] = ver
+    except Exception:
+        report["library"]["imagingcontrol4_version"] = None
 
-    # 4) For each device, open & scrape its PropertyMap
-    for dev in devices:
-        dev_report = {"model": dev.model_name, "serial": dev.serial, "properties": {}}
-        grabber = ic4.Grabber()
-        grabber.device_open(dev)
-        pm = grabber.device_property_map
+    # Enumerate devices
+    try:
+        devs = ic4.DeviceEnum.devices()
+        for dev in devs:
+            pm = ic4.Grabber().device_open(dev) or ic4.Grabber().device_property_map
+            props = {}
+            for prop in pm:
+                try:
+                    props[prop.name] = {
+                        "value": prop.value,
+                        "min": getattr(prop, "minimum", None),
+                        "max": getattr(prop, "maximum", None),
+                        "type": type(prop).__name__,
+                    }
+                except Exception:
+                    continue
+            report["devices"].append(
+                {
+                    "model": dev.model_name,
+                    "serial": dev.serial,
+                    "properties": props,
+                }
+            )
+    except Exception as e:
+        print(f"Error enumerating devices: {e}")
 
-        # 5) Enumerate all property names by inspecting pm.properties dict
-        #    (PropertyMap.properties is a dict of name→Prop*)
-        try:
-            prop_names = list(pm.properties.keys())
-        except Exception:
-            prop_names = []
-
-        for name in prop_names:
-            try:
-                prop = pm.find(name)
-                dev_report["properties"][name] = dump_prop(prop)
-            except Exception as e:
-                dev_report["properties"][name] = {"error": str(e)}
-
-        grabber.device_close()
-        report["devices"].append(dev_report)
-
-    # 6) Print JSON
-    print(json.dumps(report, indent=2))
+    # Write report to file
+    out_path = os.path.join(os.path.dirname(__file__), "camera_report.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2)
+    print(f"Wrote camera report to {out_path!r}")
 
 
 if __name__ == "__main__":
