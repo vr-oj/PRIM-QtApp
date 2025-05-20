@@ -1,13 +1,15 @@
 import logging
-import imagingcontrol4 as ic4  # For ic4.DeviceInfo
+import imagingcontrol4 as ic4
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout,
-    QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
-    QOpenGLWidget
+    QWidget,
+    QVBoxLayout,
+    QGraphicsView,
+    QGraphicsScene,
+    QGraphicsPixmapItem,
+    QOpenGLWidget,
 )
-from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot
+from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot, QTimer
 from PyQt5.QtGui import QImage, QPixmap
-
 
 from .sdk_camera_thread import SDKCameraThread
 
@@ -18,6 +20,7 @@ class GLCameraView(QGraphicsView):
     """
     A QGraphicsView that uses QOpenGLWidget viewport for GPU-accelerated rendering.
     """
+
     def __init__(self, parent=None):
         super().__init__(parent)
         scene = QGraphicsScene(self)
@@ -40,6 +43,7 @@ class QtCameraWidget(QWidget):
     Displays live camera feed via SDKCameraThread using OpenGL for performance.
     Manages camera selection, resolution, and basic properties.
     """
+
     frame_ready = pyqtSignal(QImage, object)
     camera_resolutions_updated = pyqtSignal(list)
     camera_properties_updated = pyqtSignal(dict)
@@ -57,8 +61,6 @@ class QtCameraWidget(QWidget):
         self._camera_thread = None
         self._active_device_info: ic4.DeviceInfo = None
         # Debounce timers
-        self._exp_pending = None
-        self._gain_pending = None
         self._setup_debounce_timers()
         # OpenGL-backed viewfinder
         self.viewfinder = GLCameraView(self)
@@ -68,7 +70,8 @@ class QtCameraWidget(QWidget):
         self.setLayout(layout)
 
     def _setup_debounce_timers(self):
-        from PyQt5.QtCore import QTimer
+        self._exp_pending = None
+        self._gain_pending = None
         self._exp_timer = QTimer(self)
         self._exp_timer.setSingleShot(True)
         self._exp_timer.setInterval(100)
@@ -79,6 +82,7 @@ class QtCameraWidget(QWidget):
         self._gain_timer.timeout.connect(self._apply_pending_gain)
 
     def _cleanup_camera_thread(self):
+        log.debug("Cleaning up camera thread...")
         if self._camera_thread:
             thread = self._camera_thread
             self._camera_thread = None
@@ -89,8 +93,12 @@ class QtCameraWidget(QWidget):
             try:
                 thread.frame_ready.disconnect(self._on_sdk_frame_received)
                 thread.camera_error.disconnect(self._on_camera_thread_error_received)
-                thread.camera_resolutions_available.disconnect(self.camera_resolutions_updated)
-                thread.camera_properties_updated.disconnect(self.camera_properties_updated)
+                thread.camera_resolutions_available.disconnect(
+                    self.camera_resolutions_updated
+                )
+                thread.camera_properties_updated.disconnect(
+                    self.camera_properties_updated
+                )
             except Exception:
                 pass
             thread.deleteLater()
@@ -118,9 +126,27 @@ class QtCameraWidget(QWidget):
         )
         self._camera_thread.frame_ready.connect(self._on_sdk_frame_received)
         self._camera_thread.camera_error.connect(self._on_camera_thread_error_received)
-        self._camera_thread.camera_resolutions_available.connect(self.camera_resolutions_updated)
-        self._camera_thread.camera_properties_updated.connect(self.camera_properties_updated)
+        self._camera_thread.camera_resolutions_available.connect(
+            self.camera_resolutions_updated
+        )
+        self._camera_thread.camera_properties_updated.connect(
+            self.camera_properties_updated
+        )
         self._camera_thread.start()
+
+    @pyqtSlot(str)
+    def set_active_resolution_str(self, resolution_str: str):
+        if "x" in resolution_str:
+            parts = resolution_str.split("x", 1)
+            try:
+                w = int(parts[0])
+                h = int(parts[1].split()[0])
+            except Exception:
+                return
+            if (w, h) != (self.current_width, self.current_height):
+                self.current_width, self.current_height = w, h
+                self._cleanup_camera_thread()
+                self._start_new_camera_thread()
 
     @pyqtSlot(int)
     def set_exposure(self, exposure_us: int):
@@ -139,14 +165,22 @@ class QtCameraWidget(QWidget):
 
     @pyqtSlot()
     def _apply_pending_exposure(self):
-        if self._camera_thread and self._exp_pending is not None:
+        if (
+            self._camera_thread
+            and hasattr(self, "_exp_pending")
+            and self._exp_pending is not None
+        ):
             self._camera_thread.update_auto_exposure(False)
             self._camera_thread.update_exposure(self._exp_pending)
         self._exp_pending = None
 
     @pyqtSlot()
     def _apply_pending_gain(self):
-        if self._camera_thread and self._gain_pending is not None:
+        if (
+            self._camera_thread
+            and hasattr(self, "_gain_pending")
+            and self._gain_pending is not None
+        ):
             self._camera_thread.update_gain(self._gain_pending)
         self._gain_pending = None
 
@@ -156,6 +190,11 @@ class QtCameraWidget(QWidget):
         if self._camera_thread and self._camera_thread.isRunning():
             self._camera_thread.update_roi(x, y, w, h)
 
+    @pyqtSlot()
+    def reset_roi_to_default(self):
+        """Reset Region Of Interest to full frame."""
+        self.set_software_roi(0, 0, 0, 0)
+
     @pyqtSlot(QImage, object)
     def _on_sdk_frame_received(self, qimg: QImage, frame_data: object):
         if not qimg.isNull():
@@ -164,15 +203,6 @@ class QtCameraWidget(QWidget):
 
     @pyqtSlot(str, str)
     def _on_camera_thread_error_received(self, message: str, code: str):
-        self.camera_error.emit(message, code)
-
-    @pyqtSlot()
-    def reset_roi_to_default(self):
-        """Reset Region Of Interest to full frame."""
-        self.set_software_roi(0, 0, 0, 0)
-
-    def current_camera_is_active(self) -> bool:
-        return bool(self._camera_thread and self._camera_thread.isRunning())(self, message: str, code: str):
         self.camera_error.emit(message, code)
 
     def current_camera_is_active(self) -> bool:
