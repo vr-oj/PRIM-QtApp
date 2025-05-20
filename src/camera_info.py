@@ -1,94 +1,87 @@
-import logging
+#!/usr/bin/env python3
+import json
 import sys
 import platform
-import json
 import imagingcontrol4 as ic4
-from imagingcontrol4.properties import PropInteger, PropFloat, PropEnumeration
-
-# Set up logging
-glogging = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 
-def gather_system_info():
-    return {
-        "platform": platform.platform(),
-        "python_version": platform.python_version(),
-        "architecture": platform.machine(),
+def dump_prop(p):
+    info = {
+        "type": type(p).__name__,
+        "available": getattr(p, "is_available", False),
+        "readonly": getattr(p, "is_readonly", False),
+        "value": None,
     }
-
-
-def gather_library_info():
-    try:
-        # Library version from imagingcontrol4
-        lib_ver = ic4.Library.get_version()
-    except Exception:
-        lib_ver = None
-    return {"imagingcontrol4_version": lib_ver}
-
-
-def gather_devices_info():
-    devices = []
-    for dev in ic4.DeviceEnum.devices():
-        di = {
-            "model_name": dev.model_name,
-            "serial": getattr(dev, "serial", None),
-            "version": getattr(dev, "version", None),
-        }
+    # Enumeration entries
+    if hasattr(p, "entries"):
         try:
-            # Open device to read properties
-            grabber = ic4.Grabber()
-            grabber.device_open(dev)
-            pm = grabber.device_property_map
-            # Determine available property names
-            if hasattr(pm, "property_names"):
-                names = pm.property_names
-            elif hasattr(pm, "names"):
-                names = pm.names
-            else:
-                try:
-                    names = list(pm)
-                except Exception:
-                    names = []
+            info["entries"] = [e.name for e in p.entries]
+        except Exception:
+            info["entries"] = "<error reading entries>"
 
-            props = {}
-            for name in names:
-                try:
-                    p = pm.find(name)
-                    val = p.value
-                    info = {"value": val}
-                    if isinstance(p, PropInteger) or isinstance(p, PropFloat):
-                        info.update(min=p.minimum, max=p.maximum, inc=p.increment)
-                    elif isinstance(p, PropEnumeration):
-                        info.update(options=[e.name for e in p.entries])
-                    props[name] = info
-                except Exception:
-                    logging.debug(f"Failed to read property {name}")
-            di["properties"] = props
-            # Close device
-            if getattr(grabber, "is_streaming", False):
-                grabber.stream_stop()
-            if getattr(grabber, "is_device_open", False):
-                grabber.device_close()
-        except Exception as e:
-            logging.exception(f"Error gathering info for device {dev}")
-        devices.append(di)
-    return devices
+    # Numeric limits & increment
+    for attr in ("minimum", "maximum", "increment", "value"):
+        if hasattr(p, attr):
+            try:
+                info[attr] = getattr(p, attr)
+            except Exception:
+                info[attr] = f"<error reading {attr}>"
+    return info
 
 
 def main():
-    # Initialize IC4 library
+    # 1) Init library
     try:
         ic4.Library.init()
-    except Exception as e:
-        logging.warning(f"Library.init() failed: {e}")
+    except Exception:
+        # already initialized? ignore
+        pass
 
+    # 2) Base report structure
     report = {
-        "system": gather_system_info(),
-        "library": gather_library_info(),
-        "devices": gather_devices_info(),
+        "system": {
+            "platform": platform.platform(),
+            "python_version": platform.python_version(),
+            "architecture": platform.machine(),
+        },
+        "library": {
+            # if the binding exposes a version API
+            "imagingcontrol4_version": getattr(ic4.Library, "version", lambda: None)()
+        },
+        "devices": [],
     }
 
+    # 3) Enumerate cameras
+    devices = ic4.DeviceEnum.devices()
+    if not devices:
+        print("No cameras found", file=sys.stderr)
+        sys.exit(1)
+
+    # 4) For each device, open & scrape its PropertyMap
+    for dev in devices:
+        dev_report = {"model": dev.model_name, "serial": dev.serial, "properties": {}}
+        grabber = ic4.Grabber()
+        grabber.device_open(dev)
+        pm = grabber.device_property_map
+
+        # 5) Enumerate all property names by inspecting pm.properties dict
+        #    (PropertyMap.properties is a dict of name→Prop*)
+        try:
+            prop_names = list(pm.properties.keys())
+        except Exception:
+            prop_names = []
+
+        for name in prop_names:
+            try:
+                prop = pm.find(name)
+                dev_report["properties"][name] = dump_prop(prop)
+            except Exception as e:
+                dev_report["properties"][name] = {"error": str(e)}
+
+        grabber.device_close()
+        report["devices"].append(dev_report)
+
+    # 6) Print JSON
     print(json.dumps(report, indent=2))
 
 
