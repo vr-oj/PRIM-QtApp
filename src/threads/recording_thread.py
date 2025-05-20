@@ -54,5 +54,6 @@ class RecordingThread(QThread):
             pass
 
     def stop(self):
+        # Tell the thread to exit at its next opportunity,
+        # but don't block the GUI thread waiting for it.
         self._stop_flag.set()
-        self.wait()
