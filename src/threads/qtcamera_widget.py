@@ -1,12 +1,9 @@
 import logging
 import imagingcontrol4 as ic4  # For ic4.DeviceInfo
 from PyQt5.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QGraphicsView,
-    QGraphicsScene,
-    QGraphicsPixmapItem,
-    QOpenGLWidget,
+    QWidget, QVBoxLayout,
+    QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
+    QOpenGLWidget
 )
 from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot
 from PyQt5.QtGui import QImage, QPixmap
@@ -21,7 +18,6 @@ class GLCameraView(QGraphicsView):
     """
     A QGraphicsView that uses QOpenGLWidget viewport for GPU-accelerated rendering.
     """
-
     def __init__(self, parent=None):
         super().__init__(parent)
         scene = QGraphicsScene(self)
@@ -44,7 +40,6 @@ class QtCameraWidget(QWidget):
     Displays live camera feed via SDKCameraThread using OpenGL for performance.
     Manages camera selection, resolution, and basic properties.
     """
-
     frame_ready = pyqtSignal(QImage, object)
     camera_resolutions_updated = pyqtSignal(list)
     camera_properties_updated = pyqtSignal(dict)
@@ -74,7 +69,6 @@ class QtCameraWidget(QWidget):
 
     def _setup_debounce_timers(self):
         from PyQt5.QtCore import QTimer
-
         self._exp_timer = QTimer(self)
         self._exp_timer.setSingleShot(True)
         self._exp_timer.setInterval(100)
@@ -95,12 +89,8 @@ class QtCameraWidget(QWidget):
             try:
                 thread.frame_ready.disconnect(self._on_sdk_frame_received)
                 thread.camera_error.disconnect(self._on_camera_thread_error_received)
-                thread.camera_resolutions_available.disconnect(
-                    self.camera_resolutions_updated
-                )
-                thread.camera_properties_updated.disconnect(
-                    self.camera_properties_updated
-                )
+                thread.camera_resolutions_available.disconnect(self.camera_resolutions_updated)
+                thread.camera_properties_updated.disconnect(self.camera_properties_updated)
             except Exception:
                 pass
             thread.deleteLater()
@@ -128,12 +118,8 @@ class QtCameraWidget(QWidget):
         )
         self._camera_thread.frame_ready.connect(self._on_sdk_frame_received)
         self._camera_thread.camera_error.connect(self._on_camera_thread_error_received)
-        self._camera_thread.camera_resolutions_available.connect(
-            self.camera_resolutions_updated
-        )
-        self._camera_thread.camera_properties_updated.connect(
-            self.camera_properties_updated
-        )
+        self._camera_thread.camera_resolutions_available.connect(self.camera_resolutions_updated)
+        self._camera_thread.camera_properties_updated.connect(self.camera_properties_updated)
         self._camera_thread.start()
 
     @pyqtSlot(int)
@@ -178,6 +164,15 @@ class QtCameraWidget(QWidget):
 
     @pyqtSlot(str, str)
     def _on_camera_thread_error_received(self, message: str, code: str):
+        self.camera_error.emit(message, code)
+
+    @pyqtSlot()
+    def reset_roi_to_default(self):
+        """Reset Region Of Interest to full frame."""
+        self.set_software_roi(0, 0, 0, 0)
+
+    def current_camera_is_active(self) -> bool:
+        return bool(self._camera_thread and self._camera_thread.isRunning())(self, message: str, code: str):
         self.camera_error.emit(message, code)
 
     def current_camera_is_active(self) -> bool:
