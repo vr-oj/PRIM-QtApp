@@ -322,11 +322,14 @@ class SDKCameraThread(QThread):
             )
             log.info("Streaming started")
 
+            # initialize our counters and throttling
             frame_count = 0
             no_data_count = 0
+            last_emit = time.monotonic()
+            frame_interval = 1.0 / self.target_fps
 
             while not self._stop_requested:
-                # debounce & apply any pending exposure/gain/etc
+                # apply any pending exposure/gain/ROI changes
                 self._apply_pending_properties()
 
                 try:
@@ -356,15 +359,12 @@ class SDKCameraThread(QThread):
                 no_data_count = 0
                 w = buf.image_type.width
                 h = buf.image_type.height
-                log.info(
-                    f"Frame {frame_count}: {w}×{h}, {buf.image_type.pixel_format.name}"
-                )
+                log.debug(f"Frame {frame_count}: {w}×{h}")
 
-                # extract raw Mono8 bytes
+                # extract raw Mono8 bytes and build QImage
                 try:
                     fmt = self.actual_qimage_format
                     stride = w
-                    raw = None
 
                     if hasattr(buf, "numpy_wrap"):
                         arr = buf.numpy_wrap()
@@ -386,7 +386,11 @@ class SDKCameraThread(QThread):
                     if img.isNull():
                         log.warning("Built QImage is null")
                     else:
-                        self.frame_ready.emit(img.copy(), raw)
+                        now = time.monotonic()
+                        if now - last_emit >= frame_interval:
+                            last_emit = now
+                            # emit a _copy_ so the producer buffer can be re-used safely
+                            self.frame_ready.emit(img.copy(), raw)
 
                 except Exception:
                     log.error("QImage construction failed", exc_info=True)
