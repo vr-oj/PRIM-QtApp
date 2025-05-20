@@ -3,7 +3,7 @@ import time
 import ctypes
 import imagingcontrol4 as ic4
 
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QImage
 
 from imagingcontrol4.properties import (
@@ -48,6 +48,7 @@ class SDKCameraThread(QThread):
 
     # emitted once after opening, with a list of resolution strings
     camera_resolutions_available = pyqtSignal(list)
+    camera_video_formats_available = pyqtSignal(list)
 
     # emitted whenever exposure/gain/ROI props change, to repopulate your UI
     camera_properties_updated = pyqtSignal(dict)
@@ -93,6 +94,8 @@ class SDKCameraThread(QThread):
         # listener for QueueSink
         self.dummy_listener = DummySinkListener()
 
+        self.selected_video_format_identifier = None
+
     def request_stop(self):
         self._stop_requested = True
 
@@ -108,6 +111,13 @@ class SDKCameraThread(QThread):
 
     def update_roi(self, x: int, y: int, w: int, h: int):
         self._pending_roi = (x, y, w, h)
+
+    @pyqtSlot(str)
+    def select_video_format(self, format_identifier: str):
+        log.info(
+            f"SDKCameraThread: Request to select video format ID: {format_identifier}"
+        )
+        self.selected_video_format_identifier = format_identifier
 
     def _is_prop_writable(self, prop):
         return bool(
@@ -234,19 +244,80 @@ class SDKCameraThread(QThread):
 
         self.camera_properties_updated.emit(info)
 
-    def _emit_available_resolutions(self):
-        if not self.pm:
-            self.camera_resolutions_available.emit([])
-            return
-
+    def _emit_current_settings_as_format_option(self):
+        # Fallback if proper video format enumeration fails
         try:
-            w = self.pm.find(PROP_WIDTH).value
-            h = self.pm.find(PROP_HEIGHT).value
-            pf = self.pm.find(PROP_PIXEL_FORMAT).value
-            self.camera_resolutions_available.emit([f"{w}x{h} ({pf})"])
+            if not self.pm:
+                log.warning("Property map not available for fallback format emission.")
+                self.camera_video_formats_available.emit([])
+                return
+
+            w_prop = self.pm.find(PROP_WIDTH)
+            h_prop = self.pm.find(PROP_HEIGHT)
+            pf_prop = self.pm.find(PROP_PIXEL_FORMAT)
+
+            if not (
+                w_prop
+                and w_prop.is_available
+                and h_prop
+                and h_prop.is_available
+                and pf_prop
+                and pf_prop.is_available
+            ):
+                log.warning(
+                    "Width, Height, or PixelFormat properties not available for fallback."
+                )
+                self.camera_video_formats_available.emit([])
+                return
+
+            w = w_prop.value
+            h = h_prop.value
+            pf_val = pf_prop.value
+
+            # Handle cases where pf_val might be an enum entry or a string
+            if hasattr(pf_val, "name"):  # If it's an enum entry object
+                pf_name = pf_val.name
+            elif isinstance(pf_val, str):  # If it's already a string
+                pf_name = pf_val
+            else:  # Fallback if it's something unexpected
+                pf_name = str(pf_val)
+
+            dummy_id = f"current_{w}x{h}_{pf_name.replace(' ','_')}"  # Make a somewhat unique ID
+            display_text = f"{w}x{h} ({pf_name})"
+
+            log.info(
+                f"Emitting fallback video format option: {display_text} (ID: {dummy_id})"
+            )
+            self.camera_video_formats_available.emit(
+                [{"text": display_text, "id": dummy_id}]
+            )
+
+            # Also set this as the 'selected' one if no other choice yet
+            if not self.selected_video_format_identifier:
+                self.selected_video_format_identifier = dummy_id
+                log.info(
+                    f"Set selected_video_format_identifier to fallback: {dummy_id}"
+                )
+
         except Exception as e:
-            log.warning(f"Couldn’t list resolutions: {e}")
-            self.camera_resolutions_available.emit([])
+            log.error(
+                f"Failed to emit current settings as format option: {e}", exc_info=True
+            )
+            self.camera_video_formats_available.emit([])
+
+    #    def _emit_available_resolutions(self):
+    #        if not self.pm:
+    #            self.camera_resolutions_available.emit([])
+    #            return
+    #
+    #        try:
+    #            w = self.pm.find(PROP_WIDTH).value
+    #            h = self.pm.find(PROP_HEIGHT).value
+    #            pf = self.pm.find(PROP_PIXEL_FORMAT).value
+    #            self.camera_resolutions_available.emit([f"{w}x{h} ({pf})"]) # This signal is still used by CameraControlPanel for now
+    #        except Exception as e:
+    #            log.warning(f"Couldn’t list resolutions: {e}")
+    #            self.camera_resolutions_available.emit([])
 
     def run(self):
         log.info(
@@ -265,51 +336,238 @@ class SDKCameraThread(QThread):
             self.pm = self.grabber.device_property_map
             log.info(f"Opened {self.device_info.model_name}")
 
-            # ── initial setup: force full-sensor Mono8, clear ROI ──
+            # === NEW CAMERA SETUP LOGIC START ===
             try:
-                # pixel format
-                pfp = self.pm.find(PROP_PIXEL_FORMAT)
-                cur_pf = pfp.value
-                want_pf = "Mono 8"
-                if isinstance(pfp, PropEnumeration) and cur_pf.lower().replace(
-                    " ", ""
-                ) != want_pf.lower().replace(" ", ""):
-                    opts = [e.name for e in pfp.entries]
-                    if want_pf in opts:
-                        self._set_property_value(PROP_PIXEL_FORMAT, want_pf)
-                self.actual_qimage_format = QImage.Format_Grayscale8
+                # STEP A: Enumerate and emit available video formats
+                available_formats_for_ui = []
+                try:
+                    # Ensure device is open before accessing video_format_descs
+                    if not self.grabber.is_device_open:
+                        raise RuntimeError(
+                            "Device is not open before enumerating video formats."
+                        )
 
-                # full sensor size
-                wp = self.pm.find(PROP_WIDTH)
-                hp = self.pm.find(PROP_HEIGHT)
-                if self._is_prop_writable(wp):
-                    self._set_property_value(PROP_WIDTH, wp.maximum)
-                if self._is_prop_writable(hp):
-                    self._set_property_value(PROP_HEIGHT, hp.maximum)
+                    video_format_descs = self.grabber.video_format_descs
+                    if not video_format_descs:
+                        log.warning(
+                            "Camera did not report any video format descriptors. Using fallback."
+                        )
+                        self._emit_current_settings_as_format_option()
+                    else:
+                        log.info(f"Found {len(video_format_descs)} video formats.")
+                        for i, desc in enumerate(video_format_descs):
+                            display_text = (
+                                f"{desc.width}x{desc.height} ({desc.pixel_format.name})"
+                            )
+                            # The identifier is crucial for setting the format later
+                            available_formats_for_ui.append(
+                                {"text": display_text, "id": desc.identifier_string}
+                            )
 
-                # reset offsets
-                self._set_property_value(PROP_OFFSET_X, 0)
-                self._set_property_value(PROP_OFFSET_Y, 0)
+                        if available_formats_for_ui:
+                            # Default selection logic:
+                            # If a format was pre-selected (e.g., by QtCameraWidget restarting us with a choice)
+                            # and that ID is valid, use it. Otherwise, pick a sensible default.
+                            current_selected_id_is_valid = False
+                            if self.selected_video_format_identifier:
+                                for fmt_info in available_formats_for_ui:
+                                    if (
+                                        fmt_info["id"]
+                                        == self.selected_video_format_identifier
+                                    ):
+                                        current_selected_id_is_valid = True
+                                        break
 
-                log.info(
-                    f"Res: {wp.value}×{hp.value}, PF={self.pm.find(PROP_PIXEL_FORMAT).value}"
-                )
+                            if (
+                                not current_selected_id_is_valid
+                            ):  # If no valid pre-selection, pick a default
+                                # Try to find a "Mono 8" format, preferably smaller for default
+                                default_fmt_id = None
+                                for fmt_info in available_formats_for_ui:
+                                    if (
+                                        "Mono8" in fmt_info["text"]
+                                        or "Mono 8" in fmt_info["text"]
+                                    ):  # Case for "Mono8" or "Mono 8"
+                                        if self.desired_width and self.desired_height:
+                                            if (
+                                                str(self.desired_width)
+                                                in fmt_info["text"]
+                                                and str(self.desired_height)
+                                                in fmt_info["text"]
+                                            ):
+                                                default_fmt_id = fmt_info["id"]
+                                                break
+                                        elif (
+                                            not default_fmt_id
+                                        ):  # Fallback to first mono8 if specific size not found
+                                            default_fmt_id = fmt_info["id"]
 
-                # continuous streaming
+                                if default_fmt_id:
+                                    self.selected_video_format_identifier = (
+                                        default_fmt_id
+                                    )
+                                elif (
+                                    available_formats_for_ui
+                                ):  # Ultimate fallback to the very first format
+                                    self.selected_video_format_identifier = (
+                                        available_formats_for_ui[0]["id"]
+                                    )
+                                log.info(
+                                    f"Default/Initial video format ID set to: {self.selected_video_format_identifier}"
+                                )
+                        else:  # Should be covered by the "not video_format_descs" case
+                            self._emit_current_settings_as_format_option()
+
+                    # Emit the full list for the UI to populate
+                    self.camera_video_formats_available.emit(available_formats_for_ui)
+
+                except Exception as e_vf_enum:
+                    log.error(
+                        f"Error enumerating video formats: {e_vf_enum}", exc_info=True
+                    )
+                    self.camera_error.emit(
+                        f"VideoFormatEnum: {e_vf_enum}", type(e_vf_enum).__name__
+                    )
+                    self._emit_current_settings_as_format_option()  # Attempt fallback
+
+                # STEP B: Apply the selected video format
+                if not self.selected_video_format_identifier:
+                    log.error(
+                        "No video format identifier was selected or determined. Cannot proceed with camera setup."
+                    )
+                    self.camera_error.emit("NoVideoFormat", "RuntimeError")
+                    return  # Critical failure
+
+                try:
+                    log.info(
+                        f"Attempting to set video format to ID: {self.selected_video_format_identifier}"
+                    )
+                    self.grabber.video_format = self.selected_video_format_identifier
+                    log.info(
+                        f"Successfully set video format to: {self.grabber.video_format.name} "
+                        f"(W:{self.pm.find(PROP_WIDTH).value}, H:{self.pm.find(PROP_HEIGHT).value}, "
+                        f"PF:{self.pm.find(PROP_PIXEL_FORMAT).value})"
+                    )
+
+                    # Determine QImage format based on the actual pixel format set by the video format
+                    current_pf_name = self.pm.find(PROP_PIXEL_FORMAT).value
+                    if isinstance(
+                        current_pf_name, ic4.PixelFormatInfo
+                    ):  # if it's an object
+                        current_pf_name = current_pf_name.name
+                    current_pf_name = current_pf_name.lower()
+
+                    if "mono8" in current_pf_name:
+                        self.actual_qimage_format = QImage.Format_Grayscale8
+                    elif any(
+                        pf in current_pf_name for pf in ["mono10", "mono12", "mono16"]
+                    ):
+                        log.warning(
+                            f"Pixel format {current_pf_name} will be displayed as Grayscale8. Data may be scaled/truncated if QImage.Format_Grayscale16 is not used or conversion is not implemented."
+                        )
+                        self.actual_qimage_format = (
+                            QImage.Format_Grayscale8
+                        )  # Consider QImage.Format_Grayscale16 if appropriate and handled downstream
+                    # Add more pixel format mappings here if needed (e.g., BayerRG8 -> QImage.Format_RGB888 after debayering, etc.)
+                    else:
+                        log.warning(
+                            f"Unhandled pixel format from camera for QImage: {current_pf_name}. Defaulting to Invalid."
+                        )
+                        self.actual_qimage_format = QImage.Format_Invalid
+
+                except Exception as e_vf_set:
+                    log.error(
+                        f"Failed to set video format ID '{self.selected_video_format_identifier}': {e_vf_set}",
+                        exc_info=True,
+                    )
+                    self.camera_error.emit(
+                        f"VideoFormatSet: {e_vf_set}", type(e_vf_set).__name__
+                    )
+                    return  # Critical failure
+
+                # STEP C: Configure FrameRate *after* video format is set
+                fps_prop = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
+                desired_fps_to_set = float(self.target_fps)
+
+                if fps_prop and fps_prop.is_available:
+                    try:
+                        min_fps = fps_prop.minimum
+                        max_fps = fps_prop.maximum
+                        log.info(
+                            f"Property '{PROP_ACQUISITION_FRAME_RATE}' valid range for current format: {min_fps:.2f} - {max_fps:.2f} FPS"
+                        )
+
+                        if not (min_fps <= desired_fps_to_set <= max_fps):
+                            log.warning(
+                                f"Desired FPS {desired_fps_to_set:.2f} is out of range ({min_fps:.2f}-{max_fps:.2f})."
+                            )
+                            if (
+                                desired_fps_to_set > max_fps and max_fps > 0
+                            ):  # Ensure max_fps is sensible
+                                desired_fps_to_set = max_fps
+                                log.info(
+                                    f"Clamping FPS to maximum: {desired_fps_to_set:.2f}"
+                                )
+                            elif desired_fps_to_set < min_fps:
+                                desired_fps_to_set = min_fps
+                                log.info(
+                                    f"Clamping FPS to minimum: {desired_fps_to_set:.2f}"
+                                )
+                            else:  # max_fps might be 0 or invalid if camera doesn't support rate control for this format
+                                log.warning(
+                                    f"Could not clamp FPS {desired_fps_to_set:.2f} as max_fps is {max_fps:.2f}. Frame rate might not be controllable."
+                                )
+
+                        if self._is_prop_writable(fps_prop):
+                            self._set_property_value(
+                                PROP_ACQUISITION_FRAME_RATE, desired_fps_to_set
+                            )
+                            log.info(
+                                f"Actual '{PROP_ACQUISITION_FRAME_RATE}' after setting: {fps_prop.value:.2f}"
+                            )
+                        else:
+                            log.warning(
+                                f"'{PROP_ACQUISITION_FRAME_RATE}' is not writable for the current format. Using camera default: {fps_prop.value:.2f} FPS."
+                            )
+
+                    except Exception as e_fps_range:
+                        log.error(
+                            f"Error querying or setting FPS for {PROP_ACQUISITION_FRAME_RATE}: {e_fps_range}",
+                            exc_info=True,
+                        )
+                else:
+                    log.warning(
+                        f"'{PROP_ACQUISITION_FRAME_RATE}' property not found or not available for current format."
+                    )
+
+                # STEP D: Other essential settings
                 self._set_property_value(PROP_ACQUISITION_MODE, "Continuous")
                 self._set_property_value(PROP_TRIGGER_MODE, "Off")
-                self._set_property_value(
-                    PROP_ACQUISITION_FRAME_RATE, float(self.target_fps)
+                # Note: Width, Height, PixelFormat, OffsetX, OffsetY are now primarily controlled by the VideoFormat.
+                # It's good practice to log their actual values after setting the video format.
+                log.info(
+                    f"Camera configured: W={self.pm.find(PROP_WIDTH).value}, H={self.pm.find(PROP_HEIGHT).value}, "
+                    f"PF={self.pm.find(PROP_PIXEL_FORMAT).value}, FPS={self.pm.find(PROP_ACQUISITION_FRAME_RATE).value if fps_prop and fps_prop.is_available else 'N/A'}"
                 )
-            except Exception as e:
-                log.error("Initial config failed", exc_info=True)
-                self.camera_error.emit(f"Config: {e}", type(e).__name__)
-                return
+
+            except Exception as e_initial_setup:  # Catch-all for this new setup block
+                log.error(
+                    f"Critical error during new camera setup phase: {e_initial_setup}",
+                    exc_info=True,
+                )
+                self.camera_error.emit(
+                    f"SetupFail: {e_initial_setup}", type(e_initial_setup).__name__
+                )
+                return  # Cannot proceed
 
             # push initial state to UI
             self._apply_pending_properties()
-            self._emit_available_resolutions()
+            self._emit_available_resolutions()  # Call the OLD method for now to keep UI somewhat populated
             self._emit_camera_properties()
+
+            # push initial state to UI for controls like Exposure, Gain, etc.
+            self._apply_pending_properties()  # Apply any exposure/gain changes that were queued before start
+            self._emit_camera_properties()  # Update UI with actual ranges for these adjustable properties
 
             # start sink + streaming
             self.sink = ic4.QueueSink(self.dummy_listener)
