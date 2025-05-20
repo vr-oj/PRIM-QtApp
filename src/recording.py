@@ -74,3 +74,11 @@ class TrialRecorder:
         Handle any errors emitted by RecordingThread.
         """
         log.error(f"RecordingThread error: {msg}")
+
+    @property
+    def video_frame_count(self):
+        """
+        Expose how many TIFF frames were written,
+        so main_window can report it.
+        """
+        return getattr(self.rec_thread, "frames_written", 0)

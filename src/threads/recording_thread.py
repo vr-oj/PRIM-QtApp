@@ -16,6 +16,7 @@ class RecordingThread(QThread):
         self.csv_name = csv_name
         self.fps = fps
         self._stop_flag = threading.Event()
+        self.frames_written = 0
 
     def run(self):
         # open TIFF writer and CSV writer
@@ -30,7 +31,7 @@ class RecordingThread(QThread):
                 while not self._stop_flag.is_set():
                     try:
                         frame_idx, frame = self.frames_q.get(timeout=0.1)
-                        tif.write(frame)
+                        self.frames_written += 1
                     except Empty:
                         pass
                     try:
@@ -54,6 +55,5 @@ class RecordingThread(QThread):
             pass
 
     def stop(self):
-        # Tell the thread to exit at its next opportunity,
-        # but don't block the GUI thread waiting for it.
         self._stop_flag.set()
+        self.wait()
