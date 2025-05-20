@@ -265,21 +265,34 @@ class SDKCameraThread(QThread):
             self.pm = self.grabber.device_property_map
             log.info(f"Opened {self.device_info.model_name}")
 
-            # ── initial setup: force full-sensor Mono8, clear ROI ──
+            # ── initial setup: pick a working pixel‐format ──
             try:
-                # pixel format
                 pfp = self.pm.find(PROP_PIXEL_FORMAT)
-                cur_pf = pfp.value
-                want_pf = "Mono 8"
-                if isinstance(pfp, PropEnumeration) and cur_pf.lower().replace(
-                    " ", ""
-                ) != want_pf.lower().replace(" ", ""):
+                if isinstance(pfp, PropEnumeration):
                     opts = [e.name for e in pfp.entries]
-                    if want_pf in opts:
-                        self._set_property_value(PROP_PIXEL_FORMAT, want_pf)
-                self.actual_qimage_format = QImage.Format_Grayscale8
+                    want_pf = self.desired_pixel_format_str or opts[0]
+                    if want_pf not in opts:
+                        log.warning(
+                            f"Desired PF '{want_pf}' not available; using '{opts[0]}'"
+                        )
+                        want_pf = opts[0]
+                    self._set_property_value(PROP_PIXEL_FORMAT, want_pf)
 
-                # full sensor size
+                    pf_clean = want_pf.replace(" ", "").lower()
+                    if pf_clean.startswith("mono8"):
+                        self.actual_qimage_format = QImage.Format_Grayscale8
+                    elif pf_clean.startswith("rgb8") or pf_clean.startswith("bgr8"):
+                        self.actual_qimage_format = QImage.Format_RGB888
+                    else:
+                        log.warning(
+                            f"Unrecognized PF '{want_pf}', defaulting to Mono8 mapping"
+                        )
+                        self.actual_qimage_format = QImage.Format_Grayscale8
+                else:
+                    # fallback
+                    self.actual_qimage_format = QImage.Format_Grayscale8
+
+                # full-sensor ROI
                 wp = self.pm.find(PROP_WIDTH)
                 hp = self.pm.find(PROP_HEIGHT)
                 if self._is_prop_writable(wp):
