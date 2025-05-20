@@ -5,6 +5,7 @@ import logging
 import imageio  # For AVI and potentially other formats
 import tifffile  # For TIFF stacks
 import queue
+from PyQt5.QtCore import QThread
 
 log = logging.getLogger(__name__)
 
