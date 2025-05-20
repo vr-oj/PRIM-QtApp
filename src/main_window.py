@@ -165,7 +165,7 @@ class MainWindow(QMainWindow):
         self.main_splitter.addWidget(self.qt_cam_widget)
         self.main_splitter.addWidget(self.pressure_plot_widget)
         self.main_splitter.setStretchFactor(0, 1)
-        self.main_splitter.setStretchFactor(3, 5)
+        self.main_splitter.setStretchFactor(3.5, 3)
 
         outer_layout.addWidget(self.main_splitter, 1)
         self.setCentralWidget(central_container_widget)
