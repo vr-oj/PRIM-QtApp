@@ -3,21 +3,11 @@
  ******************************************************************/
 
 /*─────────────────────────────────────────────────────────────────
-   Core Colors
-─────────────────────────────────────────────────────────────────*/
-@base-dark:       #2E3440;  /* deep slate */
-@panel-mid:       #3B4252;  /* slightly lighter slate */
-@accent-green:    #40634A;  /* Spartan-mid */
-@accent-light:    #5E81AC;  /* blue-gray highlight */
-@text-light:      #ECEFF4;  /* off-white */
-@text-dark:       #2E3440;  /* for selected text */
-
-/*─────────────────────────────────────────────────────────────────
-   Apply to every widget
+   Global Base
 ─────────────────────────────────────────────────────────────────*/
 QWidget {
-    background-color: @base-dark;
-    color:            @text-light;
+    background-color: #2E3440;  /* base-dark */
+    color:            #ECEFF4;  /* text-light */
     font-family:      "Segoe UI", "Helvetica Neue", Arial, sans-serif;
     font-size:        12px;
 }
@@ -26,30 +16,30 @@ QWidget {
    Main Window & Panels
 ─────────────────────────────────────────────────────────────────*/
 QMainWindow, QDialog, QWidget#centralwidget {
-    background-color: @base-dark; 
+    background-color: #2E3440;
 }
 
 /*─────────────────────────────────────────────────────────────────
    Toolbars & Status Bar
 ─────────────────────────────────────────────────────────────────*/
 QToolBar {
-    background-color: @panel-mid;
+    background-color: #3B4252;  /* panel-mid */
     border:           none;
     spacing:          6px;
     padding:          2px;
 }
 QToolButton {
     background:       transparent;
-    color:            @text-light;
+    color:            #ECEFF4;
     border:           none;
     padding:          4px;
 }
 QToolButton:hover {
-    background-color: @accent-light;
+    background-color: #5E81AC;  /* accent-light */
 }
 QStatusBar {
-    background-color: @panel-mid;
-    color:            @text-light;
+    background-color: #3B4252;
+    color:            #ECEFF4;
     font-size:        11px;
 }
 
@@ -57,8 +47,8 @@ QStatusBar {
    Group Boxes & Tabs
 ─────────────────────────────────────────────────────────────────*/
 QGroupBox {
-    background-color: @panel-mid;
-    border:           1px solid @accent-green;
+    background-color: #3B4252;
+    border:           1px solid #40634A;  /* accent-green */
     border-radius:    4px;
     margin-top:       1.2em;
     padding:          8px;
@@ -67,30 +57,30 @@ QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top center;
     padding:            0 6px;
-    color:              @text-light;
+    color:              #ECEFF4;
     font-weight:        bold;
 }
 QTabWidget::pane {
-    background-color: @panel-mid;
-    border:           1px solid @accent-green;
+    background-color: #3B4252;
+    border:           1px solid #40634A;
     border-radius:    4px;
     padding:          4px;
 }
 QTabBar::tab {
-    background:           @accent-green;
-    color:                @text-light;
+    background:           #40634A;
+    color:                #ECEFF4;
     padding:              4px 12px;
-    border:               1px solid @accent-green;
+    border:               1px solid #40634A;
     border-bottom:        none;
     border-top-left-radius: 4px;
     border-top-right-radius: 4px;
     min-width:            60px;
 }
 QTabBar::tab:selected {
-    background: @base-dark;
+    background: #2E3440;
 }
 QTabBar::tab:hover {
-    background: @accent-light;
+    background: #5E81AC;
 }
 
 /*─────────────────────────────────────────────────────────────────
@@ -98,24 +88,23 @@ QTabBar::tab:hover {
 ─────────────────────────────────────────────────────────────────*/
 QComboBox, QSpinBox, QDoubleSpinBox,
 QLineEdit, QTextEdit {
-    background-color: @panel-mid;
-    border:           1px solid @accent-green;
+    background-color: #3B4252;
+    border:           1px solid #40634A;
     border-radius:    4px;
     padding:          4px;
-    color:            @text-light;
+    color:            #ECEFF4;
 }
 QComboBox:hover, QSpinBox:hover,
 QLineEdit:hover, QTextEdit:hover {
-    border-color: @accent-light;
+    border-color: #5E81AC;
 }
 QComboBox::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
     width: 16px;
-    border-left: 1px solid @accent-green;
+    border-left: 1px solid #40634A;
 }
 QComboBox::down-arrow {
-    /* if you have a monochrome arrow SVG, it will inherit text color */
     image: url(:/icons/arrow-down.svg);
 }
 
@@ -123,19 +112,19 @@ QComboBox::down-arrow {
    Buttons & Checkboxes
 ─────────────────────────────────────────────────────────────────*/
 QPushButton {
-    background-color: @accent-light;
-    color:            @base-dark;
+    background-color: #5E81AC;
+    color:            #2E3440;
     border-radius:    4px;
     padding:          6px 16px;
     min-height:       28px;
 }
 QPushButton:hover {
-    background-color: @accent-green;
-    color:            @text-light;
+    background-color: #40634A;
+    color:            #ECEFF4;
 }
 QCheckBox {
     spacing: 6px;
-    color:   @text-light;
+    color:   #ECEFF4;
 }
 QCheckBox::indicator:unchecked {
     image: url(:/icons/checkbox-unchecked.svg);
@@ -148,42 +137,42 @@ QCheckBox::indicator:checked {
    Sliders
 ─────────────────────────────────────────────────────────────────*/
 QSlider::groove:horizontal {
-    height:    6px;
-    background: @panel-mid;
-    border-radius: 3px;
+    height:         6px;
+    background:     #3B4252;
+    border-radius:  3px;
 }
 QSlider::handle:horizontal {
-    width:     14px;
-    margin:    -4px 0;
-    background: @accent-green;
-    border:     2px solid @text-light;
-    border-radius: 7px;
+    width:          14px;
+    margin:         -4px 0;
+    background:     #40634A;
+    border:         2px solid #ECEFF4;
+    border-radius:  7px;
 }
 
 /*─────────────────────────────────────────────────────────────────
    Tables & Headers
 ─────────────────────────────────────────────────────────────────*/
 QTableWidget, QTreeView {
-    background: @panel-mid;
-    alternate-background-color: @base-dark;
-    gridline-color: @accent-green;
+    background: #3B4252;
+    alternate-background-color: #2E3440;
+    gridline-color: #40634A;
 }
 QHeaderView::section {
-    background-color: @accent-green;
-    color:            @text-light;
+    background-color: #40634A;
+    color:            #ECEFF4;
     padding:          6px;
     border:           none;
 }
 QTableWidget::item:selected {
-    background-color: @accent-light;
-    color:            @base-dark;
+    background-color: #5E81AC;
+    color:            #2E3440;
 }
 
 /*─────────────────────────────────────────────────────────────────
    Camera View Placeholder
 ─────────────────────────────────────────────────────────────────*/
 QFrame#camera_view, QLabel#camera_placeholder {
-    background-color: @panel-mid;
-    color:            @text-light;
-    border:           1px solid @accent-green;
+    background-color: #3B4252;
+    color:            #ECEFF4;
+    border:           1px solid #40634A;
 }
