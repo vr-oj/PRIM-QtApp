@@ -6,302 +6,119 @@ import imagingcontrol4 as ic4
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 
-from imagingcontrol4.properties import PropEnumeration
-
 log = logging.getLogger(__name__)
 
 # GenICam camera-property names
 PROP_WIDTH = "Width"
 PROP_HEIGHT = "Height"
 PROP_PIXEL_FORMAT = "PixelFormat"
-PROP_EXPOSURE_TIME = "ExposureTime"
-PROP_EXPOSURE_AUTO = "ExposureAuto"
-PROP_GAIN = "Gain"
 PROP_OFFSET_X = "OffsetX"
 PROP_OFFSET_Y = "OffsetY"
-PROP_ACQUISITION_FRAME_RATE = "AcquisitionFrameRate"
 PROP_ACQUISITION_MODE = "AcquisitionMode"
 PROP_TRIGGER_MODE = "TriggerMode"
 
 
-class DummySinkListener:
-    def sink_connected(self, sink, image_type, min_buffers_required):
-        log.debug(f"Sink connected: {image_type}, buffers={min_buffers_required}")
-        try:
-            sink.alloc_and_queue_buffers(min_buffers_required)
-            log.debug(f"Queued {min_buffers_required} buffers")
-            return True
-        except Exception:
-            log.exception("Failed to alloc_and_queue_buffers")
-            return False
-
-    def frames_queued(self, sink):
-        pass
-
-    def sink_disconnected(self, sink):
-        log.debug("Sink disconnected")
-
-
 class SDKCameraThread(QThread):
+    """
+    Simplified camera thread: always picks first available device,
+    configures it to full sensor, continuous free-run, and streams frames.
+    """
+
     frame_ready = pyqtSignal(QImage, object)
-    camera_resolutions_available = pyqtSignal(list)
-    camera_properties_updated = pyqtSignal(dict)
     camera_error = pyqtSignal(str, str)
 
-    def __init__(
-        self,
-        device_info=None,
-        target_fps=20.0,
-        desired_width=None,
-        desired_height=None,
-        desired_pixel_format="Mono8",
-        parent=None,
-    ):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        # Ensure IC4 library initialized before any thread operations
-        try:
-            ic4.Library.init()
-            log.debug("IC4 Library initialized in SDKCameraThread init")
-        except Exception:
-            log.debug("IC4 Library already initialized")
-
-        self.device_info = device_info
-        self.target_fps = target_fps
-        self.desired_width = desired_width
-        self.desired_height = desired_height
-        self.desired_pixel_format_str = desired_pixel_format
-
         self._stop_requested = False
-        self._pending_exposure_us = None
-        self._pending_gain_db = None
-        self._pending_auto_exposure = None
-        self._pending_roi = None
-
-        self._last_prop_apply = 0.0
-        self._throttle_interval = 0.1
-
-        self.grabber = None
-        self.sink = None
-        self.pm = None
-        self.actual_qimg_fmt = QImage.Format_Invalid
-        self.listener = DummySinkListener()
 
     def request_stop(self):
         self._stop_requested = True
-        log.debug("SDKCameraThread: Stop requested")
-
-    def update_exposure(self, exp_us):
-        self._pending_exposure_us = float(exp_us)
-
-    def update_gain(self, gain_db):
-        self._pending_gain_db = gain_db
-
-    def update_auto_exposure(self, auto):
-        self._pending_auto_exposure = auto
-
-    def update_roi(self, x, y, w, h):
-        self._pending_roi = (x, y, w, h)
-
-    def _is_writable(self, prop):
-        return bool(
-            prop and prop.is_available and not getattr(prop, "is_readonly", True)
-        )
-
-    def _set_prop(self, name, val):
-        try:
-            p = self.pm.find(name)
-            if self._is_writable(p):
-                self.pm.set_value(name, val)
-                log.info(f"Set {name} -> {val}")
-                return True
-        except Exception:
-            log.exception(f"Failed to set {name}")
-        return False
-
-    def _apply_pending(self):
-        now = time.monotonic()
-        if now - self._last_prop_apply < self._throttle_interval:
-            return
-        self._last_prop_apply = now
-        if not (self.pm and self.grabber and self.grabber.is_device_open):
-            return
-
-        if self._pending_auto_exposure is not None:
-            pa = self.pm.find(PROP_EXPOSURE_AUTO)
-            if pa and pa.is_available:
-                val = "Continuous" if self._pending_auto_exposure else "Off"
-                self._set_prop(
-                    PROP_EXPOSURE_AUTO,
-                    (
-                        val
-                        if isinstance(pa, PropEnumeration)
-                        else self._pending_auto_exposure
-                    ),
-                )
-            self._pending_auto_exposure = None
-
-        if self._pending_exposure_us is not None:
-            self._set_prop(PROP_EXPOSURE_TIME, self._pending_exposure_us)
-            self._pending_exposure_us = None
-
-        if self._pending_gain_db is not None:
-            self._set_prop(PROP_GAIN, self._pending_gain_db)
-            self._pending_gain_db = None
-
-        if self._pending_roi is not None:
-            x, y, w, h = self._pending_roi
-            if (w, h) == (0, 0):
-                self._set_prop(PROP_OFFSET_X, 0)
-                self._set_prop(PROP_OFFSET_Y, 0)
-            else:
-                self._set_prop(PROP_WIDTH, w)
-                self._set_prop(PROP_HEIGHT, h)
-                self._set_prop(PROP_OFFSET_X, x)
-                self._set_prop(PROP_OFFSET_Y, y)
-            self._pending_roi = None
-
-    def _emit_props(self):
-        if not self.pm:
-            self.camera_properties_updated.emit({})
-            return
-        info = {"controls": {}, "roi": {}}
-        # TODO: gather and emit detailed property info
-        self.camera_properties_updated.emit(info)
-
-    def _emit_res(self):
-        if not self.pm:
-            self.camera_resolutions_available.emit([])
-            return
-        try:
-            w = self.pm.find(PROP_WIDTH).value
-            h = self.pm.find(PROP_HEIGHT).value
-            pf = self.pm.find(PROP_PIXEL_FORMAT).value
-            self.camera_resolutions_available.emit([f"{w}x{h} ({pf})"])
-        except Exception:
-            log.exception("Could not list resolutions")
-            self.camera_resolutions_available.emit([])
+        log.debug("Camera thread stop requested")
 
     def run(self):
-        log.info(f"SDKCameraThread start: {self.device_info}")
-        # Ensure library init in worker thread
         try:
-            ic4.Library.init()
-            log.debug("IC4 Library init in run()")
-        except Exception:
-            log.debug("IC4 Library already initialized in run()")
+            # Ensure library initialized
+            try:
+                ic4.Library.init()
+            except Exception:
+                pass
+            # Enumerate and open first device
+            devs = ic4.DeviceEnum.devices()
+            if not devs:
+                raise RuntimeError("No camera found")
+            grabber = ic4.Grabber()
+            grabber.device_open(devs[0])
+            pm = grabber.device_property_map
+            log.info(f"Opened camera: {devs[0].model_name}")
 
-        self.grabber = ic4.Grabber()
-        try:
-            # Open camera device
-            if not self.device_info:
-                devs = ic4.DeviceEnum.devices()
-                if not devs:
-                    raise RuntimeError("No camera found")
-                self.device_info = devs[0]
-            self.grabber.device_open(self.device_info)
-            self.pm = self.grabber.device_property_map
-            log.info(f"Opened {self.device_info.model_name}")
+            # Set pixel format to first available
+            pfp = pm.find(PROP_PIXEL_FORMAT)
+            if hasattr(pfp, "entries") and pfp.entries:
+                first_pf = pfp.entries[0].name
+                try:
+                    pm.set_value(PROP_PIXEL_FORMAT, first_pf)
+                    log.info(f"PixelFormat set to {first_pf}")
+                except Exception:
+                    log.warning(f"Could not set PixelFormat to {first_pf}")
 
-            # Pixel format preference
-            pfp = self.pm.find(PROP_PIXEL_FORMAT)
-            if isinstance(pfp, PropEnumeration) and pfp.is_available:
-                opts = [e.name for e in pfp.entries]
-                for cand in ("Y800", "Mono8", "Mono 8", opts[0]):
-                    if cand in opts:
-                        self._set_prop(PROP_PIXEL_FORMAT, cand)
-                        pf_clean = cand.replace(" ", "").lower()
-                        self.actual_qimg_fmt = (
-                            QImage.Format_Grayscale8
-                            if pf_clean.startswith(("mono", "y800"))
-                            else QImage.Format_RGB888
-                        )
-                        break
-            else:
-                self.actual_qimg_fmt = QImage.Format_Grayscale8
+            # Full sensor dims
+            wp = pm.find(PROP_WIDTH)
+            hp = pm.find(PROP_HEIGHT)
+            try:
+                if hasattr(wp, "maximum"):
+                    pm.set_value(PROP_WIDTH, wp.maximum)
+                if hasattr(hp, "maximum"):
+                    pm.set_value(PROP_HEIGHT, hp.maximum)
+                pm.set_value(PROP_OFFSET_X, 0)
+                pm.set_value(PROP_OFFSET_Y, 0)
+                log.info(f"Full sensor: {wp.maximum}×{hp.maximum}")
+            except Exception:
+                log.warning("Could not set full sensor ROI, proceeding")
 
-            # Determine ROI: center on desired size or full sensor
-            wp = self.pm.find(PROP_WIDTH)
-            hp = self.pm.find(PROP_HEIGHT)
-            max_w, max_h = wp.maximum, hp.maximum
-            if (
-                self.desired_width
-                and self.desired_height
-                and self.desired_width <= max_w
-                and self.desired_height <= max_h
-            ):
-                w, h = self.desired_width, self.desired_height
-                off_x = (max_w - w) // 2
-                off_y = (max_h - h) // 2
-                if self._is_writable(wp):
-                    self._set_prop(PROP_WIDTH, w)
-                if self._is_writable(hp):
-                    self._set_prop(PROP_HEIGHT, h)
-                self._set_prop(PROP_OFFSET_X, off_x)
-                self._set_prop(PROP_OFFSET_Y, off_y)
-                log.info(f"ROI: {w}×{h} @ {off_x},{off_y}")
-            else:
-                if self._is_writable(wp):
-                    self._set_prop(PROP_WIDTH, max_w)
-                if self._is_writable(hp):
-                    self._set_prop(PROP_HEIGHT, max_h)
-                self._set_prop(PROP_OFFSET_X, 0)
-                self._set_prop(PROP_OFFSET_Y, 0)
-                log.info(f"Full-sensor: {max_w}×{max_h}")
-
-            # Acquisition settings
-            self._set_prop(PROP_ACQUISITION_MODE, "Continuous")
-            self._set_prop(PROP_TRIGGER_MODE, "Off")
-            self._set_prop(PROP_ACQUISITION_FRAME_RATE, float(self.target_fps))
-            log.info(f"Configured continuous free-run @ {self.target_fps} fps")
-
-            # Initial UI data
-            self._emit_res()
-            self._emit_props()
+            # Continuous, free-run
+            try:
+                pm.set_value(PROP_ACQUISITION_MODE, "Continuous")
+                pm.set_value(PROP_TRIGGER_MODE, "Off")
+            except Exception:
+                log.warning("Could not set acquisition mode/trigger, proceeding")
 
             # Start streaming
-            self.sink = ic4.QueueSink(self.listener)
-            self.sink.accept_incomplete_frames = False
-            log.info("QueueSink created")
-            self.grabber.stream_setup(
-                self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
+            listener = ic4.QueueSink(self)
+            listener.accept_incomplete_frames = False
+            grabber.stream_setup(
+                listener, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
             log.info("Streaming started")
 
-            # Acquisition loop
-            frame_interval = 1.0 / self.target_fps
-            last_emit = time.monotonic()
+            # Grab loop
             while not self._stop_requested:
-                self._apply_pending()
                 try:
-                    buf = self.sink.pop_output_buffer()
-                except ic4.IC4Exception as ex:
-                    name = ex.code.name if getattr(ex, "code", None) else ""
-                    if "NoData" in name or "Time" in name:
-                        time.sleep(0.01)
-                        continue
-                    log.exception("pop_output_buffer failed")
+                    buf = listener.pop_output_buffer()
+                except Exception:
+                    time.sleep(0.01)
                     continue
-
                 if buf is None:
                     continue
-
-                w, h = buf.image_type.width, buf.image_type.height
+                # Build QImage
+                w = buf.image_type.width
+                h = buf.image_type.height
                 try:
                     if hasattr(buf, "numpy_wrap"):
                         arr = buf.numpy_wrap()
                         raw = arr.tobytes()
                         stride = arr.strides[0]
+                        fmt = (
+                            QImage.Format_Grayscale8
+                            if arr.ndim == 2
+                            else QImage.Format_RGB888
+                        )
                     else:
                         pitch = getattr(buf, "pitch", w)
                         raw = ctypes.string_at(buf.pointer, pitch * h)
                         stride = pitch
-
-                    img = QImage(raw, w, h, stride, self.actual_qimg_fmt)
-                    if (
-                        not img.isNull()
-                        and time.monotonic() - last_emit >= frame_interval
-                    ):
-                        last_emit = time.monotonic()
+                        fmt = QImage.Format_Grayscale8
+                    img = QImage(raw, w, h, stride, fmt)
+                    if not img.isNull():
                         self.frame_ready.emit(img.copy(), raw)
                 except Exception:
                     log.exception("Failed to build QImage")
@@ -311,24 +128,17 @@ class SDKCameraThread(QThread):
                     except Exception:
                         pass
 
-            log.info("Acquisition loop exited")
-
-        except Exception:
-            log.exception("Unhandled in SDKCameraThread.run")
-            self.camera_error.emit("Unexpected", "Exception")
+        except Exception as e:
+            log.exception("Camera thread error")
+            self.camera_error.emit(str(e), type(e).__name__)
 
         finally:
-            log.info("Tearing down grabber")
-            if self.grabber:
-                try:
-                    if getattr(self.grabber, "is_streaming", False):
-                        self.grabber.stream_stop()
-                except Exception:
-                    pass
-                try:
-                    if getattr(self.grabber, "is_device_open", False):
-                        self.grabber.device_close()
-                except Exception:
-                    pass
-            self.grabber = self.sink = self.pm = None
-            log.info("SDKCameraThread stopped")
+            try:
+                if isinstance(grabber, ic4.Grabber):
+                    if getattr(grabber, "is_streaming", False):
+                        grabber.stream_stop()
+                    if getattr(grabber, "is_device_open", False):
+                        grabber.device_close()
+            except Exception:
+                pass
+            log.info("Camera thread stopped")
