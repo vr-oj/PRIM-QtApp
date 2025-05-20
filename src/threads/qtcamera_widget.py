@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QOpenGLWidget,
 )
 from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot, QTimer
-from PyQt5.QtGui import QImage, QPixmap, QPainter
+from PyQt5.QtGui import QImage, QPixmap
 
 from .sdk_camera_thread import SDKCameraThread
 
@@ -18,7 +18,8 @@ log = logging.getLogger(__name__)
 
 class GLCameraView(QGraphicsView):
     """
-    A QGraphicsView that uses QOpenGLWidget viewport for GPU-accelerated rendering.
+    A QGraphicsView that uses QOpenGLWidget viewport for GPU-accelerated rendering,
+    auto-fitting the frame to its view.
     """
 
     def __init__(self, parent=None):
@@ -27,14 +28,7 @@ class GLCameraView(QGraphicsView):
         self.setScene(scene)
         self._item = QGraphicsPixmapItem()
         scene.addItem(self._item)
-
-        # use an OpenGL widget for the viewport
         self.setViewport(QOpenGLWidget())
-
-        # smooth scaling of pixmaps
-        self.setRenderHint(QPainter.SmoothPixmapTransform)
-
-        # no scrollbars, center alignment
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setAlignment(Qt.AlignCenter)
@@ -42,10 +36,13 @@ class GLCameraView(QGraphicsView):
     def update_frame(self, qimg: QImage):
         pix = QPixmap.fromImage(qimg)
         self._item.setPixmap(pix)
-        # adjust the scene rect & fit the view to the image
-        self.scene().setSceneRect(0, 0, pix.width(), pix.height())
-        self.resetTransform()
-        self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
+        # keep full frame visible
+        self.fitInView(self._item, Qt.KeepAspectRatio)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # re-fit on resize
+        self.fitInView(self._item, Qt.KeepAspectRatio)
 
 
 class QtCameraWidget(QWidget):
@@ -61,11 +58,11 @@ class QtCameraWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Camera settings
+        # Start in full-frame by default
         self.current_target_fps = 20.0
-        self.current_width = 640
-        self.current_height = 480
-        self.current_pixel_format = "Mono 8"
+        self.current_width = None  # None => full sensor
+        self.current_height = None
+        self.current_pixel_format = "Mono8"
         self._current_roi = (0, 0, 0, 0)
         # Thread and storage
         self._camera_thread = None
@@ -203,7 +200,10 @@ class QtCameraWidget(QWidget):
     @pyqtSlot()
     def reset_roi_to_default(self):
         """Reset Region Of Interest to full frame."""
-        self.set_software_roi(0, 0, 0, 0)
+        self.current_width = None
+        self.current_height = None
+        self._cleanup_camera_thread()
+        self._start_new_camera_thread()
 
     @pyqtSlot(QImage, object)
     def _on_sdk_frame_received(self, qimg: QImage, frame_data: object):
