@@ -281,6 +281,10 @@ class QtCameraWidget(QWidget):
             else "Unknown"
         )
         log.info(f"SDKCameraThread for {name} has finished.")
+        # if we still have a camera selected, try again after a short delay
+        if self._active_device_info:
+            log.info("Restarting camera thread in 200 ms…")
+            QTimer.singleShot(200, self._start_new_camera_thread)
 
     def _update_viewfinder_display(self):
         if self._last_pixmap and not self._last_pixmap.isNull():
