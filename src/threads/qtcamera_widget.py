@@ -6,10 +6,11 @@ from PyQt5.QtWidgets import (
     QGraphicsView,
     QGraphicsScene,
     QGraphicsPixmapItem,
+    QOpenGLWidget,
 )
 from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot
 from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtOpenGL import QOpenGLWidget
+
 
 from .sdk_camera_thread import SDKCameraThread
 
