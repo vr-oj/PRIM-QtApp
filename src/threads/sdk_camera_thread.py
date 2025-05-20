@@ -279,30 +279,39 @@ class SDKCameraThread(QThread):
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
+            # … after your self.grabber.stream_setup(…) …
             log.info("Streaming started")
 
+            # initialize our counters & throttling
             frame_count = 0
             no_data_count = 0
             last_emit = time.monotonic()
             frame_interval = 1.0 / self.target_fps
 
             while not self._stop_requested:
+                # first, apply any pending property changes
                 self._apply_pending_properties()
+
+                # try to pull a frame buffer
                 try:
                     buf = self.sink.pop_output_buffer()
                 except ic4.IC4Exception as ex:
                     name = ex.code.name if getattr(ex, "code", None) else ""
+                    # transient miss — no data yet or timeout
                     if "NoData" in name or "Time" in name:
                         no_data_count += 1
                         if no_data_count % 200 == 0:
                             log.warning(f"No frames for ~{no_data_count*0.05:.1f}s")
                         self.msleep(50)
                         continue
-                    log.error("Sink pop failed (will retry)", _exc_info=True)
+
+                    # any other error: log, emit, sleep, then retry
+                    log.error("Sink pop failed (will retry)", exc_info=True)
                     self.camera_error.emit(str(ex), name)
                     self.msleep(50)
                     continue
 
+                # sometimes pop gives you None instead of an exception
                 if buf is None:
                     no_data_count += 1
                     if no_data_count % 200 == 0:
@@ -312,16 +321,20 @@ class SDKCameraThread(QThread):
                     self.msleep(50)
                     continue
 
+                # we got a real buffer
                 frame_count += 1
                 no_data_count = 0
+
+                # pull out dimensions
                 w = buf.image_type.width
                 h = buf.image_type.height
                 log.debug(f"Frame {frame_count}: {w}×{h}")
 
-                # build QImage
+                # build the QImage and emit it, throttled to target_fps
                 try:
                     fmt = self.actual_qimage_format
                     stride = w
+
                     if hasattr(buf, "numpy_wrap"):
                         arr = buf.numpy_wrap()
                         stride = arr.strides[0]
@@ -339,12 +352,14 @@ class SDKCameraThread(QThread):
                         raise RuntimeError("No image-buffer interface found")
 
                     img = QImage(raw, w, h, stride, fmt)
-                    if (
-                        not img.isNull()
-                        and time.monotonic() - last_emit >= frame_interval
-                    ):
-                        last_emit = time.monotonic()
-                        self.frame_ready.emit(img.copy(), raw)
+                    if not img.isNull():
+                        now = time.monotonic()
+                        if now - last_emit >= frame_interval:
+                            last_emit = now
+                            # copy so the sink buffer can be reused
+                            self.frame_ready.emit(img.copy(), raw)
+                    else:
+                        log.warning("Built QImage is null (check fmt mapping)")
                 except Exception:
                     log.error("QImage construction failed", exc_info=True)
 
