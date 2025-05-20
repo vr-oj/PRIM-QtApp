@@ -33,9 +33,17 @@ class DummySinkListener:
         log.debug(
             f"DummyListener: Sink connected. {image_type}, MinBuffers={min_buffers_required}"
         )
-        return True
+        try:
+            # allocate and queue the minimum number of buffers so we actually get frames
+            sink.alloc_and_queue_buffers(min_buffers_required)
+            return True
+        except Exception as e:
+            log.error(f"Failed to queue buffers: {e}", exc_info=True)
+            return False
 
     def frames_queued(self, sink):
+        # we don’t need to do anything here;
+        # buffers will be popped & released in run()
         pass
 
     def sink_disconnected(self, sink):
@@ -341,6 +349,12 @@ class SDKCameraThread(QThread):
                         log.warning("Built QImage is null (check fmt mapping)")
                 except Exception:
                     log.error("QImage construction failed", exc_info=True)
+                finally:
+                    # return the buffer to the sink so it can be reused
+                    try:
+                        buf.release()
+                    except Exception:
+                        pass
 
             log.info("Exited acquisition loop")
 
