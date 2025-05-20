@@ -61,7 +61,10 @@ except Exception as e:
 
 from threads.qtcamera_widget import QtCameraWidget
 from threads.serial_thread import SerialThread
-from recording import TrialRecorder, RecordingWorker
+from recording import (
+    TrialRecorder,
+    RecordingWorker,
+)  # Assuming recording.py is the last version provided
 from utils import list_serial_ports
 
 from control_panels.top_control_panel import TopControlPanel
@@ -331,20 +334,35 @@ class MainWindow(QMainWindow):
         self.qt_cam_widget.camera_error.connect(self._handle_camera_error)
         self.qt_cam_widget.frame_ready.connect(self._handle_new_camera_frame)
 
-    @pyqtSlot(ic4_sdk.DeviceInfo)
+    @pyqtSlot(
+        object
+    )  # Changed from ic4_sdk.DeviceInfo to object for broader compatibility
     def _handle_camera_selection(self, device_info_obj):
         log.debug(
-            f"MainWindow: Camera selection changed. DeviceInfo: {device_info_obj}"
+            f"MainWindow: Camera selection changed. DeviceInfo type: {type(device_info_obj)}"
         )
-        is_ic4_device = (
-            _ic4_module
-            and hasattr(_ic4_module, "DeviceInfo")
+
+        is_ic4_device = False
+        if (
+            _IC4_INITIALIZED
+            and _ic4_module
             and isinstance(device_info_obj, _ic4_module.DeviceInfo)
-        )
+        ):
+            is_ic4_device = True
+            log.info(
+                f"Selected TIS Camera: {device_info_obj.model_name if device_info_obj else 'None'}"
+            )
+        elif device_info_obj is not None:
+            log.warning(
+                f"Selected camera is not a TIS DeviceInfo object. Type: {type(device_info_obj)}"
+            )
+
         if is_ic4_device:
             self.qt_cam_widget.set_active_camera_device(device_info_obj)
         else:
-            self.qt_cam_widget.set_active_camera_device(None)
+            self.qt_cam_widget.set_active_camera_device(
+                None
+            )  # Handles None or non-IC4 objects
             if hasattr(self.top_ctrl, "camera_controls"):
                 self.top_ctrl.camera_controls.disable_all_controls()
                 self.top_ctrl.camera_controls.update_camera_resolutions_list([])
@@ -382,7 +400,7 @@ class MainWindow(QMainWindow):
     def _toggle_serial_connection(self):
         if self._serial_thread and self._serial_thread.isRunning():
             log.info("Stopping serial thread...")
-            self._serial_thread.stop()
+            self._serial_thread.stop()  # stop() will emit finished when done
         else:
             data = self.serial_port_combobox.currentData()
             port = data.value() if isinstance(data, QVariant) else data
@@ -395,10 +413,20 @@ class MainWindow(QMainWindow):
 
             log.info(f"Starting serial thread on port: {port or 'Simulation'}")
             try:
-                if self._serial_thread and self._serial_thread.isRunning():
-                    if not self._serial_thread.wait(100):
-                        self._serial_thread.terminate()
-                        self._serial_thread.wait(500)
+                # Ensure any previous thread instance is fully cleaned up if it exists
+                # This is more for robustness, stop() should handle it.
+                if self._serial_thread:
+                    if (
+                        self._serial_thread.isRunning()
+                    ):  # Should not happen if logic is correct
+                        log.warning(
+                            "Previous serial thread was still running, attempting to stop it forcefully."
+                        )
+                        self._serial_thread.stop()
+                        if not self._serial_thread.wait(1000):
+                            self._serial_thread.terminate()
+                            self._serial_thread.wait(500)
+                    self._serial_thread.deleteLater()  # Schedule for deletion
                     self._serial_thread = None
 
                 self._serial_thread = SerialThread(port=port, parent=self)
@@ -414,54 +442,83 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 log.exception("Failed to start SerialThread.")
                 QMessageBox.critical(self, "Serial Error", str(e))
+                if self._serial_thread:  # If instance was created but start failed
+                    self._serial_thread.deleteLater()
                 self._serial_thread = None
-                self._update_recording_actions_enable_state()
+                self._update_recording_actions_enable_state()  # Reflect failed connection attempt
 
     @pyqtSlot(str)
     def _handle_serial_status_change(self, status: str):
         log.info(f"Serial status: {status}")
         self.statusBar().showMessage(f"PRIM Device: {status}", 4000)
-        connected = "connected" in status.lower()
+
+        # More robust check for "connected" state
+        connected = (
+            "connected" in status.lower() or "opened serial port" in status.lower()
+        )
+
         self.top_ctrl.update_connection_status(status, connected)
         if connected:
             self.connect_serial_action.setIcon(self.icon_disconnect)
             self.connect_serial_action.setText("Disconnect PRIM Device")
             self.serial_port_combobox.setEnabled(False)
-            self.pressure_plot_widget.clear_plot()
-        else:
+            self.pressure_plot_widget.clear_plot()  # Clear plot on new connection
+        else:  # Disconnected or error states
             self.connect_serial_action.setIcon(self.icon_connect)
             self.connect_serial_action.setText("Connect PRIM Device")
             self.serial_port_combobox.setEnabled(True)
-            if self._is_recording:
+            if self._is_recording:  # If was recording and device disconnected
                 QMessageBox.information(
-                    self, "Recording Stopped", "PRIM device disconnected."
+                    self,
+                    "Recording Stopped",
+                    "PRIM device disconnected during recording.",
                 )
-                self._trigger_stop_recording()
+                self._trigger_stop_recording()  # Stop the recording
         self._update_recording_actions_enable_state()
 
     @pyqtSlot(str)
     def _handle_serial_error(self, msg: str):
         log.error(f"Serial error: {msg}")
         self.statusBar().showMessage(f"Serial Error: {msg}", 6000)
+        # UI should already be updated by status_changed if connection failed
+        # self._handle_serial_status_change(f"Error: {msg}") # This might cause loop if error leads to disconnect status
+        self._update_recording_actions_enable_state()
 
     @pyqtSlot()
     def _handle_serial_thread_finished(self):
-        log.info("SerialThread finished.")
-        if self._serial_thread is self.sender():
-            self._serial_thread = None
-            current = (
+        log.info("SerialThread finished signal received.")
+        # Check if the sender is indeed our current serial thread
+        sender_thread = self.sender()
+        if self._serial_thread is sender_thread:
+            # Update UI to reflect disconnected state if it wasn't already
+            # This handles cases where thread stops without an explicit "Disconnected" status emitted
+            # (e.g., if stop() is called directly)
+            current_status_text = (
                 self.top_ctrl.conn_lbl.text().lower()
                 if hasattr(self.top_ctrl, "conn_lbl")
                 else ""
             )
-            if "connected" in current:
-                self._handle_serial_status_change("Disconnected")
-            else:
-                self._update_recording_actions_enable_state()
+            is_ui_connected = (
+                "connected" in current_status_text
+                or "opened serial port" in current_status_text
+            )
+
+            if is_ui_connected:  # If UI still shows connected, update it
+                self._handle_serial_status_change("Disconnected by thread finishing")
+
+            if self._serial_thread:  # Ensure it exists before deleteLater
+                self._serial_thread.deleteLater()  # Schedule for deletion
+            self._serial_thread = None
+            log.info("SerialThread instance cleaned up.")
+        else:
+            log.warning(
+                "Received 'finished' signal from an old or unknown SerialThread instance."
+            )
+
+        self._update_recording_actions_enable_state()
 
     @pyqtSlot(int, float, float)
     def _handle_new_serial_data(self, idx: int, t: float, p: float):
-        # Update GUI
         self.top_ctrl.update_prim_data(idx, t, p)
         ax = self.top_ctrl.plot_controls.auto_x_cb.isChecked()
         ay = self.top_ctrl.plot_controls.auto_y_cb.isChecked()
@@ -471,11 +528,10 @@ class MainWindow(QMainWindow):
                 f"PRIM Data: Idx={idx}, Time={t:.3f}s, P={p:.2f}"
             )
 
-        # Write CSV if recording
         if self._is_recording and self._recording_worker:
             try:
                 self._recording_worker.add_csv_data(t, idx, p)
-            except Exception:  # Should be rare if queue.put is used
+            except Exception:
                 log.exception("Error queueing CSV data for recording.")
                 self.statusBar().showMessage(
                     "CSV queue error. Stopping recording.", 5000
@@ -487,10 +543,8 @@ class MainWindow(QMainWindow):
             self._serial_thread is not None and self._serial_thread.isRunning()
         )
         camera_ready = self.qt_cam_widget.current_camera_is_active()
-
         can_start_recording = serial_ready and camera_ready and not self._is_recording
 
-        # Use the correct variable and ensure a bool is passed
         self.start_recording_action.setEnabled(bool(can_start_recording))
         self.stop_recording_action.setEnabled(bool(self._is_recording))
 
@@ -506,31 +560,46 @@ class MainWindow(QMainWindow):
 
         if self._is_recording and self._recording_worker and not qimage.isNull():
             try:
-                # Convert to numpy
                 numpy_frame = None
                 if qimage.format() == QImage.Format_Grayscale8:
                     ptr = qimage.constBits()
-                    numpy_frame = np.array(
-                        ptr.asarray(qimage.sizeInBytes()), dtype=np.uint8
+                    ptr.setsize(qimage.sizeInBytes())  # Important for PySide/PyQt5
+                    numpy_frame = np.array(ptr, dtype=np.uint8).reshape(
+                        qimage.height(), qimage.width()
                     )
-                    numpy_frame = numpy_frame.reshape(qimage.height(), qimage.width())
-                elif qimage.format() == QImage.Format_RGB888:
+                elif (
+                    qimage.format() == QImage.Format_RGB888
+                ):  # Assuming RGB888 is 3 channels
                     ptr = qimage.constBits()
-                    numpy_frame = np.array(
-                        ptr.asarray(qimage.sizeInBytes()), dtype=np.uint8
-                    )
-                    numpy_frame = numpy_frame.reshape(
+                    ptr.setsize(qimage.sizeInBytes())
+                    numpy_frame = np.array(ptr, dtype=np.uint8).reshape(
                         qimage.height(), qimage.width(), 3
                     )
+                # Add other formats if necessary, e.g. Format_RGB32 (BGRA typically)
+                # elif qimage.format() == QImage.Format_RGB32:
+                #     ptr = qimage.constBits()
+                #     ptr.setsize(qimage.sizeInBytes())
+                #     numpy_frame = np.array(ptr, dtype=np.uint8).reshape(
+                #         qimage.height(), qimage.width(), 4
+                #     ) # BGRA
+                #     # numpy_frame = numpy_frame[..., :3] # If you need to convert to RGB
 
                 if numpy_frame is not None:
-                    self._recording_worker.add_video_frame(numpy_frame.copy())
-                    log.warning("Unsupported QImage format for video frame.")
+                    self._recording_worker.add_video_frame(
+                        numpy_frame.copy()
+                    )  # Send copy
+                else:
+                    # Corrected: Log warning if numpy_frame is None (format not handled)
+                    log.warning(
+                        f"Unsupported QImage format ({qimage.format()}) for video frame, not sending to recorder."
+                    )
 
-            except Exception:
-                log.exception("Error writing video frame.")
+            except Exception as e:  # Catch specific errors if possible
+                log.exception(
+                    f"Error converting QImage to numpy or queueing video frame: {e}"
+                )
                 self.statusBar().showMessage(
-                    "Video write error. Stopping recording.", 5000
+                    "Video frame error. Stopping recording.", 5000
                 )
                 self._trigger_stop_recording()
 
@@ -587,7 +656,9 @@ class MainWindow(QMainWindow):
 
         w, h = self.current_camera_frame_width, self.current_camera_frame_height
         if w <= 0 or h <= 0:
-            log.warning("Invalid frame size, using default.")
+            log.warning(
+                f"Invalid frame size ({w}x{h}), using default {DEFAULT_FRAME_SIZE}."
+            )
             w, h = DEFAULT_FRAME_SIZE
 
         ext_data = self.video_format_combobox.currentData()
@@ -596,8 +667,18 @@ class MainWindow(QMainWindow):
             video_ext = DEFAULT_VIDEO_EXTENSION.lower()
         codec = DEFAULT_VIDEO_CODEC
 
-        log.info(f"Starting recording: {base}, {DEFAULT_FPS} FPS, {w}x{h}, {video_ext}")
+        log.info(
+            f"Attempting to start recording: {base}, {DEFAULT_FPS} FPS, {w}x{h}, format: {video_ext}, codec: {codec}"
+        )
         try:
+            if self._recording_worker and self._recording_worker.isRunning():
+                log.warning("A recording worker is already running. Stopping it first.")
+                self._recording_worker.stop_worker()
+                if not self._recording_worker.wait(3000):
+                    self._recording_worker.terminate()
+                self._recording_worker.deleteLater()
+                self._recording_worker = None
+
             self._recording_worker = RecordingWorker(
                 basepath=base,
                 fps=DEFAULT_FPS,
@@ -606,25 +687,54 @@ class MainWindow(QMainWindow):
                 video_codec=codec,
                 parent=self,
             )
-            QApplication.processEvents()  # Give thread a moment to start
-            time.sleep(0.2)  # Small delay, not ideal for production but helps for demo
+
+            # CRITICAL: Start the thread so its run() method executes
+            self._recording_worker.start()
+
+            # The sleep is a temporary, imperfect way to wait for initialization.
+            # A signal from RecordingWorker would be much better.
+            # Increase sleep slightly to give more time for file I/O in TrialRecorder init.
+            time.sleep(0.5)  # Increased from 0.2, still not ideal.
 
             if not (
-                self._recording_worker and self._recording_worker.is_ready_to_record
-            ):  # is_ready_to_record is a new property
-                raise RuntimeError(
-                    "Recording worker failed to initialize TrialRecorder."
+                self._recording_worker
+                and self._recording_worker.isRunning()
+                and self._recording_worker.is_ready_to_record
+            ):
+                # If worker is not running or not ready, it means init failed.
+                # The RecordingWorker's run() method should have logged the specific error.
+                log.error(
+                    "Recording worker did not become ready. Check RecordingWorker logs for initialization errors in TrialRecorder."
+                )
+                # Attempt to clean up the worker if it was created but isn't ready
+                if self._recording_worker:
+                    if self._recording_worker.isRunning():
+                        self._recording_worker.stop_worker()  # Signal it to stop if it's in its loop
+                        if not self._recording_worker.wait(1000):  # Brief wait
+                            self._recording_worker.terminate()
+                    self._recording_worker.deleteLater()
+                    self._recording_worker = None
+                raise RuntimeError(  # This error will be caught by the outer try-except
+                    "Recording worker failed to initialize TrialRecorder or did not start."
                 )
 
         except Exception as e:
-            log.exception("Failed to initialize or start RecordingWorker.")
-            QMessageBox.critical(self, "Recording Error", str(e))
-            if self._recording_worker:
-                self._recording_worker.stop_worker()
-                self._recording_worker.wait()  # Ensure it stops
+            log.exception(
+                f"Failed to initialize or start RecordingWorker: {e}"
+            )  # This catches the RuntimeError above too
+            QMessageBox.critical(
+                self, "Recording Error", f"Could not start recording worker: {e}"
+            )
+            if self._recording_worker:  # Ensure cleanup if instance was created
+                if self._recording_worker.isRunning():
+                    self._recording_worker.stop_worker()
+                    if not self._recording_worker.wait(1000):
+                        self._recording_worker.terminate()
+                self._recording_worker.deleteLater()
             self._recording_worker = None
-            return
+            return  # Do not proceed to set _is_recording = True
 
+        # If we reach here, worker started and is ready
         self._is_recording = True
         self.start_recording_action.setIcon(self.icon_recording_active)
         self._update_recording_actions_enable_state()
@@ -632,24 +742,37 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Recording Started: {safe}", 0)
 
     def _trigger_stop_recording(self):
-        if not self._is_recording or not self._recording_worker:  # MODIFIED
+        if not self._is_recording or not self._recording_worker:
+            log.info("Stop recording triggered, but not recording or worker missing.")
+            # Ensure UI consistency if state is desynced
+            if self._is_recording:  # If flag is true but worker is missing
+                self._is_recording = False
+            self._update_recording_actions_enable_state()
             return
 
-        log.info("Stopping recording worker.")
+        log.info("Stopping recording worker...")
         try:
-            self._recording_worker.stop_worker()
-            if not self._recording_worker.wait(5000):  # Wait for thread to finish
-                log.warning("Recording worker did not stop gracefully.")
-                self._recording_worker.terminate()  # Force if necessary
+            self._recording_worker.stop_worker()  # Signal the worker to stop
 
-            count = (
-                self._recording_worker.video_frame_count
-            )  # MODIFIED: Get count from worker
-            self.statusBar().showMessage(f"Recording Stopped. {count} frames", 7000)
+            # Wait for the worker thread to finish its queue and exit
+            # Increased timeout as file closing can take time
+            if not self._recording_worker.wait(7000):
+                log.warning(
+                    "Recording worker did not stop gracefully after 7s. Terminating."
+                )
+                self._recording_worker.terminate()  # Force if necessary
+                # If terminated, frame count might not be perfectly up-to-date
+                # but it's better than hanging.
+
+            count = self._recording_worker.video_frame_count
+            self.statusBar().showMessage(
+                f"Recording Stopped. {count} frames saved.", 7000
+            )
+
             reply = QMessageBox.information(
                 self,
                 "Recording Saved",
-                f"Saved to:\n{self.last_trial_basepath}\nOpen folder?",
+                f"Session saved to:\n{self.last_trial_basepath}\n\nOpen folder?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             )
@@ -660,16 +783,30 @@ class MainWindow(QMainWindow):
                     os.system(f'open "{self.last_trial_basepath}"')
                 else:
                     os.system(f'xdg-open "{self.last_trial_basepath}"')
-                pass
-        except Exception:
-            log.exception("Error stopping recorder.")
+
+        except Exception as e:  # Catch any unexpected errors during stop process
+            log.exception(f"Error during the stop recording process: {e}")
             self.statusBar().showMessage("Error stopping recording.", 5000)
         finally:
+            # Ensure worker is cleaned up
+            if self._recording_worker:
+                if (
+                    self._recording_worker.isRunning()
+                ):  # Should be false if wait() succeeded
+                    log.warning(
+                        "Recording worker still running in finally block of stop. Forcing stop."
+                    )
+                    self._recording_worker.stop_worker()  # Resend stop just in case
+                    if not self._recording_worker.wait(1000):
+                        self._recording_worker.terminate()
+                self._recording_worker.deleteLater()  # Schedule for deletion
             self._recording_worker = None
 
-        self._is_recording = False
-        self.start_recording_action.setIcon(self.icon_record_start)
-        self._update_recording_actions_enable_state()
+            # Reset recording state
+            self._is_recording = False
+            self.start_recording_action.setIcon(self.icon_record_start)
+            self._update_recording_actions_enable_state()
+            log.info("Recording fully stopped and UI updated.")
 
     @pyqtSlot()
     def _clear_pressure_plot(self):
@@ -700,9 +837,9 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Plot data exported to {os.path.basename(path)}", 4000
             )
-        except Exception:
-            log.exception("Failed to export plot data.")
-            QMessageBox.critical(self, "Export Error", "Could not save CSV.")
+        except Exception as e:
+            log.exception(f"Failed to export plot data: {e}")
+            QMessageBox.critical(self, "Export Error", f"Could not save CSV: {e}")
 
     @pyqtSlot()
     def _show_about_dialog(self):
@@ -716,7 +853,7 @@ class MainWindow(QMainWindow):
         self.app_session_time_label.setText(f"Session: {h:02}:{m:02}:{s:02}")
 
     def closeEvent(self, event):
-        log.info(f"Close event received. Recording: {self._is_recording}")
+        log.info(f"Close event received. Recording active: {self._is_recording}")
         if self._is_recording:
             reply = QMessageBox.question(
                 self,
@@ -726,34 +863,45 @@ class MainWindow(QMainWindow):
                 QMessageBox.No,
             )
             if reply == QMessageBox.Yes:
-                self._trigger_stop_recording()  # This will handle the recording worker
+                self._trigger_stop_recording()
+                # _trigger_stop_recording now handles waiting for the worker.
+                # Allow a brief moment for UI events related to stopping.
+                QApplication.processEvents()
             else:
                 event.ignore()
                 return
 
-        # Stop Recording Worker if it's still around (e.g., if recording was not active but worker exists)
-        if self._recording_worker and self._recording_worker.isRunning():
-            log.info("Stopping recording worker on exit...")
-            self._recording_worker.stop_worker()
-            if not self._recording_worker.wait(3000):  # Increased wait time slightly
-                log.warning(
-                    "Recording worker did not stop gracefully on exit, terminating."
-                )
-                self._recording_worker.terminate()
+        # Ensure recording worker is stopped and cleaned up if it still exists
+        # (e.g., if recording was not active but worker was somehow created and not cleaned)
+        if self._recording_worker:
+            log.info("Cleaning up recording worker on application exit...")
+            if self._recording_worker.isRunning():
+                self._recording_worker.stop_worker()
+                if not self._recording_worker.wait(3000):
+                    log.warning(
+                        "Recording worker did not stop gracefully on exit, terminating."
+                    )
+                    self._recording_worker.terminate()
+            self._recording_worker.deleteLater()
             self._recording_worker = None
 
         # Stop Serial Thread
         if self._serial_thread and self._serial_thread.isRunning():
-            log.info("Stopping serial thread on exit...")
+            log.info("Stopping serial thread on application exit...")
             self._serial_thread.stop()
             if not self._serial_thread.wait(2000):
                 log.warning(
                     "Serial thread did not stop gracefully on exit, terminating."
                 )
                 self._serial_thread.terminate()
-                self._serial_thread.wait(500)  # Wait after terminate
+                if not self._serial_thread.wait(500):  # Wait after terminate
+                    log.error("Serial thread failed to terminate.")
+            self._serial_thread.deleteLater()
             self._serial_thread = None
 
         log.info("Closing camera widget.")
-        self.qt_cam_widget.close()
+        if self.qt_cam_widget:  # Check if it exists
+            self.qt_cam_widget.close()  # This should trigger its own cleanup
+
+        log.info("Exiting application.")
         super().closeEvent(event)
