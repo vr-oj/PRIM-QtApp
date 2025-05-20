@@ -58,6 +58,13 @@ class SDKCameraThread(QThread):
         parent=None,
     ):
         super().__init__(parent)
+        # Ensure IC4 library initialized before any thread operations
+        try:
+            ic4.Library.init()
+            log.debug("IC4 Library initialized in SDKCameraThread init")
+        except Exception:
+            log.debug("IC4 Library already initialized")
+
         self.device_info = device_info
         self.target_fps = target_fps
         self.desired_width = desired_width
@@ -81,7 +88,7 @@ class SDKCameraThread(QThread):
 
     def request_stop(self):
         self._stop_requested = True
-        log.debug("Stop requested")
+        log.debug("SDKCameraThread: Stop requested")
 
     def update_exposure(self, exp_us):
         self._pending_exposure_us = float(exp_us)
@@ -158,6 +165,7 @@ class SDKCameraThread(QThread):
             self.camera_properties_updated.emit({})
             return
         info = {"controls": {}, "roi": {}}
+        # TODO: gather and emit detailed property info
         self.camera_properties_updated.emit(info)
 
     def _emit_res(self):
@@ -175,9 +183,16 @@ class SDKCameraThread(QThread):
 
     def run(self):
         log.info(f"SDKCameraThread start: {self.device_info}")
+        # Ensure library init in worker thread
+        try:
+            ic4.Library.init()
+            log.debug("IC4 Library init in run()")
+        except Exception:
+            log.debug("IC4 Library already initialized in run()")
+
         self.grabber = ic4.Grabber()
         try:
-            # open camera
+            # Open camera device
             if not self.device_info:
                 devs = ic4.DeviceEnum.devices()
                 if not devs:
@@ -187,7 +202,7 @@ class SDKCameraThread(QThread):
             self.pm = self.grabber.device_property_map
             log.info(f"Opened {self.device_info.model_name}")
 
-            # Pixel format
+            # Pixel format preference
             pfp = self.pm.find(PROP_PIXEL_FORMAT)
             if isinstance(pfp, PropEnumeration) and pfp.is_available:
                 opts = [e.name for e in pfp.entries]
@@ -204,25 +219,42 @@ class SDKCameraThread(QThread):
             else:
                 self.actual_qimg_fmt = QImage.Format_Grayscale8
 
-            # — always full-sensor, offset=(0,0) —
+            # Determine ROI: center on desired size or full sensor
             wp = self.pm.find(PROP_WIDTH)
             hp = self.pm.find(PROP_HEIGHT)
             max_w, max_h = wp.maximum, hp.maximum
-            if self._is_writable(wp):
-                self._set_prop(PROP_WIDTH, max_w)
-            if self._is_writable(hp):
-                self._set_prop(PROP_HEIGHT, max_h)
-            self._set_prop(PROP_OFFSET_X, 0)
-            self._set_prop(PROP_OFFSET_Y, 0)
-            log.info(f"Camera full-sensor configured: {max_w}×{max_h}")
+            if (
+                self.desired_width
+                and self.desired_height
+                and self.desired_width <= max_w
+                and self.desired_height <= max_h
+            ):
+                w, h = self.desired_width, self.desired_height
+                off_x = (max_w - w) // 2
+                off_y = (max_h - h) // 2
+                if self._is_writable(wp):
+                    self._set_prop(PROP_WIDTH, w)
+                if self._is_writable(hp):
+                    self._set_prop(PROP_HEIGHT, h)
+                self._set_prop(PROP_OFFSET_X, off_x)
+                self._set_prop(PROP_OFFSET_Y, off_y)
+                log.info(f"ROI: {w}×{h} @ {off_x},{off_y}")
+            else:
+                if self._is_writable(wp):
+                    self._set_prop(PROP_WIDTH, max_w)
+                if self._is_writable(hp):
+                    self._set_prop(PROP_HEIGHT, max_h)
+                self._set_prop(PROP_OFFSET_X, 0)
+                self._set_prop(PROP_OFFSET_Y, 0)
+                log.info(f"Full-sensor: {max_w}×{max_h}")
 
-            # Continuous free-run
+            # Acquisition settings
             self._set_prop(PROP_ACQUISITION_MODE, "Continuous")
             self._set_prop(PROP_TRIGGER_MODE, "Off")
             self._set_prop(PROP_ACQUISITION_FRAME_RATE, float(self.target_fps))
-            log.info(f"Configured @ {self.target_fps} fps")
+            log.info(f"Configured continuous free-run @ {self.target_fps} fps")
 
-            # Emit UI info
+            # Initial UI data
             self._emit_res()
             self._emit_props()
 
@@ -235,12 +267,11 @@ class SDKCameraThread(QThread):
             )
             log.info("Streaming started")
 
-            # Grab loop
+            # Acquisition loop
             frame_interval = 1.0 / self.target_fps
             last_emit = time.monotonic()
             while not self._stop_requested:
                 self._apply_pending()
-                buf = None
                 try:
                     buf = self.sink.pop_output_buffer()
                 except ic4.IC4Exception as ex:
@@ -254,7 +285,6 @@ class SDKCameraThread(QThread):
                 if buf is None:
                     continue
 
-                # Build QImage
                 w, h = buf.image_type.width, buf.image_type.height
                 try:
                     if hasattr(buf, "numpy_wrap"):

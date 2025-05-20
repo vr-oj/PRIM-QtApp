@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QGraphicsPixmapItem,
     QOpenGLWidget,
 )
-from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot, QTimer
+from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot, QTimer, QRectF
 from PyQt5.QtGui import QImage, QPixmap
 
 from .sdk_camera_thread import SDKCameraThread
@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 class GLCameraView(QGraphicsView):
     """
     A QGraphicsView that uses QOpenGLWidget viewport for GPU-accelerated rendering,
-    auto-fitting the frame to its view.
+    and auto-scales the scene to keep the full pixmap visible.
     """
 
     def __init__(self, parent=None):
@@ -28,6 +28,8 @@ class GLCameraView(QGraphicsView):
         self.setScene(scene)
         self._item = QGraphicsPixmapItem()
         scene.addItem(self._item)
+
+        # Use OpenGL for smoother updates
         self.setViewport(QOpenGLWidget())
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -36,19 +38,19 @@ class GLCameraView(QGraphicsView):
     def update_frame(self, qimg: QImage):
         pix = QPixmap.fromImage(qimg)
         self._item.setPixmap(pix)
-        # keep full frame visible
+        # fit the new pixmap into view, keep aspect ratio
         self.fitInView(self._item, Qt.KeepAspectRatio)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # re-fit on resize
+        # on resize, refit whatever pixmap we have
         self.fitInView(self._item, Qt.KeepAspectRatio)
 
 
 class QtCameraWidget(QWidget):
     """
     Displays live camera feed via SDKCameraThread using OpenGL for performance.
-    Manages camera selection, resolution, and basic properties.
+    Manages camera selection, optional software ROI cropping, and resets.
     """
 
     frame_ready = pyqtSignal(QImage, object)
@@ -58,18 +60,20 @@ class QtCameraWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Start in full-frame by default
+
+        # full-frame by default (None means "use full sensor")
         self.current_target_fps = 20.0
-        self.current_width = None  # None => full sensor
+        self.current_width = None
         self.current_height = None
         self.current_pixel_format = "Mono8"
-        self._current_roi = (0, 0, 0, 0)
-        # Thread and storage
+        self._software_roi = QRectF(0, 0, 0, 0)
+
         self._camera_thread = None
         self._active_device_info: ic4.DeviceInfo = None
-        # Debounce timers
+
         self._setup_debounce_timers()
-        # OpenGL-backed viewfinder
+
+        # build UI
         self.viewfinder = GLCameraView(self)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -79,10 +83,12 @@ class QtCameraWidget(QWidget):
     def _setup_debounce_timers(self):
         self._exp_pending = None
         self._gain_pending = None
+
         self._exp_timer = QTimer(self)
         self._exp_timer.setSingleShot(True)
         self._exp_timer.setInterval(100)
         self._exp_timer.timeout.connect(self._apply_pending_exposure)
+
         self._gain_timer = QTimer(self)
         self._gain_timer.setSingleShot(True)
         self._gain_timer.setInterval(100)
@@ -90,39 +96,43 @@ class QtCameraWidget(QWidget):
 
     def _cleanup_camera_thread(self):
         log.debug("Cleaning up camera thread...")
-        if self._camera_thread:
-            thread = self._camera_thread
-            self._camera_thread = None
-            if thread.isRunning():
-                thread.request_stop()
-                if not thread.wait(3000):
-                    thread.terminate()
-            try:
-                thread.frame_ready.disconnect(self._on_sdk_frame_received)
-                thread.camera_error.disconnect(self._on_camera_thread_error_received)
-                thread.camera_resolutions_available.disconnect(
-                    self.camera_resolutions_updated
-                )
-                thread.camera_properties_updated.disconnect(
-                    self.camera_properties_updated
-                )
-            except Exception:
-                pass
-            thread.deleteLater()
+        if not self._camera_thread:
+            return
+        thread = self._camera_thread
+        self._camera_thread = None
+
+        if thread.isRunning():
+            thread.request_stop()
+            if not thread.wait(3000):
+                thread.terminate()
+
+        try:
+            thread.frame_ready.disconnect(self._on_sdk_frame_received)
+            thread.camera_error.disconnect(self.camera_error.emit)
+            thread.camera_resolutions_available.disconnect(
+                self.camera_resolutions_updated.emit
+            )
+            thread.camera_properties_updated.disconnect(
+                self.camera_properties_updated.emit
+            )
+        except Exception:
+            pass
+
+        thread.deleteLater()
 
     @pyqtSlot(ic4.DeviceInfo)
     def set_active_camera_device(self, device_info: ic4.DeviceInfo = None):
+        """Switch to a new camera (or clear)."""
         self._cleanup_camera_thread()
         self._active_device_info = device_info
-        if not device_info:
-            return
-        self._start_new_camera_thread()
+        if device_info:
+            self._start_new_camera_thread()
 
     def _start_new_camera_thread(self):
-        if self._camera_thread:
-            self._cleanup_camera_thread()
         if not self._active_device_info:
             return
+
+        # instantiate thread with optional width/height (None→full)
         self._camera_thread = SDKCameraThread(
             device_info=self._active_device_info,
             target_fps=self.current_target_fps,
@@ -131,29 +141,37 @@ class QtCameraWidget(QWidget):
             desired_pixel_format=self.current_pixel_format,
             parent=self,
         )
+
+        # wire up signals
         self._camera_thread.frame_ready.connect(self._on_sdk_frame_received)
-        self._camera_thread.camera_error.connect(self._on_camera_thread_error_received)
+        self._camera_thread.camera_error.connect(self.camera_error.emit)
         self._camera_thread.camera_resolutions_available.connect(
-            self.camera_resolutions_updated
+            self.camera_resolutions_updated.emit
         )
         self._camera_thread.camera_properties_updated.connect(
-            self.camera_properties_updated
+            self.camera_properties_updated.emit
         )
+
         self._camera_thread.start()
 
     @pyqtSlot(str)
     def set_active_resolution_str(self, resolution_str: str):
-        if "x" in resolution_str:
-            parts = resolution_str.split("x", 1)
-            try:
-                w = int(parts[0])
-                h = int(parts[1].split()[0])
-            except Exception:
-                return
-            if (w, h) != (self.current_width, self.current_height):
-                self.current_width, self.current_height = w, h
-                self._cleanup_camera_thread()
-                self._start_new_camera_thread()
+        """Parses 'WxH' and restarts thread with that ROI size."""
+        if "x" not in resolution_str:
+            return
+        w_s, rest = resolution_str.split("x", 1)
+        try:
+            w = int(w_s)
+            h = int(rest.split()[0])
+        except ValueError:
+            return
+
+        # only restart if truly changed
+        if (w, h) != (self.current_width, self.current_height):
+            self.current_width, self.current_height = w, h
+            self._software_roi = QRectF(0, 0, 0, 0)
+            self._cleanup_camera_thread()
+            self._start_new_camera_thread()
 
     @pyqtSlot(int)
     def set_exposure(self, exposure_us: int):
@@ -170,38 +188,32 @@ class QtCameraWidget(QWidget):
         if self._camera_thread and self._camera_thread.isRunning():
             self._camera_thread.update_auto_exposure(enable_auto)
 
-    @pyqtSlot()
     def _apply_pending_exposure(self):
-        if (
-            self._camera_thread
-            and hasattr(self, "_exp_pending")
-            and self._exp_pending is not None
-        ):
+        if self._camera_thread and self._exp_pending is not None:
+            # force manual
             self._camera_thread.update_auto_exposure(False)
             self._camera_thread.update_exposure(self._exp_pending)
         self._exp_pending = None
 
-    @pyqtSlot()
     def _apply_pending_gain(self):
-        if (
-            self._camera_thread
-            and hasattr(self, "_gain_pending")
-            and self._gain_pending is not None
-        ):
+        if self._camera_thread and self._gain_pending is not None:
             self._camera_thread.update_gain(self._gain_pending)
         self._gain_pending = None
 
     @pyqtSlot(int, int, int, int)
     def set_software_roi(self, x: int, y: int, w: int, h: int):
-        self._current_roi = (x, y, w, h)
-        if self._camera_thread and self._camera_thread.isRunning():
-            self._camera_thread.update_roi(x, y, w, h)
+        """
+        Defines a cropping rectangle (in sensor coordinates) that
+        we apply on the QImage before display.
+        """
+        self._software_roi = QRectF(x, y, w, h)
 
     @pyqtSlot()
     def reset_roi_to_default(self):
-        """Reset Region Of Interest to full frame."""
+        """Clear any software ROI and go back to full-sensor capture."""
         self.current_width = None
         self.current_height = None
+        self._software_roi = QRectF(0, 0, 0, 0)
         self._cleanup_camera_thread()
         self._start_new_camera_thread()
 
@@ -210,22 +222,18 @@ class QtCameraWidget(QWidget):
         if qimg.isNull():
             return
 
-        # software ROI: if the user has requested a sub-region, crop here
-        x, y, w, h = self._current_roi
-        if w > 0 and h > 0:
-            try:
-                cropped = qimg.copy(x, y, w, h)
-            except Exception:
-                cropped = qimg
+        # apply software ROI cropping if requested
+        roi = self._software_roi
+        if roi.width() > 0 and roi.height() > 0:
+            cropped = qimg.copy(
+                int(roi.x()), int(roi.y()), int(roi.width()), int(roi.height())
+            )
         else:
             cropped = qimg
 
+        # push to viewfinder & emit outwards
         self.viewfinder.update_frame(cropped)
         self.frame_ready.emit(cropped, frame_data)
-
-    @pyqtSlot(str, str)
-    def _on_camera_thread_error_received(self, message: str, code: str):
-        self.camera_error.emit(message, code)
 
     def current_camera_is_active(self) -> bool:
         return bool(self._camera_thread and self._camera_thread.isRunning())
