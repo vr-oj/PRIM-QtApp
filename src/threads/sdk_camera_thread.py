@@ -6,139 +6,411 @@ import imagingcontrol4 as ic4
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 
+from imagingcontrol4.properties import (
+    PropInteger,
+    PropFloat,
+    PropEnumeration,
+)
+
 log = logging.getLogger(__name__)
 
-# GenICam camera-property names
+# camera-property names
 PROP_WIDTH = "Width"
 PROP_HEIGHT = "Height"
 PROP_PIXEL_FORMAT = "PixelFormat"
+PROP_EXPOSURE_TIME = "ExposureTime"
+PROP_EXPOSURE_AUTO = "ExposureAuto"
+PROP_GAIN = "Gain"
 PROP_OFFSET_X = "OffsetX"
 PROP_OFFSET_Y = "OffsetY"
+PROP_ACQUISITION_FRAME_RATE = "AcquisitionFrameRate"
 PROP_ACQUISITION_MODE = "AcquisitionMode"
 PROP_TRIGGER_MODE = "TriggerMode"
 
 
-class SDKCameraThread(QThread):
-    """
-    Simplified camera thread: always picks first available device,
-    configures it to full sensor, continuous free-run, and streams frames.
-    """
+class DummySinkListener:
+    def sink_connected(self, sink, image_type, min_buffers_required):
+        log.debug(
+            f"DummyListener: Sink connected. {image_type}, MinBuffers={min_buffers_required}"
+        )
+        return True
 
+    def frames_queued(self, sink):
+        pass
+
+    def sink_disconnected(self, sink):
+        log.debug(f"DummyListener: Sink disconnected ({type(sink)})")
+
+
+class SDKCameraThread(QThread):
+    # emitted whenever a new frame is ready: (QImage copy, raw_buffer)
     frame_ready = pyqtSignal(QImage, object)
+
+    # emitted once after opening, with a list of resolution strings
+    camera_resolutions_available = pyqtSignal(list)
+
+    # emitted whenever exposure/gain/ROI props change, to repopulate your UI
+    camera_properties_updated = pyqtSignal(dict)
+
+    # emitted on any camera error: (message, code)
     camera_error = pyqtSignal(str, str)
 
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        device_info: "ic4.DeviceInfo" = None,
+        target_fps: float = 20.0,
+        desired_width: int = None,
+        desired_height: int = None,
+        desired_pixel_format: str = "Mono 8",
+        parent=None,
+    ):
         super().__init__(parent)
+
+        # user-requested parameters (we keep them for signature compatibility)
+        self.device_info = device_info
+        self.target_fps = target_fps
+        self.desired_width = desired_width
+        self.desired_height = desired_height
+        self.desired_pixel_format_str = desired_pixel_format
+
+        # internal flags & throttling
         self._stop_requested = False
+        self._pending_exposure_us = None
+        self._pending_gain_db = None
+        self._pending_auto_exposure = None
+        self._pending_roi = None
+
+        # debounce apply interval
+        self._prop_throttle_interval = 0.1
+        self._last_prop_apply_time = 0.0
+
+        # runtime objects
+        self.grabber = None
+        self.sink = None
+        self.pm = None
+        self.actual_qimage_format = QImage.Format_Invalid
+
+        # listener for QueueSink
+        self.dummy_listener = DummySinkListener()
 
     def request_stop(self):
         self._stop_requested = True
-        log.debug("Camera thread stop requested")
 
-    def run(self):
+    # these are called from the GUI thread
+    def update_exposure(self, exp_us: int):
+        self._pending_exposure_us = float(exp_us)
+
+    def update_gain(self, gain_db: float):
+        self._pending_gain_db = gain_db
+
+    def update_auto_exposure(self, auto: bool):
+        self._pending_auto_exposure = auto
+
+    def update_roi(self, x: int, y: int, w: int, h: int):
+        self._pending_roi = (x, y, w, h)
+
+    def _is_prop_writable(self, prop):
+        return bool(
+            prop and prop.is_available and not getattr(prop, "is_readonly", True)
+        )
+
+    def _set_property_value(self, name: str, val):
         try:
-            # Ensure library initialized
+            p = self.pm.find(name)
+            if self._is_prop_writable(p):
+                self.pm.set_value(name, val)
+                log.info(f"Set {name} → {val}")
+                return True
+            elif p and p.is_available:
+                log.warning(f"{name} is read-only")
+        except Exception as e:
+            log.warning(f"Failed to set {name}: {e}")
+        return False
+
+    def _apply_pending_properties(self):
+        now = time.monotonic()
+        if now - self._last_prop_apply_time < self._prop_throttle_interval:
+            return
+        self._last_prop_apply_time = now
+
+        if not (self.pm and self.grabber and self.grabber.is_device_open):
+            return
+
+        # auto-exposure toggle
+        if self._pending_auto_exposure is not None:
+            pa = self.pm.find(PROP_EXPOSURE_AUTO)
+            if pa and pa.is_available:
+                val = "Continuous" if self._pending_auto_exposure else "Off"
+                self._set_property_value(
+                    PROP_EXPOSURE_AUTO,
+                    (
+                        val
+                        if isinstance(pa, PropEnumeration)
+                        else self._pending_auto_exposure
+                    ),
+                )
+                if not self._pending_auto_exposure:
+                    # force properties update immediately
+                    self._emit_camera_properties()
+            self._pending_auto_exposure = None
+
+        # manual exposure
+        if self._pending_exposure_us is not None:
+            pa = self.pm.find(PROP_EXPOSURE_AUTO)
+            auto_on = False
+            if pa and pa.is_available:
+                av = pa.value
+                auto_on = (av != "Off") if isinstance(av, str) else bool(av)
+            if not auto_on:
+                self._set_property_value(PROP_EXPOSURE_TIME, self._pending_exposure_us)
+            self._pending_exposure_us = None
+
+        # gain
+        if self._pending_gain_db is not None:
+            self._set_property_value(PROP_GAIN, self._pending_gain_db)
+            self._pending_gain_db = None
+
+        # ROI offsets
+        if self._pending_roi is not None:
+            x, y, w, h = self._pending_roi
+            if (w, h) == (0, 0):
+                self._set_property_value(PROP_OFFSET_X, 0)
+                self._set_property_value(PROP_OFFSET_Y, 0)
+            else:
+                self._set_property_value(PROP_OFFSET_X, x)
+                self._set_property_value(PROP_OFFSET_Y, y)
+            self._pending_roi = None
+
+    def _emit_camera_properties(self):
+        if not self.pm:
+            self.camera_properties_updated.emit({})
+            return
+
+        info = {"controls": {}, "roi": {}}
+
+        # exposure & gain
+        for key, (pv, pa) in {
+            "exposure": (PROP_EXPOSURE_TIME, PROP_EXPOSURE_AUTO),
+            "gain": (PROP_GAIN, None),
+        }.items():
+            ctrl = {"enabled": False, "value": 0, "min": 0, "max": 0}
             try:
-                ic4.Library.init()
+                p = self.pm.find(pv)
+                if p and p.is_available:
+                    ctrl["enabled"] = self._is_prop_writable(p)
+                    if isinstance(p, (PropInteger, PropFloat)):
+                        ctrl.update(min=p.minimum, max=p.maximum, value=p.value)
+                    elif isinstance(p, PropEnumeration):
+                        ctrl.update(options=[e.name for e in p.entries], value=p.value)
+                    if pa:
+                        pap = self.pm.find(pa)
+                        if pap and pap.is_available:
+                            av = pap.value
+                            is_auto = (av != "Off") if isinstance(av, str) else bool(av)
+                            ctrl["auto_available"] = True
+                            ctrl["is_auto_on"] = is_auto
+                            if key == "exposure" and is_auto:
+                                ctrl["enabled"] = False
             except Exception:
                 pass
-            # Enumerate and open first device
-            devs = ic4.DeviceEnum.devices()
-            if not devs:
-                raise RuntimeError("No camera found")
-            grabber = ic4.Grabber()
-            grabber.device_open(devs[0])
-            pm = grabber.device_property_map
-            log.info(f"Opened camera: {devs[0].model_name}")
+            info["controls"][key] = ctrl
 
-            # Set pixel format to first available
-            pfp = pm.find(PROP_PIXEL_FORMAT)
-            if hasattr(pfp, "entries") and pfp.entries:
-                first_pf = pfp.entries[0].name
-                try:
-                    pm.set_value(PROP_PIXEL_FORMAT, first_pf)
-                    log.info(f"PixelFormat set to {first_pf}")
-                except Exception:
-                    log.warning(f"Could not set PixelFormat to {first_pf}")
+        # ROI state
+        try:
+            roi = {}
+            for label, pname in [
+                ("w", PROP_WIDTH),
+                ("h", PROP_HEIGHT),
+                ("x", PROP_OFFSET_X),
+                ("y", PROP_OFFSET_Y),
+            ]:
+                p = self.pm.find(pname)
+                roi[label] = p.value
+                if hasattr(p, "maximum"):
+                    roi[f"max_{label}"] = p.maximum
+            info["roi"] = roi
+        except Exception:
+            pass
 
-            # Full sensor dims
-            wp = pm.find(PROP_WIDTH)
-            hp = pm.find(PROP_HEIGHT)
+        self.camera_properties_updated.emit(info)
+
+    def _emit_available_resolutions(self):
+        if not self.pm:
+            self.camera_resolutions_available.emit([])
+            return
+
+        try:
+            w = self.pm.find(PROP_WIDTH).value
+            h = self.pm.find(PROP_HEIGHT).value
+            pf = self.pm.find(PROP_PIXEL_FORMAT).value
+            self.camera_resolutions_available.emit([f"{w}x{h} ({pf})"])
+        except Exception as e:
+            log.warning(f"Couldn’t list resolutions: {e}")
+            self.camera_resolutions_available.emit([])
+
+    def run(self):
+        log.info(
+            f"SDKCameraThread starting for {self.device_info.model_name if self.device_info else 'Unknown'}"
+        )
+        self.grabber = ic4.Grabber()
+        try:
+            # pick first camera if none given
+            if not self.device_info:
+                devs = ic4.DeviceEnum.devices()
+                if not devs:
+                    raise RuntimeError("No cameras found")
+                self.device_info = devs[0]
+
+            self.grabber.device_open(self.device_info)
+            self.pm = self.grabber.device_property_map
+            log.info(f"Opened {self.device_info.model_name}")
+
+            # ── initial setup: force full-sensor Mono8, clear ROI ──
             try:
-                if hasattr(wp, "maximum"):
-                    pm.set_value(PROP_WIDTH, wp.maximum)
-                if hasattr(hp, "maximum"):
-                    pm.set_value(PROP_HEIGHT, hp.maximum)
-                pm.set_value(PROP_OFFSET_X, 0)
-                pm.set_value(PROP_OFFSET_Y, 0)
-                log.info(f"Full sensor: {wp.maximum}×{hp.maximum}")
-            except Exception:
-                log.warning("Could not set full sensor ROI, proceeding")
+                # pixel format
+                pfp = self.pm.find(PROP_PIXEL_FORMAT)
+                cur_pf = pfp.value
+                want_pf = "Mono 8"
+                if isinstance(pfp, PropEnumeration) and cur_pf.lower().replace(
+                    " ", ""
+                ) != want_pf.lower().replace(" ", ""):
+                    opts = [e.name for e in pfp.entries]
+                    if want_pf in opts:
+                        self._set_property_value(PROP_PIXEL_FORMAT, want_pf)
+                self.actual_qimage_format = QImage.Format_Grayscale8
 
-            # Continuous, free-run
-            try:
-                pm.set_value(PROP_ACQUISITION_MODE, "Continuous")
-                pm.set_value(PROP_TRIGGER_MODE, "Off")
-            except Exception:
-                log.warning("Could not set acquisition mode/trigger, proceeding")
+                # full sensor size
+                wp = self.pm.find(PROP_WIDTH)
+                hp = self.pm.find(PROP_HEIGHT)
+                if self._is_prop_writable(wp):
+                    self._set_property_value(PROP_WIDTH, wp.maximum)
+                if self._is_prop_writable(hp):
+                    self._set_property_value(PROP_HEIGHT, hp.maximum)
 
-            # Start streaming
-            listener = ic4.QueueSink(self)
-            listener.accept_incomplete_frames = False
-            grabber.stream_setup(
-                listener, setup_option=ic4.StreamSetupOption.ACQUISITION_START
+                # reset offsets
+                self._set_property_value(PROP_OFFSET_X, 0)
+                self._set_property_value(PROP_OFFSET_Y, 0)
+
+                log.info(
+                    f"Res: {wp.value}×{hp.value}, PF={self.pm.find(PROP_PIXEL_FORMAT).value}"
+                )
+
+                # continuous streaming
+                self._set_property_value(PROP_ACQUISITION_MODE, "Continuous")
+                self._set_property_value(PROP_TRIGGER_MODE, "Off")
+                self._set_property_value(
+                    PROP_ACQUISITION_FRAME_RATE, float(self.target_fps)
+                )
+            except Exception as e:
+                log.error("Initial config failed", exc_info=True)
+                self.camera_error.emit(f"Config: {e}", type(e).__name__)
+                return
+
+            # push initial state to UI
+            self._apply_pending_properties()
+            self._emit_available_resolutions()
+            self._emit_camera_properties()
+
+            # start sink + streaming
+            self.sink = ic4.QueueSink(self.dummy_listener)
+            if hasattr(self.sink, "accept_incomplete_frames"):
+                self.sink.accept_incomplete_frames = False
+            log.info("QueueSink created")
+
+            self.grabber.stream_setup(
+                self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
             log.info("Streaming started")
 
-            # Grab loop
+            frame_count = 0
+            no_data_count = 0
+
             while not self._stop_requested:
+                # debounce & apply any pending exposure/gain/etc
+                self._apply_pending_properties()
+
                 try:
-                    buf = listener.pop_output_buffer()
-                except Exception:
-                    time.sleep(0.01)
-                    continue
+                    buf = self.sink.pop_output_buffer()
+                except ic4.IC4Exception as ex:
+                    name = ex.code.name if getattr(ex, "code", None) else ""
+                    if "NoData" in name or "Time" in name:
+                        no_data_count += 1
+                        if no_data_count % 200 == 0:
+                            log.warning(f"No frames for ~{no_data_count*0.05:.1f}s")
+                        self.msleep(50)
+                        continue
+                    log.error("Sink pop failed", exc_info=True)
+                    self.camera_error.emit(str(ex), name)
+                    break
+
                 if buf is None:
+                    no_data_count += 1
+                    if no_data_count % 200 == 0:
+                        log.warning(
+                            f"pop_output_buffer returned None for ~{no_data_count*0.05:.1f}s"
+                        )
+                    self.msleep(50)
                     continue
-                # Build QImage
+
+                frame_count += 1
+                no_data_count = 0
                 w = buf.image_type.width
                 h = buf.image_type.height
+                log.info(
+                    f"Frame {frame_count}: {w}×{h}, {buf.image_type.pixel_format.name}"
+                )
+
+                # extract raw Mono8 bytes
                 try:
+                    fmt = self.actual_qimage_format
+                    stride = w
+                    raw = None
+
                     if hasattr(buf, "numpy_wrap"):
                         arr = buf.numpy_wrap()
-                        raw = arr.tobytes()
                         stride = arr.strides[0]
-                        fmt = (
-                            QImage.Format_Grayscale8
-                            if arr.ndim == 2
-                            else QImage.Format_RGB888
-                        )
-                    else:
+                        raw = arr.tobytes()
+                    elif hasattr(buf, "numpy_copy"):
+                        arr = buf.numpy_copy()
+                        stride = arr.strides[0]
+                        raw = arr.tobytes()
+                    elif hasattr(buf, "pointer"):
+                        ptr = buf.pointer
                         pitch = getattr(buf, "pitch", w)
-                        raw = ctypes.string_at(buf.pointer, pitch * h)
+                        raw = ctypes.string_at(ptr, pitch * h)
                         stride = pitch
-                        fmt = QImage.Format_Grayscale8
-                    img = QImage(raw, w, h, stride, fmt)
-                    if not img.isNull():
-                        self.frame_ready.emit(img.copy(), raw)
-                except Exception:
-                    log.exception("Failed to build QImage")
-                finally:
-                    try:
-                        buf.release()
-                    except Exception:
-                        pass
+                    else:
+                        raise RuntimeError("No image-buffer interface found")
 
-        except Exception as e:
-            log.exception("Camera thread error")
-            self.camera_error.emit(str(e), type(e).__name__)
+                    img = QImage(raw, w, h, stride, fmt)
+                    if img.isNull():
+                        log.warning("Built QImage is null")
+                    else:
+                        self.frame_ready.emit(img.copy(), raw)
+
+                except Exception:
+                    log.error("QImage construction failed", exc_info=True)
+
+            log.info("Exited acquisition loop")
+
+        except Exception:
+            log.exception("Unhandled in run()")
+            self.camera_error.emit("Unexpected", "Exception")
 
         finally:
-            try:
-                if isinstance(grabber, ic4.Grabber):
-                    if getattr(grabber, "is_streaming", False):
-                        grabber.stream_stop()
-                    if getattr(grabber, "is_device_open", False):
-                        grabber.device_close()
-            except Exception:
-                pass
-            log.info("Camera thread stopped")
+            log.info("Shutting down grabber")
+            if self.grabber:
+                try:
+                    if self.grabber.is_streaming:
+                        self.grabber.stream_stop()
+                        log.info("Stream stopped")
+                except Exception:
+                    pass
+                try:
+                    if self.grabber.is_device_open:
+                        self.grabber.device_close()
+                        log.info("Device closed")
+                except Exception:
+                    pass
+            self.grabber = self.sink = self.pm = None
+            log.info("SDKCameraThread fully stopped")
