@@ -15,36 +15,25 @@ class QtCameraWidget(QWidget):
     Manages camera selection, resolution, and basic properties.
     """
 
-    # Signals a copy of the QImage and the original numpy array (if available)
+    # Signals
     frame_ready = pyqtSignal(QImage, object)
-
-    # Emits list of strings like "WidthxHeight (PixelFormat)"
     camera_resolutions_updated = pyqtSignal(list)
-
-    # Emits a dictionary of camera properties and their current states/ranges
     camera_properties_updated = pyqtSignal(dict)
-
-    # Emits error message and a string code for the error type
     camera_error = pyqtSignal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-
-        # Default camera parameters
+        # Camera parameters
         self.current_target_fps = 20.0
         self.current_width = 640
         self.current_height = 480
         self.current_pixel_format = "Mono 8"
-
-        # ROI state
         self._current_roi = (0, 0, 0, 0)
-
-        # Thread and pixmap
+        # Thread / pixmap
         self._camera_thread = None
         self._last_pixmap = None
         self._active_device_info: ic4.DeviceInfo = None
-
-        # Debounce timers for exposure/gain
+        # Debounce timers
         self._exp_pending = None
         self._gain_pending = None
         self._exp_timer = QTimer(self)
@@ -55,7 +44,6 @@ class QtCameraWidget(QWidget):
         self._gain_timer.setSingleShot(True)
         self._gain_timer.setInterval(100)
         self._gain_timer.timeout.connect(self._apply_pending_gain)
-
         # Viewfinder
         self.viewfinder = QLabel("No Camera Selected", self)
         self.viewfinder.setAlignment(Qt.AlignCenter)
@@ -67,22 +55,19 @@ class QtCameraWidget(QWidget):
             "QLabel { background-color: black; color: white; }"
         )
         self.viewfinder.setScaledContents(True)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.viewfinder)
         self.setLayout(layout)
 
     def _cleanup_camera_thread(self):
-        log.debug("Attempting to cleanup existing camera thread...")
+        log.debug("Cleaning up camera thread...")
         if self._camera_thread:
             thread = self._camera_thread
             self._camera_thread = None
             if thread.isRunning():
-                log.info(f"Stopping camera thread {thread.device_info.model_name}...")
                 thread.request_stop()
                 if not thread.wait(3000):
-                    log.warning("Terminating camera thread.")
                     thread.terminate()
             try:
                 thread.frame_ready.disconnect(self._on_sdk_frame_received)
@@ -137,7 +122,9 @@ class QtCameraWidget(QWidget):
     @pyqtSlot(str)
     def set_active_resolution_str(self, resolution_str: str):
         if "x" in resolution_str:
-            w, h = map(int, resolution_str.split("x", 1)[0:2])
+            w_str, rest = resolution_str.split("x", 1)
+            h_str = rest.split()[0]
+            w, h = int(w_str), int(h_str)
             if (w, h) != (self.current_width, self.current_height):
                 self.current_width, self.current_height = w, h
                 self._cleanup_camera_thread()
@@ -171,6 +158,16 @@ class QtCameraWidget(QWidget):
             self._camera_thread.update_gain(self._gain_pending)
         self._gain_pending = None
 
+    @pyqtSlot(int, int, int, int)
+    def set_software_roi(self, x: int, y: int, w: int, h: int):
+        self._current_roi = (x, y, w, h)
+        if self._camera_thread and self._camera_thread.isRunning():
+            self._camera_thread.update_roi(x, y, w, h)
+
+    @pyqtSlot()
+    def reset_roi_to_default(self):
+        self.set_software_roi(0, 0, 0, 0)
+
     @pyqtSlot(QImage, object)
     def _on_sdk_frame_received(self, qimg: QImage, frame_data: object):
         if self.viewfinder.text():
@@ -182,7 +179,7 @@ class QtCameraWidget(QWidget):
 
     @pyqtSlot(str, str)
     def _on_camera_thread_error_received(self, message: str, code: str):
-        display = f"Camera Error: {message}" if len(message) < 50 else f"Error ({code})"
+        display = message if len(message) < 50 else f"Error ({code})"
         self.viewfinder.setText(display)
         self._last_pixmap = None
         self._update_viewfinder_display()
@@ -190,7 +187,6 @@ class QtCameraWidget(QWidget):
 
     def _update_viewfinder_display(self):
         if self._last_pixmap and not self._last_pixmap.isNull():
-            # rely on Qt scaling
             self.viewfinder.setPixmap(self._last_pixmap)
         elif not self.viewfinder.text():
             self.viewfinder.setPixmap(QPixmap())
