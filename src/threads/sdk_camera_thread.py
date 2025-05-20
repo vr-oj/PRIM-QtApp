@@ -342,9 +342,11 @@ class SDKCameraThread(QThread):
                             log.warning(f"No frames for ~{no_data_count*0.05:.1f}s")
                         self.msleep(50)
                         continue
-                    log.error("Sink pop failed", exc_info=True)
-                    self.camera_error.emit(str(ex), name)
-                    break
+                    og.error("Sink pop failed (will retry)", exc_info=True)
+                self.camera_error.emit(str(ex), name)
+                # don’t exit the loop—sleep briefly and retry
+                self.msleep(50)
+                continue
 
                 if buf is None:
                     no_data_count += 1
