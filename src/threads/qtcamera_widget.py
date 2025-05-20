@@ -122,7 +122,7 @@ class QtCameraWidget(QWidget):
         self._last_pixmap = None
 
         if self._active_device_info is None:
-            …  # same early return
+            # same early return
             return
 
         self.viewfinder.setText(
