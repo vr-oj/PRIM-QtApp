@@ -11,7 +11,6 @@ os.environ["IC4_DLL_PATH"] = (
 
 class DummySinkListener:
     def sink_connected(self, sink, image_type, min_buffers_required):
-        # Must return True to allow streaming
         print(f"🔗 Sink connected: {image_type}, buffers={min_buffers_required}")
         return True
 
@@ -23,45 +22,83 @@ class DummySinkListener:
 
 
 def main():
-    # ── initialize the IC4 core library ──
+    # ── 1) Init the IC4 library
     try:
         ic4.Library.init()
     except Exception as e:
         print("❌ Library.init() failed:", e)
         sys.exit(1)
 
-    # ── enumerate cameras ──
+    # ── 2) Enumerate & open
     devs = ic4.DeviceEnum.devices()
     if not devs:
-        print("❌ No cameras found by IC4.")
+        print("❌ No cameras found.")
         sys.exit(1)
     cam = devs[0]
-    print(f"Found camera: {cam.model_name!r}")
+    print(f"📷 Found camera: {cam.model_name!r}")
 
-    # ── open the camera ──
-    g = ic4.Grabber()
+    grabber = ic4.Grabber()
     try:
-        g.device_open(cam)
+        grabber.device_open(cam)
         print("✅ Device opened.")
     except Exception as e:
         print("❌ Failed to open device:", e)
         sys.exit(1)
 
-    # ── start streaming ──
+    pm = grabber.device_property_map
+
+    # ── 3) Dump a few key properties
+    def dump_prop(name):
+        try:
+            p = pm.find(name)
+            print(
+                f" • {name}: value={p.value}, available={p.is_available}, readonly={getattr(p,'is_readonly',False)}"
+            )
+        except:
+            print(f" • {name}: <error reading>")
+
+    print("🔍 Current settings:")
+    for n in (
+        "PixelFormat",
+        "Width",
+        "Height",
+        "AcquisitionMode",
+        "TriggerMode",
+        "ExposureAuto",
+        "ExposureTime",
+    ):
+        dump_prop(n)
+
+    # ── 4) Force continuous streaming & manual exposure
+    try:
+        pm.set_value("PixelFormat", pm.find("PixelFormat").entries[0].name)
+        pm.set_value("Width", pm.find("Width").maximum)
+        pm.set_value("Height", pm.find("Height").maximum)
+        pm.set_value("AcquisitionMode", "Continuous")
+        pm.set_value("TriggerMode", "Off")
+        pm.set_value("AcquisitionFrameRate", 20.0)
+        pm.set_value("ExposureAuto", "Off")  # turn off auto exposure
+        pm.set_value("ExposureTime", 20000.0)  # 20 ms
+        print("✅ Forced continuous-free-run + manual exposure")
+    except Exception as e:
+        print("❌ Failed to configure camera:", e)
+
+    # ── 5) Start streaming
     listener = DummySinkListener()
     sink = ic4.QueueSink(listener)
+    # allow incomplete for diagnostics:
     if hasattr(sink, "accept_incomplete_frames"):
-        sink.accept_incomplete_frames = False
+        sink.accept_incomplete_frames = True
 
     try:
-        g.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
+        grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
         print("✅ Streaming started.")
     except Exception as e:
         print("❌ stream_setup failed:", e)
-        g.device_close()
+        grabber.device_close()
         sys.exit(1)
 
-    # ── grab a few frames ──
+    # ── 6) Grab up to 10 frames
     print("📸 Grabbing up to 10 frames…")
     got = 0
     t0 = time.monotonic()
@@ -69,7 +106,7 @@ def main():
         try:
             buf = sink.pop_output_buffer()
         except ic4.IC4Exception as ex:
-            name = ex.code.name if getattr(ex, "code", None) else ""
+            name = getattr(ex.code, "name", "")
             if "NoData" in name or "Time" in name:
                 time.sleep(0.05)
                 continue
@@ -77,24 +114,23 @@ def main():
             break
 
         if buf:
-            w, h = buf.image_type.width, buf.image_type.height
-            print(f"  • Frame {got+1}: {w}×{h}")
+            print(f"  • Frame {got+1}: {buf.image_type.width}×{buf.image_type.height}")
             got += 1
         else:
             time.sleep(0.05)
 
     if got == 0:
-        print("⚠️  No frames received in 5 seconds.")
+        print("⚠️  No frames received in 5 s. Check exposure/time or camera link.")
     else:
         print("✅ Done grabbing frames.")
 
-    # ── clean up ──
+    # ── 7) Tear down
     try:
-        g.stream_stop()
+        grabber.stream_stop()
     except:
         pass
     try:
-        g.device_close()
+        grabber.device_close()
     except:
         pass
 
