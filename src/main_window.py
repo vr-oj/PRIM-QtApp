@@ -110,13 +110,6 @@ class MainWindow(QMainWindow):
         self._connect_top_control_panel_signals()
         self._connect_camera_widget_signals()
 
-        # —— plot‐buffering to smooth out redraws ——
-        self._plot_buffer = []
-        self._plot_timer = QTimer(self)
-        self._plot_timer.setInterval(100)  # 100 ms → ~10 Hz redraw
-        self._plot_timer.timeout.connect(self._flush_plot_buffer)
-        self._plot_timer.start()
-
         # Populate camera list after a short delay
         if hasattr(self.top_ctrl, "camera_controls") and self.top_ctrl.camera_controls:
             QTimer.singleShot(250, self.top_ctrl.camera_controls.populate_camera_list)
@@ -472,7 +465,7 @@ class MainWindow(QMainWindow):
         self.top_ctrl.update_prim_data(idx, t, p)
         ax = self.top_ctrl.plot_controls.auto_x_cb.isChecked()
         ay = self.top_ctrl.plot_controls.auto_y_cb.isChecked()
-        self._plot_buffer.append((t, p))
+        self.pressure_plot_widget.update_plot(t, p, ax, ay)
         if self.dock_console.isVisible():
             self.console_out_textedit.append(
                 f"PRIM Data: Idx={idx}, Time={t:.3f}s, P={p:.2f}"
@@ -488,16 +481,6 @@ class MainWindow(QMainWindow):
                     "CSV write error. Stopping recording.", 5000
                 )
                 self._trigger_stop_recording()
-
-    def _flush_plot_buffer(self):
-        if not self._plot_buffer:
-            return
-        ax_auto = self.top_ctrl.plot_controls.auto_x_cb.isChecked()
-        ay_auto = self.top_ctrl.plot_controls.auto_y_cb.isChecked()
-        for t, p in self._plot_buffer:
-            self.pressure_plot_widget.update_plot(t, p, ax_auto, ay_auto)
-        # clear the buffer
-        self._plot_buffer.clear()
 
     def _update_recording_actions_enable_state(self):
         serial_ready = (
@@ -623,7 +606,7 @@ class MainWindow(QMainWindow):
                 video_ext=video_ext,
                 video_codec=codec,
             )
-            if not self.trial_recorder.is_recording_active:
+            if not self.trial_recorder.is_recording:
                 raise RuntimeError("Recorder failed to start.")
         except Exception as e:
             log.exception("Failed to initialize TrialRecorder.")

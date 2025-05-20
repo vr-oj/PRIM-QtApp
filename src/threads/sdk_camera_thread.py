@@ -11,7 +11,6 @@ from imagingcontrol4.properties import (
     PropFloat,
     PropEnumeration,
 )
-from imagingcontrol4.ic4exception import IC4Exception
 
 log = logging.getLogger(__name__)
 
@@ -318,17 +317,10 @@ class SDKCameraThread(QThread):
                 self.sink.accept_incomplete_frames = False
             log.info("QueueSink created")
 
-            try:
-                self.grabber.stream_setup(
-                    self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
-                )
-                log.info("Streaming started")
-            except IC4Exception as ex:
-                # timeouts or GenICam errors -> report and exit thread
-                name = ex.code.name if getattr(ex, "code", None) else ""
-                log.warning(f"Stream‐start failed: {name} – {ex}")
-                self.camera_error.emit(str(ex), name)
-                return
+            self.grabber.stream_setup(
+                self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
+            )
+            log.info("Streaming started")
 
             frame_count = 0
             no_data_count = 0

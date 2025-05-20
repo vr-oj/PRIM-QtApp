@@ -8,7 +8,7 @@ PRIM_RESULTS_DIR = os.path.join(DOCUMENTS_DIR, "PRIMalyze Results")
 DEFAULT_VIDEO_EXTENSION = "avi"  # Default format for µManager recorder
 DEFAULT_VIDEO_CODEC = "MJPG"  # Codec used only if extension == "avi"
 SUPPORTED_FORMATS = ["avi", "tif"]  # Dropdown options for recording format
-DEFAULT_FPS = 10  # Camera frames per second target
+DEFAULT_FPS = 20  # Camera frames per second target
 DEFAULT_CAMERA_INDEX = 0  # Default device index for OpenCV
 
 # Frame size fallback (actual size queried from camera at runtime)
