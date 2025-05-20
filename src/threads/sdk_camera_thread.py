@@ -204,30 +204,17 @@ class SDKCameraThread(QThread):
             else:
                 self.actual_qimg_fmt = QImage.Format_Grayscale8
 
-            # Region of interest or full frame
+            # — always full-sensor, offset=(0,0) —
             wp = self.pm.find(PROP_WIDTH)
             hp = self.pm.find(PROP_HEIGHT)
             max_w, max_h = wp.maximum, hp.maximum
-            if (
-                self.desired_width
-                and self.desired_height
-                and self.desired_width <= max_w
-                and self.desired_height <= max_h
-            ):
-                w, h = self.desired_width, self.desired_height
-                off_x = (max_w - w) // 2
-                off_y = (max_h - h) // 2
-                self._set_prop(PROP_WIDTH, w)
-                self._set_prop(PROP_HEIGHT, h)
-                self._set_prop(PROP_OFFSET_X, off_x)
-                self._set_prop(PROP_OFFSET_Y, off_y)
-                log.info(f"ROI: {w}×{h} @ {off_x},{off_y}")
-            else:
+            if self._is_writable(wp):
                 self._set_prop(PROP_WIDTH, max_w)
+            if self._is_writable(hp):
                 self._set_prop(PROP_HEIGHT, max_h)
-                self._set_prop(PROP_OFFSET_X, 0)
-                self._set_prop(PROP_OFFSET_Y, 0)
-                log.info(f"Full-frame: {max_w}×{max_h}")
+            self._set_prop(PROP_OFFSET_X, 0)
+            self._set_prop(PROP_OFFSET_Y, 0)
+            log.info(f"Camera full-sensor configured: {max_w}×{max_h}")
 
             # Continuous free-run
             self._set_prop(PROP_ACQUISITION_MODE, "Continuous")

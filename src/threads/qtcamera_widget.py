@@ -207,9 +207,21 @@ class QtCameraWidget(QWidget):
 
     @pyqtSlot(QImage, object)
     def _on_sdk_frame_received(self, qimg: QImage, frame_data: object):
-        if not qimg.isNull():
-            self.viewfinder.update_frame(qimg)
-            self.frame_ready.emit(qimg, frame_data)
+        if qimg.isNull():
+            return
+
+        # software ROI: if the user has requested a sub-region, crop here
+        x, y, w, h = self._current_roi
+        if w > 0 and h > 0:
+            try:
+                cropped = qimg.copy(x, y, w, h)
+            except Exception:
+                cropped = qimg
+        else:
+            cropped = qimg
+
+        self.viewfinder.update_frame(cropped)
+        self.frame_ready.emit(cropped, frame_data)
 
     @pyqtSlot(str, str)
     def _on_camera_thread_error_received(self, message: str, code: str):
