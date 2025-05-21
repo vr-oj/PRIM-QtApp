@@ -73,8 +73,6 @@ class SDKCameraThread(QThread):
         if not prop or not prop.is_available:
             log.warning(f"Cannot set {name}: property not available")
             return
-
-        # override the readonly guard for exposure/gain controls
         if getattr(prop, "is_readonly", True) and name not in (
             PROP_EXPOSURE_TIME,
             PROP_GAIN,
@@ -82,7 +80,6 @@ class SDKCameraThread(QThread):
         ):
             log.warning(f"Skipping truly read-only prop {name}")
             return
-
         try:
             self.pm.set_value(name, val)
             log.info(f"Set {name} → {val}")
@@ -104,15 +101,13 @@ class SDKCameraThread(QThread):
         if not prop or not prop.is_available:
             log.warning("Auto-exposure property not available")
             return
-
         entry_names = [e.name for e in getattr(prop, "entries", [])]
-        if enable_auto:
-            target = next((e for e in entry_names if "Continuous" in e), None)
-        else:
-            target = next((e for e in entry_names if "Off" in e), None)
-
-        val = target or enable_auto
-        self._set(PROP_EXPOSURE_AUTO, val)
+        target = (
+            next((e for e in entry_names if "Continuous" in e), None)
+            if enable_auto
+            else next((e for e in entry_names if "Off" in e), None)
+        )
+        self._set(PROP_EXPOSURE_AUTO, target or enable_auto)
 
     def run(self):
         self._safe_init()
@@ -130,26 +125,35 @@ class SDKCameraThread(QThread):
                 if not devs:
                     raise RuntimeError("No cameras found")
                 self.device_info = devs[0]
-
             self.grabber.device_open(self.device_info)
+            self.pm = self.grabber.device_property_map
 
-            log.info("=== GenICam property dump BEGIN ===")
-            for prop_name in self.pm.to_dict().keys():
-                prop = self.pm.find(prop_name)
-                if not prop or not prop.is_available:
-                    continue
-                # some props have min/max/value, some are enums or commands
-                info = {
-                    "value": prop.value,
-                    "min": getattr(prop, "minimum", None),
-                    "max": getattr(prop, "maximum", None),
-                    "access": "RW" if not getattr(prop, "is_readonly", True) else "RO",
-                    "type": type(prop.value).__name__,
-                }
-                log.info(f"  {prop_name}: {info}")
-            log.info("=== GenICam property dump END ===")
+            # 2) Dump all available GenICam properties for inspection
+            if self.pm:
+                log.info("=== GenICam property dump BEGIN ===")
+                if hasattr(self.pm, "to_dict"):
+                    for pname, _ in self.pm.to_dict().items():
+                        prop = self.pm.find(pname)
+                        if prop and prop.is_available:
+                            info = {
+                                "value": prop.value,
+                                "min": getattr(prop, "minimum", None),
+                                "max": getattr(prop, "maximum", None),
+                                "access": (
+                                    "RW"
+                                    if not getattr(prop, "is_readonly", True)
+                                    else "RO"
+                                ),
+                                "type": type(prop.value).__name__,
+                            }
+                            log.info(f"  {pname}: {info}")
+                else:
+                    log.warning("PropertyMap has no to_dict(); cannot dump features")
+                log.info("=== GenICam property dump END ===")
+            else:
+                log.error("PropertyMap is None; cannot list GenICam features")
 
-            # 2) GigE optimizations: packet size & throughput limits
+            # 3) GigE optimizations: packet size & throughput limits
             try:
                 psize = self.pm.find("GevSCPSPacketSize")
                 if psize and psize.is_available:
@@ -172,7 +176,7 @@ class SDKCameraThread(QThread):
             except Exception as e:
                 log.warning(f"Could not set throughput limits: {e}")
 
-            # 3) Enumerate controls for UI
+            # 4) Enumerate and emit UI controls
             controls = {}
             exp_prop = self.pm.find(PROP_EXPOSURE_TIME)
             if exp_prop and exp_prop.is_available:
@@ -194,7 +198,6 @@ class SDKCameraThread(QThread):
                         else bool(auto_val)
                     )
                 controls["exposure"] = exp_ctrl
-
             gain_prop = self.pm.find(PROP_GAIN)
             if gain_prop and gain_prop.is_available:
                 controls["gain"] = {
@@ -205,7 +208,7 @@ class SDKCameraThread(QThread):
                 }
             self.camera_properties_updated.emit({"controls": controls})
 
-            # 4) Configure camera settings
+            # 5) Configure camera settings
             self._set(PROP_PIXEL_FORMAT, "Mono8")
             self._set(PROP_WIDTH, self.desired_width)
             self._set(PROP_HEIGHT, self.desired_height)
@@ -216,7 +219,7 @@ class SDKCameraThread(QThread):
             self._set(PROP_ACQUISITION_MODE, "Continuous")
             self._set(PROP_TRIGGER_MODE, "Off")
 
-            # 5) Start streaming
+            # 6) Start streaming
             self.sink = ic4.QueueSink(self.listener)
             self.sink.timeout = 15000
             time.sleep(0.2)
@@ -226,14 +229,13 @@ class SDKCameraThread(QThread):
             )
             log.info("Streaming started—entering acquisition loop")
 
-            # 6) Acquisition loop
+            # 7) Acquisition loop
             while not self._stop:
                 try:
                     buf = self.sink.pop_output_buffer()
                 except ic4.IC4Exception:
                     time.sleep(0.05)
                     continue
-
                 w, h = buf.image_type.width, buf.image_type.height
                 pf = buf.image_type.pixel_format.name
                 if hasattr(buf, "numpy_wrap"):
@@ -264,6 +266,7 @@ class SDKCameraThread(QThread):
                     self.grabber.stream_stop()
                 except Exception:
                     pass
+
             if self.grabber and getattr(self.grabber, "is_device_open", False):
                 try:
                     self.grabber.device_close()
