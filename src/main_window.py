@@ -303,10 +303,10 @@ class MainWindow(QMainWindow):
         tc = self.top_ctrl
         tc.camera_selected.connect(self._handle_camera_selection)
         tc.resolution_selected.connect(self._handle_resolution_selection)
-        tc.exposure_changed.connect(lambda val: self.qt_cam_widget.set_exposure(val))
-        tc.gain_changed.connect(lambda val: self.qt_cam_widget.set_gain(val))
+        tc.exposure_changed.connect(lambda v: self.qt_cam_widget.set_exposure(v))
+        tc.gain_changed.connect(lambda v: self.qt_cam_widget.set_gain(v))
         tc.auto_exposure_toggled.connect(
-            lambda checked: self.qt_cam_widget.set_auto_exposure(checked)
+            lambda b: self.qt_cam_widget.set_auto_exposure(b)
         )
 
         pc = tc.plot_controls

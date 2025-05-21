@@ -15,6 +15,9 @@ PROP_PIXEL_FORMAT = "PixelFormat"
 PROP_ACQUISITION_FRAME_RATE = "AcquisitionFrameRate"
 PROP_ACQUISITION_MODE = "AcquisitionMode"
 PROP_TRIGGER_MODE = "TriggerMode"
+PROP_EXPOSURE_TIME = "ExposureTime"
+PROP_EXPOSURE_AUTO = "ExposureAuto"
+PROP_GAIN = "Gain"
 
 
 class DummySinkListener:
@@ -71,6 +74,32 @@ class SDKCameraThread(QThread):
             log.info(f"Set {name} → {val}")
             self.camera_properties_updated.emit({name: val})
 
+    def update_exposure(self, exposure_us: int):
+        """Called by QtCameraWidget after debouncing."""
+        self._set(PROP_EXPOSURE_TIME, exposure_us)
+
+    def update_gain(self, gain_db: float):
+        """Called by QtCameraWidget after debouncing."""
+        self._set(PROP_GAIN, gain_db)
+
+    def update_auto_exposure(self, enable_auto: bool):
+        """Turn auto-exposure on or off."""
+        prop = self.pm.find(PROP_EXPOSURE_AUTO)
+        if not prop or not prop.is_available or getattr(prop, "is_readonly", True):
+            log.warning("Auto-exposure property not available")
+            return
+
+        # Many cameras expose this as an enum; look for common entry names
+        entry_names = [e.name for e in getattr(prop, "entries", [])]
+        if enable_auto:
+            target = next((e for e in entry_names if "Continuous" in e), None)
+        else:
+            target = next((e for e in entry_names if "Off" in e), None)
+
+        # fallback to boolean if the driver actually expects True/False
+        val = target or enable_auto
+        self._set(PROP_EXPOSURE_AUTO, val)
+
     def run(self):
         self._safe_init()
         self.grabber = ic4.Grabber()
@@ -84,6 +113,45 @@ class SDKCameraThread(QThread):
                 self.device_info = devs[0]
             self.grabber.device_open(self.device_info)
             self.pm = self.grabber.device_property_map
+
+            # --- enumerate exposure & gain caps for the UI ---
+            controls = {}
+
+            # ExposureTime
+            exp_prop = self.pm.find(PROP_EXPOSURE_TIME)
+            if exp_prop and exp_prop.is_available:
+                exp_ctrl = {
+                    "enabled": True,
+                    "min": int(exp_prop.minimum),
+                    "max": int(exp_prop.maximum),
+                    "value": int(exp_prop.value),
+                    "auto_available": False,
+                    "is_auto_on": False,
+                }
+                auto_prop = self.pm.find(PROP_EXPOSURE_AUTO)
+                if auto_prop and auto_prop.is_available:
+                    exp_ctrl["auto_available"] = True
+                    # map current auto value
+                    auto_val = auto_prop.value
+                    exp_ctrl["is_auto_on"] = (
+                        auto_val == "Continuous"
+                        if isinstance(auto_val, str)
+                        else bool(auto_val)
+                    )
+                controls["exposure"] = exp_ctrl
+
+            # Gain
+            gain_prop = self.pm.find(PROP_GAIN)
+            if gain_prop and gain_prop.is_available:
+                controls["gain"] = {
+                    "enabled": True,
+                    "min": float(gain_prop.minimum),
+                    "max": float(gain_prop.maximum),
+                    "value": float(gain_prop.value),
+                }
+
+            # send full controls dict to the UI
+            self.camera_properties_updated.emit({"controls": controls})
 
             # 2) (Optional) emit UI lists
             # -- you can populate resolutions/formats here if needed --
