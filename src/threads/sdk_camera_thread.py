@@ -279,7 +279,7 @@ class SDKCameraThread(QThread):
                 pf_name = pf_val.name
             elif isinstance(pf_val, str):  # If it's already a string
                 pf_name = pf_val
-            else:  # Fallback if it's something unexpected
+            else:  # Fallback if it's something unexpected (e.g. int id of pixel format)
                 pf_name = str(pf_val)
 
             dummy_id = f"current_{w}x{h}_{pf_name.replace(' ','_')}"  # Make a somewhat unique ID
@@ -347,7 +347,7 @@ class SDKCameraThread(QThread):
                             "Device is not open before enumerating video formats."
                         )
 
-                    video_format_descs = self.grabber.video_format_descs
+                    video_format_descs = self.device_info.get_video_format_descs()
                     if not video_format_descs:
                         log.warning(
                             "Camera did not report any video format descriptors. Using fallback."
@@ -440,14 +440,62 @@ class SDKCameraThread(QThread):
 
                 try:
                     log.info(
-                        f"Attempting to set video format to ID: {self.selected_video_format_identifier}"
+                        f"Attempting to set video format using identifier: '{self.selected_video_format_identifier}'"
                     )
-                    self.grabber.video_format = self.selected_video_format_identifier
+                    self.grabber.video_format = (
+                        self.selected_video_format_identifier
+                    )  # This is the 'set' operation
+
+                    # After setting, retrieve the current video format object
+                    current_video_format_object = self.grabber.video_format
+
+                    if hasattr(current_video_format_object, "name") and hasattr(
+                        current_video_format_object, "identifier_string"
+                    ):
+                        log.info(
+                            f"Successfully set and retrieved video format. "
+                            f"Current format name: '{current_video_format_object.name}', "
+                            f"ID: '{current_video_format_object.identifier_string}'"
+                        )
+                        log.info(
+                            f"Current Actual Settings: W={self.pm.find(PROP_WIDTH).value}, "
+                            f"H={self.pm.find(PROP_HEIGHT).value}, "
+                            f"PF='{self.pm.find(PROP_PIXEL_FORMAT).value}'"
+                        )  # PF value might be an enum or string
+                    else:
+                        # This might happen if the set failed and 'current_video_format_object' is still a string or None
+                        log.warning(
+                            f"Video format may not have been set correctly. "
+                            f"Retrieved grabber.video_format type: {type(current_video_format_object)}, value: {current_video_format_object}"
+                        )
+                        # Attempt to log basic properties directly if the format object isn't as expected
+                        log.info(
+                            f"Current Actual Settings (direct query): W={self.pm.find(PROP_WIDTH).value}, "
+                            f"H={self.pm.find(PROP_HEIGHT).value}, "
+                            f"PF='{self.pm.find(PROP_PIXEL_FORMAT).value}'"
+                        )
+
+                    # Determine QImage format based on the actual pixel format
+                    # This logic needs to use the property map value, as video_format object might not directly give simple string
+                    pf_property_value = self.pm.find(PROP_PIXEL_FORMAT).value
+                    current_pf_name_from_prop = pf_property_value
+                    if hasattr(
+                        pf_property_value, "name"
+                    ):  # If it's an enum entry object
+                        current_pf_name_from_prop = pf_property_value.name
+                    elif isinstance(pf_property_value, str):  # If it's already a string
+                        current_pf_name_from_prop = pf_property_value
+                    else:  # Fallback
+                        current_pf_name_from_prop = str(pf_property_value)
+
+                    current_pf_name_lower = current_pf_name_from_prop.lower()
                     log.info(
-                        f"Successfully set video format to: {self.grabber.video_format.name} "
-                        f"(W:{self.pm.find(PROP_WIDTH).value}, H:{self.pm.find(PROP_HEIGHT).value}, "
-                        f"PF:{self.pm.find(PROP_PIXEL_FORMAT).value})"
+                        f"Determining QImage format based on PixelFormat property: '{current_pf_name_lower}'"
                     )
+
+                    if "mono8" in current_pf_name_lower:
+                        self.actual_qimage_format = QImage.Format_Grayscale8
+                    # ... (rest of your pixel format mapping logic) ...
 
                     # Determine QImage format based on the actual pixel format set by the video format
                     current_pf_name = self.pm.find(PROP_PIXEL_FORMAT).value
