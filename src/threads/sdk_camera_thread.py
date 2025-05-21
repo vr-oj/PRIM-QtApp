@@ -184,7 +184,11 @@ class SDKCameraThread(QThread):
         self.camera_video_formats_available.emit(opts)
 
     def run(self):
-        ic4.Library.init()
+        # ensure library is initialized, but ignore “already called”
+        try:
+            ic4.Library.init()
+        except RuntimeError:
+            pass
         self.grabber = ic4.Grabber()
 
         try:
