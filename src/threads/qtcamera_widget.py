@@ -5,6 +5,7 @@ from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot, QTimer
 from PyQt5.QtGui import QImage, QPixmap, QFont
 
 from .sdk_camera_thread import SDKCameraThread
+from .gl_viewfinder import GLViewfinder
 
 log = logging.getLogger(__name__)
 
@@ -17,13 +18,10 @@ class QtCameraWidget(QWidget):
 
     # Signals a copy of the QImage and the original numpy array (if available)
     frame_ready = pyqtSignal(QImage, object)
-
     # Emits list of strings like "WidthxHeight (PixelFormat)"
     camera_resolutions_updated = pyqtSignal(list)
-
     # Emits a dictionary of camera properties and their current states/ranges
     camera_properties_updated = pyqtSignal(dict)
-
     # Emits error message and a string code for the error type
     camera_error = pyqtSignal(str, str)
 
@@ -56,18 +54,9 @@ class QtCameraWidget(QWidget):
         self._gain_timer.setSingleShot(True)
         self._gain_timer.setInterval(100)
         self._gain_timer.timeout.connect(self._apply_pending_gain)
-        # ----------------------------------------------------------------
 
         # viewfinder
-        self.viewfinder = QLabel("No Camera Selected", self)
-        self.viewfinder.setAlignment(Qt.AlignCenter)
-        self.viewfinder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        font = QFont()
-        font.setPointSize(12)
-        self.viewfinder.setFont(font)
-        self.viewfinder.setStyleSheet(
-            "QLabel { background-color : black; color : white; }"
-        )
+        self.viewfinder = GLViewfinder(self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -246,11 +235,9 @@ class QtCameraWidget(QWidget):
 
     @pyqtSlot(QImage, object)
     def _on_sdk_frame_received(self, qimg: QImage, frame_data: object):
-        if self.viewfinder.text() and not qimg.isNull():
-            self.viewfinder.setText("")
+        """Handle new frames: render in GLViewfinder and emit for recording."""
         if qimg and not qimg.isNull():
-            self._last_pixmap = QPixmap.fromImage(qimg)
-            self._update_viewfinder_display()
+            self.viewfinder.update_frame(qimg)
             self.frame_ready.emit(qimg, frame_data)
         else:
             log.warning("Received null QImage from SDK thread.")
