@@ -147,9 +147,6 @@ class QtCameraWidget(QWidget):
         self._camera_thread = SDKCameraThread(
             device_info=self._active_device_info,
             target_fps=self.current_target_fps,
-            desired_width=self.current_width,
-            desired_height=self.current_height,
-            desired_pixel_format=self.current_pixel_format,
             parent=self,
         )
 
