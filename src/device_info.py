@@ -6,13 +6,7 @@ grabber = ic4.Grabber()
 dev = ic4.DeviceEnum.devices()[0]
 grabber.device_open(dev)
 
-di = grabber.device_info
-print("---- DeviceInfo attrs containing 'format' ----")
-for a in sorted(dir(di)):
-    if "format" in a.lower():
-        print(a)
-
-print("\n---- Grabber attrs containing 'format' ----")
-for a in sorted(dir(grabber)):
-    if "format" in a.lower():
-        print(a)
+pm = grabber.device_property_map
+# List any property names containing 'format'
+fmt_props = [prop.name for prop in pm.properties if "format" in prop.name.lower()]
+print("Format-related properties:", fmt_props)
