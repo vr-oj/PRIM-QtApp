@@ -137,6 +137,7 @@ class SDKCameraThread(QThread):
                     f"Initial stream start failed: {ex}. Trying documented fallbacks…"
                 )
                 model = getattr(self.device_info, "model_name", "")
+                # 1) Try documented resolution fallbacks
                 for w, h, maxfps in MODEL_FORMAT_TABLES.get(model, []):
                     if maxfps >= self.target_fps:
                         log.warning(
@@ -159,19 +160,19 @@ class SDKCameraThread(QThread):
                         )
                         break
                 else:
-                    # no documented resolution supports target → clamp to minimum FPS
+                    # 2) No documented resolution fits → clamp to minimum FPS and retry
                     fps_p = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
                     if fps_p and fps_p.is_available:
                         log.warning(
                             "No matching resolution; clamping to min FPS and retrying"
                         )
-                        self._set(PROP_ACQUISITION_FRAME_RATE, fps_p.minimum)
                         try:
                             if self.grabber.is_streaming:
                                 self.grabber.stream_stop()
                                 time.sleep(0.1)
                         except Exception:
                             pass
+                        self._set(PROP_ACQUISITION_FRAME_RATE, fps_p.minimum)
                         self.grabber.stream_setup(
                             self.sink,
                             setup_option=ic4.StreamSetupOption.ACQUISITION_START,
