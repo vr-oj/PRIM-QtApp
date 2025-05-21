@@ -107,6 +107,9 @@ class MainWindow(QMainWindow):
             "Ready. Select camera (if available) and serial port.", 5000
         )
 
+        # set up your initial splitter sizes (e.g. 2/3 : 1/3)
+        QTimer.singleShot(0, self._set_initial_splitter_sizes)
+
         self._set_initial_control_states()
         self._connect_top_control_panel_signals()
         self._connect_camera_widget_signals()
@@ -114,6 +117,14 @@ class MainWindow(QMainWindow):
         # Populate camera list after a short delay
         if hasattr(self.top_ctrl, "camera_controls") and self.top_ctrl.camera_controls:
             QTimer.singleShot(250, self.top_ctrl.camera_controls.populate_camera_list)
+
+    def _set_initial_splitter_sizes(self):
+        # Get the total width of the splitter
+        total = self.main_splitter.size().width()
+        # You can tweak these ratios however you like
+        left = int(total * 0.65)
+        right = total - left
+        self.main_splitter.setSizes([left, right])
 
     def _init_paths_and_icons(self):
         base = os.path.dirname(os.path.abspath(__file__))
