@@ -46,19 +46,12 @@ class DummySinkListener:
 
 class SDKCameraThread(QThread):
     frame_ready = pyqtSignal(QImage, object)
-    camera_resolutions_available = pyqtSignal(
-        list
-    )  # emits List[str] like ["2592×2048", ...]
+    camera_resolutions_available = pyqtSignal(list)  # emits List[str]
     camera_video_formats_available = pyqtSignal(list)
     camera_properties_updated = pyqtSignal(dict)
     camera_error = pyqtSignal(str, str)
 
-    def __init__(
-        self,
-        device_info=None,
-        target_fps: float = 20.0,
-        parent=None,
-    ):
+    def __init__(self, device_info=None, target_fps: float = 20.0, parent=None):
         super().__init__(parent)
         self.device_info = device_info
         self.target_fps = target_fps
@@ -87,6 +80,7 @@ class SDKCameraThread(QThread):
     def run(self):
         self._safe_init()
         self.grabber = ic4.Grabber()
+
         try:
             # 1) Open device
             if not self.device_info:
@@ -100,13 +94,21 @@ class SDKCameraThread(QThread):
             model = getattr(self.device_info, "model_name", "")
             log.info(f"Opened {model}")
 
-            # 2) Emit available resolutions & formats
+            # 2) Emit supported resolutions & formats
             formats = MODEL_FORMAT_TABLES.get(model, [])
             res_list = [f"{w}×{h}" for w, h, _ in formats]
             self.camera_resolutions_available.emit(res_list)
             self.camera_video_formats_available.emit([PROP_PIXEL_FORMAT])
 
-            # 3) Configure pixel format, FPS, mode, trigger
+            # 3) Configure resolution up-front for best chance at starting live
+            for w, h, maxfps in formats:
+                if maxfps >= self.target_fps:
+                    log.info(f"Configuring upfront: {w}×{h} @ {self.target_fps} FPS")
+                    self._set(PROP_WIDTH, w)
+                    self._set(PROP_HEIGHT, h)
+                    break
+
+            # 4) Pixel format, FPS, mode, trigger
             self._set(PROP_PIXEL_FORMAT, "Mono8")
             fps_p = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
             if fps_p and fps_p.is_available:
@@ -117,50 +119,45 @@ class SDKCameraThread(QThread):
             self._set(PROP_ACQUISITION_MODE, "Continuous")
             self._set(PROP_TRIGGER_MODE, "Off")
 
-            # 4) Create sink & attempt to start streaming (with fallbacks)
+            # 5) Create sink & attempt streaming, with full fallbacks
             self.sink = ic4.QueueSink(self.listener)
             self.sink.timeout = 200
-            try:
+
+            def try_start():
                 self.grabber.stream_setup(
                     self.sink,
                     setup_option=ic4.StreamSetupOption.ACQUISITION_START,
                 )
+
+            try:
+                try_start()
             except ic4.IC4Exception as ex:
-                log.warning(f"Initial stream start failed: {ex}; trying fallbacks…")
-                # resolution‐based fallbacks
+                log.warning(f"Initial stream failed: {ex}; trying fallbacks…")
+
                 for w, h, maxfps in formats:
-                    if maxfps >= self.target_fps:
-                        log.warning(
-                            f"{model}: fallback to {w}×{h} @ {self.target_fps} FPS"
-                        )
-                        if self.grabber.is_streaming:
-                            self.grabber.stream_stop()
-                            time.sleep(0.1)
-                        self._set(PROP_WIDTH, w)
-                        self._set(PROP_HEIGHT, h)
-                        self.grabber.stream_setup(
-                            self.sink,
-                            setup_option=ic4.StreamSetupOption.ACQUISITION_START,
-                        )
+                    if maxfps < self.target_fps:
+                        continue
+                    log.warning(f"{model}: fallback to {w}×{h} @ {self.target_fps} FPS")
+                    if self.grabber.is_streaming:
+                        self.grabber.stream_stop()
+                        time.sleep(0.1)
+                    self._set(PROP_WIDTH, w)
+                    self._set(PROP_HEIGHT, h)
+
+                    try:
+                        try_start()
                         break
+                    except ic4.IC4Exception:
+                        log.warning(f"Still no go at {w}×{h}; trying next")
                 else:
-                    # clamp to minimum FPS if no resolution match
-                    if fps_p and fps_p.is_available:
-                        log.warning(
-                            "No matching resolution; clamping to min FPS and retrying"
-                        )
-                        if self.grabber.is_streaming:
-                            self.grabber.stream_stop()
-                            time.sleep(0.1)
-                        self._set(PROP_ACQUISITION_FRAME_RATE, fps_p.minimum)
-                        self.grabber.stream_setup(
-                            self.sink,
-                            setup_option=ic4.StreamSetupOption.ACQUISITION_START,
-                        )
+                    # nothing worked
+                    raise RuntimeError(
+                        "Could not start streaming on any supported resolution"
+                    )
 
             log.info("Streaming started—entering acquisition loop")
 
-            # 5) Acquisition loop
+            # 6) Acquisition loop
             while not self._stop:
                 try:
                     buf = self.sink.pop_output_buffer()
@@ -175,6 +172,7 @@ class SDKCameraThread(QThread):
                 w, h = buf.image_type.width, buf.image_type.height
                 pf = buf.image_type.pixel_format.name
 
+                # pull out the bytes
                 if hasattr(buf, "numpy_wrap"):
                     arr = buf.numpy_wrap()
                     data = arr.tobytes()
