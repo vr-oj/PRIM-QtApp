@@ -102,11 +102,8 @@ class SDKCameraThread(QThread):
             log.warning("Auto-exposure property not available")
             return
         entry_names = [e.name for e in getattr(prop, "entries", [])]
-        target = (
-            next((e for e in entry_names if "Continuous" in e), None)
-            if enable_auto
-            else next((e for e in entry_names if "Off" in e), None)
-        )
+        target = (next((e for e in entry_names if "Continuous" in e), None)
+                  if enable_auto else next((e for e in entry_names if "Off" in e), None))
         self._set(PROP_EXPOSURE_AUTO, target or enable_auto)
 
     def run(self):
@@ -139,9 +136,7 @@ class SDKCameraThread(QThread):
                             "value": prop.value,
                             "min": getattr(prop, "minimum", None),
                             "max": getattr(prop, "maximum", None),
-                            "access": (
-                                "RW" if not getattr(prop, "is_readonly", True) else "RO"
-                            ),
+                            "access": "RW" if not getattr(prop, "is_readonly", True) else "RO",
                             "type": type(prop.value).__name__,
                         }
                         log.info(f"  {pname}: {info}")
@@ -161,18 +156,12 @@ class SDKCameraThread(QThread):
                                 "value": prop.value,
                                 "min": getattr(prop, "minimum", None),
                                 "max": getattr(prop, "maximum", None),
-                                "access": (
-                                    "RW"
-                                    if not getattr(prop, "is_readonly", True)
-                                    else "RO"
-                                ),
+                                "access": "RW" if not getattr(prop, "is_readonly", True) else "RO",
                                 "type": type(prop.value).__name__,
                             }
                             log.info(f"  {pname}: {info}")
                 else:
-                    log.warning(
-                        "Driver PropertyMap has no to_dict(); cannot dump features"
-                    )
+                    log.warning("Driver PropertyMap has no to_dict(); cannot dump features")
                 log.info("=== End Driver PropertyMap dump ===")
             except Exception as e:
                 log.warning(f"Could not introspect driver_property_map: {e}")
@@ -187,11 +176,7 @@ class SDKCameraThread(QThread):
                                 "value": prop.value,
                                 "min": getattr(prop, "minimum", None),
                                 "max": getattr(prop, "maximum", None),
-                                "access": (
-                                    "RW"
-                                    if not getattr(prop, "is_readonly", True)
-                                    else "RO"
-                                ),
+                                "access": "RW" if not getattr(prop, "is_readonly", True) else "RO",
                                 "type": type(prop.value).__name__,
                             }
                             log.info(f"  {pname}: {info}")
@@ -241,9 +226,7 @@ class SDKCameraThread(QThread):
                     exp_ctrl["auto_available"] = True
                     auto_val = auto_prop.value
                     exp_ctrl["is_auto_on"] = (
-                        auto_val == "Continuous"
-                        if isinstance(auto_val, str)
-                        else bool(auto_val)
+                        auto_val == "Continuous" if isinstance(auto_val, str) else bool(auto_val)
                     )
                 controls["exposure"] = exp_ctrl
             gain_prop = self.pm.find(PROP_GAIN)
@@ -268,16 +251,19 @@ class SDKCameraThread(QThread):
             self._set(PROP_TRIGGER_MODE, "Off")
 
             # 6) Start streaming
-            self.sink = ic4.QueueSink(self.listener)
-            self.sink.timeout = 15000
-            time.sleep(0.2)
-            self.grabber.stream_setup(
-                self.sink,
-                setup_option=ic4.StreamSetupOption.ACQUISITION_START,
-            )
-            log.info("Streaming started—entering acquisition loop")
+            # Use a callback-style SnapSink instead of QueueSink to mimic IC Capture's C++ sink
+            self.sink = ic4.SnapSink(self.listener)
+            # negotiate stream buffers (no timeout needed for SnapSink)
+            self.grabber.stream_setup(self.sink)
+            # start acquisition explicitly via Grabber API
+            self.grabber.acquisition_start()
+            log.info("SnapSink streaming started via Grabber.acquisition_start()")
 
             # 7) Acquisition loop
+            while not self._stop:
+                try:
+                    buf = self.sink.pop_output_buffer()
+
             while not self._stop:
                 try:
                     buf = self.sink.pop_output_buffer()
@@ -294,9 +280,7 @@ class SDKCameraThread(QThread):
                     pitch = getattr(buf, "pitch", w * buf.image_type.bytes_per_pixel)
                     data = ctypes.string_at(buf.pointer, pitch * h)
                     stride = pitch
-                fmt = (
-                    QImage.Format_Grayscale8 if "Mono8" in pf else QImage.Format_RGB888
-                )
+                fmt = QImage.Format_Grayscale8 if "Mono8" in pf else QImage.Format_RGB888
                 img = QImage(data, w, h, stride, fmt)
                 if not img.isNull():
                     self.frame_ready.emit(img, data)
@@ -314,7 +298,7 @@ class SDKCameraThread(QThread):
                     self.grabber.stream_stop()
                 except Exception:
                     pass
-
+                    
             if self.grabber and getattr(self.grabber, "is_device_open", False):
                 try:
                     self.grabber.device_close()
