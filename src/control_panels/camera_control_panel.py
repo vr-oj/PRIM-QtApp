@@ -279,6 +279,32 @@ class CameraControlPanel(QGroupBox):
             self.exposure_slider.blockSignals(False)
             self.exposure_spinbox.blockSignals(False)
 
+        # Gain changed in the thread
+        if "Gain" in props:
+            g = float(props["Gain"])
+            # mirror back into the UI
+            self.gain_spinbox.blockSignals(True)
+            self.gain_slider.blockSignals(True)
+
+            # spinbox already has correct range
+            self.gain_spinbox.setValue(g)
+
+            # recompute slider position on your 0–1000 scale
+            min_g, max_g = self.gain_spinbox.minimum(), self.gain_spinbox.maximum()
+            smin, smax = self.gain_slider.minimum(), self.gain_slider.maximum()
+            if max_g > min_g:
+                pos = int((g - min_g) / (max_g - min_g) * (smax - smin))
+            else:
+                pos = smin
+            self.gain_slider.setValue(max(smin, min(pos, smax)))
+
+            # ensure gain controls stay enabled
+            self.gain_spinbox.setEnabled(True)
+            self.gain_slider.setEnabled(True)
+
+            self.gain_spinbox.blockSignals(False)
+            self.gain_slider.blockSignals(False)
+
     def _on_exposure_slider_changed(self, v):
         self.exposure_spinbox.blockSignals(True)
         self.exposure_spinbox.setValue(v)
