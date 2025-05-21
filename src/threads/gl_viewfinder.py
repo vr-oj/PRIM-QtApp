@@ -1,7 +1,7 @@
 # gl_viewfinder.py
 import sys
 from PyQt5.QtWidgets import QOpenGLWidget
-from PyQt5.QtCore import QSize, Qt
+from PyQt5.QtCore import QSize
 from PyQt5.QtGui import (
     QImage,
     QOpenGLTexture,
@@ -9,6 +9,7 @@ from PyQt5.QtGui import (
     QOpenGLBuffer,
     QOpenGLVertexArrayObject,
 )
+from OpenGL import GL
 
 
 class GLViewfinder(QOpenGLWidget):
@@ -20,39 +21,35 @@ class GLViewfinder(QOpenGLWidget):
         self.prog = None
         self.vao = None
         self.vbo = None
-        self.ctx = None
 
     def initializeGL(self):
-        # Acquire GL function pointers
-        self.ctx = self.context().functions()
-
-        # Shader program setup (vertex + fragment)
+        # Shader program setup (compile & link yourself)
         self.prog = QOpenGLShaderProgram(self)
-        # TODO: compile & link shaders
+        # TODO: compile vertex & fragment shaders into self.prog
 
-        # Vertex Array & Buffer init
+        # VAO & VBO setup
         self.vao = QOpenGLVertexArrayObject(self)
         self.vao.create()
         self.vbo = QOpenGLBuffer(QOpenGLBuffer.VertexBuffer)
         self.vbo.create()
-        # TODO: bind VBO, upload vertices, configure attributes
+        # TODO: bind VBO, upload vertex data, configure attributes
 
-        # Clear color
-        self.ctx.glClearColor(0.0, 0.0, 0.0, 1.0)
+        # Set clear color
+        GL.glClearColor(0.0, 0.0, 0.0, 1.0)
 
     def update_frame(self, qimg: QImage):
         """
-        Store the incoming QImage (converted to RGBA8888) for GPU upload.
+        Store the incoming frame as a QImage for GPU upload in paintGL().
         """
         if qimg.isNull():
             return
-        # Convert once for consistency
+        # Convert once for consistent GPU format
         self._pending_qimg = qimg.convertToFormat(QImage.Format_RGBA8888)
         self._img_size = self._pending_qimg.size()
-        self.update()  # trigger paintGL
+        self.update()  # triggers paintGL
 
     def paintGL(self):
-        if not self._pending_qimg:
+        if self._pending_qimg is None:
             return
 
         w, h = self._img_size.width(), self._img_size.height()
@@ -64,7 +61,7 @@ class GLViewfinder(QOpenGLWidget):
             self._texture.setMinificationFilter(QOpenGLTexture.Linear)
             self._texture.setMagnificationFilter(QOpenGLTexture.Linear)
 
-        # Bind and (re)allocate storage if size/format changed
+        # Bind & allocate if dimensions or format changed
         self._texture.bind()
         current_format = QOpenGLTexture.RGBA8_UNorm
         if (
@@ -74,27 +71,28 @@ class GLViewfinder(QOpenGLWidget):
         ):
             self._texture.setSize(w, h)
             self._texture.setFormat(current_format)
-            self._texture.allocateStorage(QOpenGLTexture.RGBA, QOpenGLTexture.UInt8)
+            self._texture.allocateStorage(
+                QOpenGLTexture.RGBA,
+                QOpenGLTexture.UInt8,
+            )
 
-        # Upload the QImage
+        # Upload the image data (no mipmaps)
         self._texture.setData(
             self._pending_qimg,
             QOpenGLTexture.MipMapGeneration.NoMipmapGeneration,
         )
-        # Clear pending image
         self._pending_qimg = None
 
-        # Clear screen and draw
-        self.ctx.glClear(self.ctx.GL_COLOR_BUFFER_BIT)
+        # Clear and draw
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
         if self.prog and self.vao:
             self.prog.bind()
             self.vao.bind()
-            self.ctx.glDrawArrays(self.ctx.GL_TRIANGLE_STRIP, 0, 4)
+            GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
             self.vao.release()
             self.prog.release()
 
         self._texture.release()
 
     def resizeGL(self, w: int, h: int):
-        if self.ctx:
-            self.ctx.glViewport(0, 0, w, h)
+        GL.glViewport(0, 0, w, h)
