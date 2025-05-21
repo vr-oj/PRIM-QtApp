@@ -91,7 +91,16 @@ class SDKCameraThread(QThread):
             self.grabber.device_open(self.device_info)
             self.pm = self.grabber.device_property_map
             model = getattr(self.device_info, "model_name", "")
-            log.info(f"Opened {model}")
+            # pick the smallest supported resolution (last entry in your list)
+            try:
+                w, h, _ = MODEL_FORMAT_TABLES[model][-1]  # e.g. (640, 480, …)
+                log.info(f"Setting low resolution: {w}×{h}")
+                self._set(PROP_WIDTH, w)
+                self._set(PROP_HEIGHT, h)
+            except (KeyError, IndexError):
+                log.warning(
+                    "No low‐res fallback defined for this model; using defaults"
+                )
 
             # 2) Set pixel format, FPS, continuous & trigger
             self._set(PROP_PIXEL_FORMAT, "Mono8")
