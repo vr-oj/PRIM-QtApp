@@ -75,17 +75,19 @@ class SDKCameraThread(QThread):
             self.camera_properties_updated.emit({name: val})
 
     def update_exposure(self, exposure_us: int):
-        """Called by QtCameraWidget after debouncing."""
+        # make sure manual mode is engaged
+        self.update_auto_exposure(False)
         self._set(PROP_EXPOSURE_TIME, exposure_us)
 
     def update_gain(self, gain_db: float):
-        """Called by QtCameraWidget after debouncing."""
+        # also ensure manual
+        self.update_auto_exposure(False)
         self._set(PROP_GAIN, gain_db)
 
     def update_auto_exposure(self, enable_auto: bool):
         """Turn auto-exposure on or off."""
         prop = self.pm.find(PROP_EXPOSURE_AUTO)
-        if not prop or not prop.is_available or getattr(prop, "is_readonly", True):
+        if not prop or not prop.is_available:
             log.warning("Auto-exposure property not available")
             return
 
