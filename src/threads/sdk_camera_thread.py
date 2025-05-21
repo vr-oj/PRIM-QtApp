@@ -54,8 +54,20 @@ class SDKCameraThread(QThread):
     camera_video_formats_available = pyqtSignal(list)
     camera_error = pyqtSignal(str, str)
 
-    def __init__(self, device_info=None, target_fps=20.0, parent=None):
+    def __init__(
+        self,
+        device_info=None,
+        target_fps: float = 20.0,
+        desired_width: int = None,
+        desired_height: int = None,
+        desired_pixel_format: str = "Mono8",
+        parent=None,
+    ):
         super().__init__(parent)
+
+        # store these so the existing widget calls continue to work:
+        self.device_info = device_info
+        self.target_fps = target_fps
         self.desired_width = desired_width
         self.desired_height = desired_height
         self.desired_pixel_format_str = desired_pixel_format
