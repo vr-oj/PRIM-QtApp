@@ -112,6 +112,26 @@ class SDKCameraThread(QThread):
     def run(self):
         self._safe_init()
         self.grabber = ic4.Grabber()
+
+        log.info("=== Grabber introspection ===")
+        for name in dir(self.grabber):
+            if not name.startswith("_"):
+                log.info(f"  Grabber.{name}")
+        log.info("=== End Grabber introspection ===")
+
+        log.info("=== ic4 module sinks ===")
+        for name in dir(ic4):
+            if "Sink" in name:
+                log.info(f"  ic4.{name}")
+        log.info("=== End ic4 module sinks ===")
+
+        if self.pm:
+            log.info("=== PropertyMap introspection ===")
+            for name in dir(self.pm):
+                if not name.startswith("_"):
+                    log.info(f"  pm.{name}")
+            log.info("=== End PropertyMap introspection ===")
+
         # Give grabber extended timeout for AcquisitionStart
         try:
             self.grabber.set_timeout(10000)
