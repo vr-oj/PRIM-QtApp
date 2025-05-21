@@ -1,3 +1,4 @@
+# sdk_camera_thread.py
 import logging
 import time
 import ctypes
@@ -73,13 +74,13 @@ class SDKCameraThread(QThread):
             log.warning(f"Cannot set {name}: property not available")
             return
 
-        # override the readonly guard for our three controls:
+        # override the readonly guard for exposure/gain controls
         if getattr(prop, "is_readonly", True) and name not in (
             PROP_EXPOSURE_TIME,
             PROP_GAIN,
             PROP_EXPOSURE_AUTO,
         ):
-            log.warning(f"Skipping truly read‐only prop {name}")
+            log.warning(f"Skipping truly read-only prop {name}")
             return
 
         try:
@@ -90,12 +91,10 @@ class SDKCameraThread(QThread):
             log.error(f"Failed to write {name}: {e}")
 
     def update_exposure(self, exposure_us: int):
-        # ensure manual mode first
         self._set(PROP_EXPOSURE_AUTO, False)
         self._set(PROP_EXPOSURE_TIME, exposure_us)
 
     def update_gain(self, gain_db: float):
-        # switch off auto‐exposure so gain writes are honored
         self._set(PROP_EXPOSURE_AUTO, False)
         self._set(PROP_GAIN, gain_db)
 
@@ -106,27 +105,23 @@ class SDKCameraThread(QThread):
             log.warning("Auto-exposure property not available")
             return
 
-        # Many cameras expose this as an enum; look for common entry names
         entry_names = [e.name for e in getattr(prop, "entries", [])]
         if enable_auto:
             target = next((e for e in entry_names if "Continuous" in e), None)
         else:
             target = next((e for e in entry_names if "Off" in e), None)
 
-        # fallback to boolean if the driver actually expects True/False
         val = target or enable_auto
         self._set(PROP_EXPOSURE_AUTO, val)
 
     def run(self):
         self._safe_init()
         self.grabber = ic4.Grabber()
-        # give the grabber up to 5 seconds to negotiate AcquisitionStart
+        # Give grabber extended timeout for AcquisitionStart
         try:
-            # some versions expose a setter...
-            self.grabber.set_timeout(5000)
+            self.grabber.set_timeout(10000)
         except AttributeError:
-            # ...others use a property
-            self.grabber.timeout = 5000
+            self.grabber.timeout = 10000
 
         try:
             # 1) Open camera
@@ -135,23 +130,35 @@ class SDKCameraThread(QThread):
                 if not devs:
                     raise RuntimeError("No cameras found")
                 self.device_info = devs[0]
+
             self.grabber.device_open(self.device_info)
             self.pm = self.grabber.device_property_map
-            # --- GigE optimization: set packet size to max (e.g. 8228) ---
+
+            # 2) GigE optimizations: packet size & throughput limits
             try:
-                psize_prop = self.pm.find("GevSCPSPacketSize")
-                if psize_prop and psize_prop.is_available:
-                    # use the lesser of max supported and typical jumbo frame size
-                    jumbo = min(int(psize_prop.maximum), 8228)
+                psize = self.pm.find("GevSCPSPacketSize")
+                if psize and psize.is_available:
+                    jumbo = min(int(psize.maximum), 8228)
                     self.pm.set_value("GevSCPSPacketSize", jumbo)
-                    log.info(f"Optimized packet size set to {jumbo}")
+                    log.info(f"Packet size set to {jumbo}")
             except Exception as e:
                 log.warning(f"Could not set GevSCPSPacketSize: {e}")
 
-            # --- enumerate exposure & gain caps for the UI ---
-            controls = {}
+            try:
+                dlm = self.pm.find("DeviceLinkThroughputLimitMode")
+                if dlm and dlm.is_available:
+                    self.pm.set_value("DeviceLinkThroughputLimitMode", "Off")
+                    log.info("Disabled throughput limit mode")
+                dll = self.pm.find("DeviceLinkThroughputLimit")
+                if dll and dll.is_available:
+                    max_limit = int(dll.maximum)
+                    self.pm.set_value("DeviceLinkThroughputLimit", max_limit)
+                    log.info(f"Throughput limit set to {max_limit}")
+            except Exception as e:
+                log.warning(f"Could not set throughput limits: {e}")
 
-            # ExposureTime
+            # 3) Enumerate controls for UI
+            controls = {}
             exp_prop = self.pm.find(PROP_EXPOSURE_TIME)
             if exp_prop and exp_prop.is_available:
                 exp_ctrl = {
@@ -165,7 +172,6 @@ class SDKCameraThread(QThread):
                 auto_prop = self.pm.find(PROP_EXPOSURE_AUTO)
                 if auto_prop and auto_prop.is_available:
                     exp_ctrl["auto_available"] = True
-                    # map current auto value
                     auto_val = auto_prop.value
                     exp_ctrl["is_auto_on"] = (
                         auto_val == "Continuous"
@@ -174,7 +180,6 @@ class SDKCameraThread(QThread):
                     )
                 controls["exposure"] = exp_ctrl
 
-            # Gain
             gain_prop = self.pm.find(PROP_GAIN)
             if gain_prop and gain_prop.is_available:
                 controls["gain"] = {
@@ -183,41 +188,30 @@ class SDKCameraThread(QThread):
                     "max": float(gain_prop.maximum),
                     "value": float(gain_prop.value),
                 }
-
-            # send full controls dict to the UI
             self.camera_properties_updated.emit({"controls": controls})
 
-            # 2) (Optional) emit UI lists
-            # -- you can populate resolutions/formats here if needed --
-
-            # 3) Configure exactly what worked in test_ic4.py
+            # 4) Configure camera settings
             self._set(PROP_PIXEL_FORMAT, "Mono8")
             self._set(PROP_WIDTH, self.desired_width)
             self._set(PROP_HEIGHT, self.desired_height)
-
             fps_prop = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
             if fps_prop and fps_prop.is_available:
-                # clamp between min and max
                 tgt = max(fps_prop.minimum, min(self.target_fps, fps_prop.maximum))
                 self._set(PROP_ACQUISITION_FRAME_RATE, tgt)
-
             self._set(PROP_ACQUISITION_MODE, "Continuous")
             self._set(PROP_TRIGGER_MODE, "Off")
 
-            # 4) Start streaming
+            # 5) Start streaming
             self.sink = ic4.QueueSink(self.listener)
-            self.sink.timeout = 15000  # 15 s
-
-            # a brief pause lets the camera apply settings
+            self.sink.timeout = 15000
             time.sleep(0.2)
-
             self.grabber.stream_setup(
                 self.sink,
                 setup_option=ic4.StreamSetupOption.ACQUISITION_START,
             )
             log.info("Streaming started—entering acquisition loop")
 
-            # 5) Acquisition loop
+            # 6) Acquisition loop
             while not self._stop:
                 try:
                     buf = self.sink.pop_output_buffer()
@@ -225,10 +219,8 @@ class SDKCameraThread(QThread):
                     time.sleep(0.05)
                     continue
 
-                # build a QImage directly from the buffer
                 w, h = buf.image_type.width, buf.image_type.height
                 pf = buf.image_type.pixel_format.name
-
                 if hasattr(buf, "numpy_wrap"):
                     arr = buf.numpy_wrap()
                     data = arr.tobytes()
@@ -237,13 +229,11 @@ class SDKCameraThread(QThread):
                     pitch = getattr(buf, "pitch", w * buf.image_type.bytes_per_pixel)
                     data = ctypes.string_at(buf.pointer, pitch * h)
                     stride = pitch
-
                 fmt = (
                     QImage.Format_Grayscale8 if "Mono8" in pf else QImage.Format_RGB888
                 )
                 img = QImage(data, w, h, stride, fmt)
                 if not img.isNull():
-                    # emit the QImage directly
                     self.frame_ready.emit(img, data)
 
             log.info("Acquisition loop exited")
@@ -257,11 +247,11 @@ class SDKCameraThread(QThread):
             if self.grabber and getattr(self.grabber, "is_streaming", False):
                 try:
                     self.grabber.stream_stop()
-                except:
+                except Exception:
                     pass
             if self.grabber and getattr(self.grabber, "is_device_open", False):
                 try:
                     self.grabber.device_close()
-                except:
+                except Exception:
                     pass
             log.info("Camera thread stopped")
