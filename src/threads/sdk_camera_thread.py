@@ -46,7 +46,9 @@ class DummySinkListener:
 
 class SDKCameraThread(QThread):
     frame_ready = pyqtSignal(QImage, object)
-    camera_resolutions_available = pyqtSignal(list)  # now emits List[str]
+    camera_resolutions_available = pyqtSignal(
+        list
+    )  # emits List[str] like ["2592×2048", ...]
     camera_video_formats_available = pyqtSignal(list)
     camera_properties_updated = pyqtSignal(dict)
     camera_error = pyqtSignal(str, str)
@@ -80,14 +82,13 @@ class SDKCameraThread(QThread):
         if p and p.is_available and not getattr(p, "is_readonly", True):
             self.pm.set_value(name, val)
             log.info(f"Set {name} → {val}")
-            # notify UI of property change
             self.camera_properties_updated.emit({name: val})
 
     def run(self):
         self._safe_init()
         self.grabber = ic4.Grabber()
         try:
-            # Open the camera
+            # 1) Open device
             if not self.device_info:
                 devs = ic4.DeviceEnum.devices()
                 if not devs:
@@ -99,32 +100,26 @@ class SDKCameraThread(QThread):
             model = getattr(self.device_info, "model_name", "")
             log.info(f"Opened {model}")
 
-            # Emit supported resolutions as strings "WxH"
+            # 2) Emit available resolutions & formats
             formats = MODEL_FORMAT_TABLES.get(model, [])
             res_list = [f"{w}×{h}" for w, h, _ in formats]
             self.camera_resolutions_available.emit(res_list)
-            # we only support Mono8 for now
             self.camera_video_formats_available.emit([PROP_PIXEL_FORMAT])
 
-            # Choose PixelFormat = Mono8
+            # 3) Configure pixel format, FPS, mode, trigger
             self._set(PROP_PIXEL_FORMAT, "Mono8")
-
-            # Clamp FPS into the camera’s real limits
             fps_p = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
             if fps_p and fps_p.is_available:
                 mn, mx = fps_p.minimum, fps_p.maximum
                 tgt = max(mn, min(self.target_fps, mx))
                 self._set(PROP_ACQUISITION_FRAME_RATE, tgt)
 
-            # Continuous streaming
             self._set(PROP_ACQUISITION_MODE, "Continuous")
             self._set(PROP_TRIGGER_MODE, "Off")
 
-            # Set up the sink
+            # 4) Create sink & attempt to start streaming (with fallbacks)
             self.sink = ic4.QueueSink(self.listener)
             self.sink.timeout = 200
-
-            # Try to start streaming, with fallbacks on failure
             try:
                 self.grabber.stream_setup(
                     self.sink,
@@ -132,7 +127,7 @@ class SDKCameraThread(QThread):
                 )
             except ic4.IC4Exception as ex:
                 log.warning(f"Initial stream start failed: {ex}; trying fallbacks…")
-                # fallback: pick a resolution with enough FPS
+                # resolution‐based fallbacks
                 for w, h, maxfps in formats:
                     if maxfps >= self.target_fps:
                         log.warning(
@@ -149,7 +144,7 @@ class SDKCameraThread(QThread):
                         )
                         break
                 else:
-                    # no match → clamp to minimum FPS and retry
+                    # clamp to minimum FPS if no resolution match
                     if fps_p and fps_p.is_available:
                         log.warning(
                             "No matching resolution; clamping to min FPS and retrying"
@@ -165,7 +160,7 @@ class SDKCameraThread(QThread):
 
             log.info("Streaming started—entering acquisition loop")
 
-            # Acquisition loop
+            # 5) Acquisition loop
             while not self._stop:
                 try:
                     buf = self.sink.pop_output_buffer()
@@ -180,7 +175,6 @@ class SDKCameraThread(QThread):
                 w, h = buf.image_type.width, buf.image_type.height
                 pf = buf.image_type.pixel_format.name
 
-                # get raw bytes
                 if hasattr(buf, "numpy_wrap"):
                     arr = buf.numpy_wrap()
                     data = arr.tobytes()
