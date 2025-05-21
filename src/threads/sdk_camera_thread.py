@@ -112,26 +112,6 @@ class SDKCameraThread(QThread):
     def run(self):
         self._safe_init()
         self.grabber = ic4.Grabber()
-
-        log.info("=== Grabber introspection ===")
-        for name in dir(self.grabber):
-            if not name.startswith("_"):
-                log.info(f"  Grabber.{name}")
-        log.info("=== End Grabber introspection ===")
-
-        log.info("=== ic4 module sinks ===")
-        for name in dir(ic4):
-            if "Sink" in name:
-                log.info(f"  ic4.{name}")
-        log.info("=== End ic4 module sinks ===")
-
-        if self.pm:
-            log.info("=== PropertyMap introspection ===")
-            for name in dir(self.pm):
-                if not name.startswith("_"):
-                    log.info(f"  pm.{name}")
-            log.info("=== End PropertyMap introspection ===")
-
         # Give grabber extended timeout for AcquisitionStart
         try:
             self.grabber.set_timeout(10000)
@@ -149,6 +129,54 @@ class SDKCameraThread(QThread):
             self.pm = self.grabber.device_property_map
 
             # 2) Dump all available GenICam properties for inspection
+            #    including both device and driver property maps for USB3Vision features
+            log.info("=== Device PropertyMap dump ===")
+            if self.pm and hasattr(self.pm, "to_dict"):
+                for pname in self.pm.to_dict().keys():
+                    prop = self.pm.find(pname)
+                    if prop and prop.is_available:
+                        info = {
+                            "value": prop.value,
+                            "min": getattr(prop, "minimum", None),
+                            "max": getattr(prop, "maximum", None),
+                            "access": (
+                                "RW" if not getattr(prop, "is_readonly", True) else "RO"
+                            ),
+                            "type": type(prop.value).__name__,
+                        }
+                        log.info(f"  {pname}: {info}")
+            else:
+                log.warning("Device PropertyMap has no to_dict(); cannot dump features")
+            log.info("=== End Device PropertyMap dump ===")
+
+            # Also check the driver-level PropertyMap for more low-level features
+            try:
+                dpm = self.grabber.driver_property_map
+                log.info("=== Driver PropertyMap dump ===")
+                if hasattr(dpm, "to_dict"):
+                    for pname in dpm.to_dict().keys():
+                        prop = dpm.find(pname)
+                        if prop and prop.is_available:
+                            info = {
+                                "value": prop.value,
+                                "min": getattr(prop, "minimum", None),
+                                "max": getattr(prop, "maximum", None),
+                                "access": (
+                                    "RW"
+                                    if not getattr(prop, "is_readonly", True)
+                                    else "RO"
+                                ),
+                                "type": type(prop.value).__name__,
+                            }
+                            log.info(f"  {pname}: {info}")
+                else:
+                    log.warning(
+                        "Driver PropertyMap has no to_dict(); cannot dump features"
+                    )
+                log.info("=== End Driver PropertyMap dump ===")
+            except Exception as e:
+                log.warning(f"Could not introspect driver_property_map: {e}")
+
             if self.pm:
                 log.info("=== GenICam property dump BEGIN ===")
                 if hasattr(self.pm, "to_dict"):
