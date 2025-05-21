@@ -77,7 +77,7 @@ class SDKCameraThread(QThread):
             log.info(f"Set {name} → {val}")
             self.camera_properties_updated.emit({name: val})
 
-        def run(self):
+    def run(self):
         self._safe_init()
         self.grabber = ic4.Grabber()
 
@@ -114,7 +114,9 @@ class SDKCameraThread(QThread):
                     setup_option=ic4.StreamSetupOption.ACQUISITION_START,
                 )
             except ic4.IC4Exception as ex:
-                log.warning(f"Initial stream failed: {ex}; clamping to min FPS and retrying")
+                log.warning(
+                    f"Initial stream failed: {ex}; clamping to min FPS and retrying"
+                )
                 # fallback: clamp to minimum FPS
                 if fps_p and fps_p.is_available:
                     self.grabber.stream_stop()
@@ -151,7 +153,9 @@ class SDKCameraThread(QThread):
                     data = ctypes.string_at(buf.pointer, pitch * h)
                     stride = pitch
 
-                fmt = QImage.Format_Grayscale8 if "Mono8" in pf else QImage.Format_RGB888
+                fmt = (
+                    QImage.Format_Grayscale8 if "Mono8" in pf else QImage.Format_RGB888
+                )
                 img = QImage(data, w, h, stride, fmt)
                 if not img.isNull():
                     self.frame_ready.emit(img.copy(), data)
@@ -165,10 +169,13 @@ class SDKCameraThread(QThread):
         finally:
             log.info("Cleaning up camera thread")
             if self.grabber and getattr(self.grabber, "is_streaming", False):
-                try: self.grabber.stream_stop()
-                except: pass
+                try:
+                    self.grabber.stream_stop()
+                except:
+                    pass
             if self.grabber and getattr(self.grabber, "is_device_open", False):
-                try: self.grabber.device_close()
-                except: pass
+                try:
+                    self.grabber.device_close()
+                except:
+                    pass
             log.info("Camera thread stopped")
-
