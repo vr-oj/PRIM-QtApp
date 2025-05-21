@@ -193,71 +193,91 @@ class CameraControlPanel(QGroupBox):
     @pyqtSlot(dict)
     def update_camera_properties_ui(self, props: dict):
         """
-        Enables/disables and updates the Exposure & Gain controls based on
-        the 'controls' dict coming from the camera thread.
+        – Full rebuild when we get the 'controls' dict
+        – Partial updates for ExposureAuto and ExposureTime
         """
-        if "controls" not in props:
-            return
-        log.debug(f"CameraControlPanel updating UI from CONTROLS: {props['controls']}")
-        controls = props["controls"]
+        # 1) Full controls payload
+        if "controls" in props:
+            controls = props["controls"]
+            exp = controls.get("exposure", {})
+            gain = controls.get("gain", {})
 
-        # Exposure
-        exp = controls.get("exposure", {})
-        exp_enabled = exp.get("enabled", False)
-        exp_auto = exp.get("is_auto_on", False)
-        self.exposure_slider.blockSignals(True)
-        self.exposure_spinbox.blockSignals(True)
-        self.auto_exposure_cb.blockSignals(True)
-
-        self.auto_exposure_cb.setEnabled(exp.get("auto_available", False))
-        self.auto_exposure_cb.setChecked(exp_auto)
-
-        if exp_enabled:
-            min_e, max_e = int(exp.get("min", 0)), int(exp.get("max", 100000))
+            # Exposure
+            exp_enabled = exp.get("enabled", False)
+            exp_auto = exp.get("is_auto_on", False)
+            min_e, max_e = int(exp.get("min", 0)), int(exp.get("max", 0))
             val_e = int(exp.get("value", min_e))
+
+            # configure slider/spinbox ranges + values
+            self.exposure_slider.blockSignals(True)
+            self.exposure_spinbox.blockSignals(True)
+            self.auto_exposure_cb.blockSignals(True)
+
+            self.auto_exposure_cb.setEnabled(exp.get("auto_available", False))
+            self.auto_exposure_cb.setChecked(exp_auto)
+
             self.exposure_slider.setRange(min_e, max_e)
             self.exposure_slider.setValue(val_e)
             self.exposure_spinbox.setRange(min_e, max_e)
             self.exposure_spinbox.setValue(val_e)
-        self.exposure_slider.setEnabled(exp_enabled and not exp_auto)
-        self.exposure_spinbox.setEnabled(exp_enabled and not exp_auto)
 
-        self.exposure_slider.blockSignals(False)
-        self.exposure_spinbox.blockSignals(False)
-        self.auto_exposure_cb.blockSignals(False)
+            # only enable manual controls when not in auto
+            self.exposure_slider.setEnabled(exp_enabled and not exp_auto)
+            self.exposure_spinbox.setEnabled(exp_enabled and not exp_auto)
 
-        # Gain
-        gain = controls.get("gain", {})
-        gain_enabled = gain.get("enabled", False)
-        self.gain_slider.blockSignals(True)
-        self.gain_spinbox.blockSignals(True)
+            self.exposure_slider.blockSignals(False)
+            self.exposure_spinbox.blockSignals(False)
+            self.auto_exposure_cb.blockSignals(False)
 
-        if gain_enabled:
-            min_g, max_g = float(gain.get("min", 0.0)), float(gain.get("max", 30.0))
+            # Gain (unchanged)
+            gain_enabled = gain.get("enabled", False)
+            min_g, max_g = float(gain.get("min", 0.0)), float(gain.get("max", 0.0))
             val_g = float(gain.get("value", min_g))
+
+            self.gain_spinbox.blockSignals(True)
+            self.gain_slider.blockSignals(True)
+
+            # set the spinbox
             self.gain_spinbox.setRange(min_g, max_g)
             self.gain_spinbox.setValue(val_g)
 
-            # map float→slider
-            s_min, s_max = self.gain_slider.minimum(), self.gain_slider.maximum()
-            if s_max == s_min:
-                self.gain_slider.setRange(0, 1000)
-                s_min, s_max = 0, 1000
+            # map spinbox→slider
+            smin, smax = 0, 1000
+            self.gain_slider.setRange(smin, smax)
             pos = (
-                int((val_g - min_g) / (max_g - min_g) * (s_max - s_min))
+                int((val_g - min_g) / (max_g - min_g) * (smax - smin))
                 if max_g > min_g
-                else s_min
+                else smin
             )
-            self.gain_slider.setValue(max(s_min, min(pos, s_max)))
+            self.gain_slider.setValue(max(smin, min(pos, smax)))
 
-        self.gain_slider.setEnabled(gain_enabled)
-        self.gain_spinbox.setEnabled(gain_enabled)
+            self.gain_spinbox.blockSignals(False)
+            self.gain_slider.blockSignals(False)
 
-        self.gain_slider.blockSignals(False)
-        self.gain_spinbox.blockSignals(False)
+            # Enable the Adjustments tab if either control is available
+            self.tabs.widget(1).setEnabled(exp_enabled or gain_enabled)
+            return
 
-        # Enable the Adjustments tab if either control is available
-        self.tabs.widget(1).setEnabled(exp_enabled or gain_enabled)
+        # 2) Partial updates
+        # ExposureAuto toggled in the thread
+        if "ExposureAuto" in props:
+            auto_on = props["ExposureAuto"] in (True, "Continuous")
+            self.auto_exposure_cb.blockSignals(True)
+            self.auto_exposure_cb.setChecked(auto_on)
+            # re-enable/disable manual exposure
+            self.exposure_slider.setEnabled(not auto_on)
+            self.exposure_spinbox.setEnabled(not auto_on)
+            self.auto_exposure_cb.blockSignals(False)
+
+        # ExposureTime changed in the thread
+        if "ExposureTime" in props:
+            v = int(props["ExposureTime"])
+            self.exposure_slider.blockSignals(True)
+            self.exposure_spinbox.blockSignals(True)
+            self.exposure_slider.setValue(v)
+            self.exposure_spinbox.setValue(v)
+            self.exposure_slider.blockSignals(False)
+            self.exposure_spinbox.blockSignals(False)
 
     def _on_exposure_slider_changed(self, v):
         self.exposure_spinbox.blockSignals(True)
