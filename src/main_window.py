@@ -308,8 +308,6 @@ class MainWindow(QMainWindow):
         tc.auto_exposure_toggled.connect(
             lambda checked: self.qt_cam_widget.set_auto_exposure(checked)
         )
-        tc.roi_changed.connect(self.qt_cam_widget.set_software_roi)
-        tc.roi_reset_requested.connect(self.qt_cam_widget.reset_roi_to_default)
 
         pc = tc.plot_controls
         pc.x_axis_limits_changed.connect(self.pressure_plot_widget.set_manual_x_limits)
