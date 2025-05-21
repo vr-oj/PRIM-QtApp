@@ -69,23 +69,38 @@ class SDKCameraThread(QThread):
 
     def _set(self, name, val):
         prop = self.pm.find(name)
-        if prop and prop.is_available and not getattr(prop, "is_readonly", True):
+        if not prop or not prop.is_available:
+            log.warning(f"Cannot set {name}: property not available")
+            return
+
+        # override the readonly guard for our three controls:
+        if getattr(prop, "is_readonly", True) and name not in (
+            PROP_EXPOSURE_TIME,
+            PROP_GAIN,
+            PROP_EXPOSURE_AUTO,
+        ):
+            log.warning(f"Skipping truly read‐only prop {name}")
+            return
+
+        try:
             self.pm.set_value(name, val)
             log.info(f"Set {name} → {val}")
             self.camera_properties_updated.emit({name: val})
+        except Exception as e:
+            log.error(f"Failed to write {name}: {e}")
 
     def update_exposure(self, exposure_us: int):
-        # make sure manual mode is engaged
-        self.update_auto_exposure(False)
+        # ensure manual mode first
+        self._set(PROP_EXPOSURE_AUTO, False)
         self._set(PROP_EXPOSURE_TIME, exposure_us)
 
     def update_gain(self, gain_db: float):
-        # also ensure manual
-        self.update_auto_exposure(False)
+        # switch off auto‐exposure so gain writes are honored
+        self._set(PROP_EXPOSURE_AUTO, False)
         self._set(PROP_GAIN, gain_db)
 
     def update_auto_exposure(self, enable_auto: bool):
-        log.debug(f"update_auto_exposure called with → {enable_auto}")
+        log.info(f"→ update_auto_exposure({enable_auto}) called")
         prop = self.pm.find(PROP_EXPOSURE_AUTO)
         if not prop or not prop.is_available:
             log.warning("Auto-exposure property not available")
