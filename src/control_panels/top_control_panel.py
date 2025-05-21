@@ -27,8 +27,6 @@ class TopControlPanel(QWidget):
     exposure_changed = pyqtSignal(int)
     gain_changed = pyqtSignal(float)
     auto_exposure_toggled = pyqtSignal(bool)
-    roi_changed = pyqtSignal(int, int, int, int)
-    roi_reset_requested = pyqtSignal()
 
     x_axis_limits_changed = pyqtSignal(float, float)
     y_axis_limits_changed = pyqtSignal(float, float)
@@ -69,8 +67,7 @@ class TopControlPanel(QWidget):
         cc.exposure_changed.connect(self.exposure_changed)
         cc.gain_changed.connect(self.gain_changed)
         cc.auto_exposure_toggled.connect(self.auto_exposure_toggled)
-        cc.roi_changed.connect(self.roi_changed)
-        cc.roi_reset_requested.connect(self.roi_reset_requested)
+        # ROI signals removed
 
         pc = self.plot_controls
         pc.x_axis_limits_changed.connect(self.x_axis_limits_changed)
