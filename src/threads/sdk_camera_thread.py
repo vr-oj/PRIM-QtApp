@@ -67,7 +67,7 @@ class SDKCameraThread(QThread):
     ):
         super().__init__(parent)
 
-        # user-requested parameters
+        # user-requested parameters (we keep them for signature compatibility)
         self.device_info = device_info
         self.target_fps = target_fps
         self.desired_width = desired_width
@@ -94,13 +94,12 @@ class SDKCameraThread(QThread):
         # listener for QueueSink
         self.dummy_listener = DummySinkListener()
 
-        # for video-format selection
         self.selected_video_format_identifier = None
 
     def request_stop(self):
         self._stop_requested = True
 
-    # GUI thread slots
+    # these are called from the GUI thread
     def update_exposure(self, exp_us: int):
         self._pending_exposure_us = float(exp_us)
 
@@ -293,10 +292,11 @@ class SDKCameraThread(QThread):
                 [{"text": display_text, "id": dummy_id}]
             )
 
+            # Also set this as the 'selected' one if no other choice yet
             if not self.selected_video_format_identifier:
                 self.selected_video_format_identifier = dummy_id
                 log.info(
-                    f" Set selected_video_format_identifier to fallback: {dummy_id}"
+                    f"Set selected_video_format_identifier to fallback: {dummy_id}"
                 )
 
         except Exception as e:
@@ -330,48 +330,77 @@ class SDKCameraThread(QThread):
 
             w = w_prop.value
             h = h_prop.value
-            pf_val = pf_prop.value
+            pf_val = pf_prop.value  # This could be an enum object or a string
 
-            pf_name = ""
+            # Robustly get the pixel format name
             if hasattr(pf_val, "name"):
                 pf_name = pf_val.name
             elif isinstance(pf_val, str):
                 pf_name = pf_val
             else:
                 pf_name = str(pf_val)
-                log.warning(
-                    f"PixelFormat value is not standard: {pf_val}. Using str()."
-                )
 
             resolution_string = f"{w}x{h} ({pf_name})"
             self.camera_resolutions_available.emit([resolution_string])
-            log.debug(f"Emitted available resolution: {resolution_string}")
+            log.debug(
+                f"Emitted (old style) available resolution via camera_resolutions_available: {resolution_string}"
+            )
 
         except Exception as e:
             log.warning(
-                f"Could not list resolutions: {e}",
+                f"Could not list resolutions (old style for camera_resolutions_available signal): {e}",
                 exc_info=True,
             )
             self.camera_resolutions_available.emit([])
 
     def _enumerate_video_formats(self):
         """
-        Ask the SDK for its complete VideoFormatDesc list,
-        then emit them as a list of {'id': name, 'text': description}.
+        Attempts to enumerate the camera's supported video formats.
+        On success, emits camera_video_formats_available(list_of_formats).
+        On failure, raises an exception to trigger fallback.
         """
-        try:
-            descs = self.grabber.device_info.video_format_descs
-            options = []
-            for d in descs:
-                min_w, min_h = d.min_size.width, d.min_size.height
-                max_w, max_h = d.max_size.width, d.max_size.height
-                txt = f"{d.name}: {min_w}×{min_h} → {max_w}×{max_h}"
-                options.append({"id": d.name, "text": txt})
-            log.info(f"Discovered {len(options)} video formats")
-            self.camera_video_formats_available.emit(options)
-        except Exception as ex:
-            log.error(f"Failed to enumerate video formats: {ex}", exc_info=True)
-            self.camera_video_formats_available.emit([])
+        log.info("Enumerating video formats")
+        descs = None
+
+        # Try known attribute names on DeviceInfo
+        for attr in ("video_format_descs", "video_format_descriptors", "video_formats"):
+            descs = getattr(self.grabber.device_info, attr, None)
+            if descs is not None:
+                log.info(f"Found video formats via attribute '{attr}'")
+                break
+
+        if descs is None:
+            raise AttributeError(
+                "No video format descriptor attribute found on DeviceInfo"
+            )
+
+        options = []
+        for desc in descs:
+            try:
+                # Python binding: VideoFormatDesc has .image_type attribute
+                img_type = getattr(desc, "image_type", None)
+                if not img_type:
+                    continue
+                w = img_type.width
+                h = img_type.height
+                pf_name = img_type.pixel_format.name
+                text = f"{w}x{h} ({pf_name})"
+                # Identify descriptor: use .identifier or fallback to text
+                identifier = getattr(desc, "identifier", text.replace(" ", "_"))
+                options.append({"text": text, "id": identifier})
+            except Exception as e:
+                log.warning(f"Failed to process video format descriptor: {e}")
+
+        if not options:
+            raise RuntimeError("Video format enumeration returned no entries")
+
+        self.camera_video_formats_available.emit(options)
+        # Default to first if none selected yet
+        if not self.selected_video_format_identifier:
+            self.selected_video_format_identifier = options[0]["id"]
+            log.info(
+                f"Selected video format identifier set to first option: {options[0]['id']}"
+            )
 
     def run(self):
         log.info(
@@ -379,6 +408,7 @@ class SDKCameraThread(QThread):
         )
         self.grabber = ic4.Grabber()
         try:
+            # pick first camera if none given
             if not self.device_info:
                 devs = ic4.DeviceEnum.devices()
                 if not devs:
@@ -393,33 +423,20 @@ class SDKCameraThread(QThread):
             self.pm = self.grabber.device_property_map
             log.info(f"Opened {self.device_info.model_name} successfully.")
 
-            # Enumerate & emit all SDK-defined video formats
-            self._enumerate_video_formats()
+            # === VIDEO FORMAT ENUMERATION (with fallback) ===
+            try:
+                self._enumerate_video_formats()
+            except Exception as e_fmt:
+                log.error(f"Failed to enumerate video formats: {e_fmt}", exc_info=True)
+                self._emit_current_settings_as_format_option()
+            # === END ENUMERATION ===
 
-            # Apply user-selected format if any
-            if self.selected_video_format_identifier:
-                descs = self.grabber.device_info.video_format_descs
-                chosen = next(
-                    (
-                        d
-                        for d in descs
-                        if d.name == self.selected_video_format_identifier
-                    ),
-                    None,
-                )
-                if chosen:
-                    log.info(f"Applying user-selected video format: {chosen.name}")
-                    chosen.create_video_format()
-                else:
-                    log.warning(
-                        f"Selected format ID '{self.selected_video_format_identifier}' not found."
-                    )
-
-            # === Simplified default + FPS clamp setup ===
+            # === TEMPORARY SIMPLIFIED SETUP: USE CAMERA DEFAULTS + CLAMP FPS ===
             log.info(
                 "Attempting simplified setup using camera defaults and FPS clamping."
             )
             try:
+                # Log current state
                 wp = self.pm.find(PROP_WIDTH)
                 hp = self.pm.find(PROP_HEIGHT)
                 pfp = self.pm.find(PROP_PIXEL_FORMAT)
@@ -428,98 +445,94 @@ class SDKCameraThread(QThread):
                 initial_h = hp.value if hp and hp.is_available else "N/A"
                 initial_pf_val = pfp.value if pfp and pfp.is_available else "N/A"
 
-                initial_pf_name = initial_pf_val
-                if hasattr(initial_pf_val, "name"):
-                    initial_pf_name = initial_pf_val.name
-                elif isinstance(initial_pf_val, str):
-                    initial_pf_name = initial_pf_val
-                else:
-                    initial_pf_name = str(initial_pf_val)
+                initial_pf_name = (
+                    initial_pf_val.name
+                    if hasattr(initial_pf_val, "name")
+                    else str(initial_pf_val)
+                )
 
                 log.info(
                     f"Camera default state: W={initial_w}, H={initial_h}, PF='{initial_pf_name}'"
                 )
 
-                current_pf_name_lower = initial_pf_name.lower()
-                if "mono8" in current_pf_name_lower:
+                # Determine QImage format based on this default PixelFormat
+                pf_lower = initial_pf_name.lower()
+                if "mono8" in pf_lower:
                     self.actual_qimage_format = QImage.Format_Grayscale8
                     log.info(
                         f"QImage format set to Grayscale8 for PF: {initial_pf_name}"
                     )
-                elif "bayer" in current_pf_name_lower:
+                elif "bayer" in pf_lower:
                     self.actual_qimage_format = QImage.Format_RGB888
                     log.info(
-                        f"QImage format set for potential RGB (from Bayer PF: {initial_pf_name})"
+                        f"QImage format set to RGB888 for Bayer PF: {initial_pf_name}"
                     )
                 else:
                     log.warning(
-                        f"Default PixelFormat '{initial_pf_name}' not explicitly handled for QImage. Defaulting to Grayscale8."
+                        f"Default PixelFormat '{initial_pf_name}' not explicitly handled. Defaulting to Grayscale8."
                     )
                     self.actual_qimage_format = QImage.Format_Grayscale8
 
+                # Configure FrameRate
                 fps_prop = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
                 desired_fps_to_set = float(self.target_fps)
 
                 if fps_prop and fps_prop.is_available:
-                    try:
-                        min_fps = fps_prop.minimum
-                        max_fps = fps_prop.maximum
-                        log.info(
-                            f"Property '{PROP_ACQUISITION_FRAME_RATE}' valid range (default format): {min_fps:.2f} - {max_fps:.2f} FPS"
+                    min_fps = fps_prop.minimum
+                    max_fps = fps_prop.maximum
+                    log.info(
+                        f"Property '{PROP_ACQUISITION_FRAME_RATE}' valid range (default format): {min_fps:.2f} - {max_fps:.2f} FPS"
+                    )
+
+                    if not (min_fps <= desired_fps_to_set <= max_fps):
+                        log.warning(
+                            f"Desired FPS {desired_fps_to_set:.2f} is out of range ({min_fps:.2f}-{max_fps:.2f})."
                         )
-
-                        if not (min_fps <= desired_fps_to_set <= max_fps):
-                            log.warning(
-                                f"Desired FPS {desired_fps_to_set:.2f} is out of range ({min_fps:.2f}-{max_fps:.2f})."
-                            )
-                            if desired_fps_to_set > max_fps and max_fps > 0:
-                                desired_fps_to_set = max_fps
-                                log.info(
-                                    f"Clamping FPS to maximum: {desired_fps_to_set:.2f}"
-                                )
-                            elif desired_fps_to_set < min_fps:
-                                desired_fps_to_set = min_fps
-                                log.info(
-                                    f"Clamping FPS to minimum: {desired_fps_to_set:.2f}"
-                                )
-
-                        if self._is_prop_writable(fps_prop):
-                            self._set_property_value(
-                                PROP_ACQUISITION_FRAME_RATE, desired_fps_to_set
-                            )
+                        if desired_fps_to_set > max_fps and max_fps > 0:
+                            desired_fps_to_set = max_fps
                             log.info(
-                                f"Actual '{PROP_ACQUISITION_FRAME_RATE}' after setting: {fps_prop.value:.2f}"
+                                f"Clamping FPS to maximum: {desired_fps_to_set:.2f}"
                             )
-                        else:
-                            log.warning(
-                                f"'{PROP_ACQUISITION_FRAME_RATE}' is not writable. Using camera default: {fps_prop.value:.2f} FPS."
+                        elif desired_fps_to_set < min_fps:
+                            desired_fps_to_set = min_fps
+                            log.info(
+                                f"Clamping FPS to minimum: {desired_fps_to_set:.2f}"
                             )
-                    except Exception as e_fps_details:
-                        log.error(
-                            f"Error getting FPS details or setting FPS: {e_fps_details}",
-                            exc_info=True,
+
+                    if self._is_prop_writable(fps_prop):
+                        self._set_property_value(
+                            PROP_ACQUISITION_FRAME_RATE, desired_fps_to_set
+                        )
+                        log.info(
+                            f"Actual '{PROP_ACQUISITION_FRAME_RATE}' after setting: {fps_prop.value:.2f}"
+                        )
+                    else:
+                        log.warning(
+                            f"'{PROP_ACQUISITION_FRAME_RATE}' not writable. Using default: {fps_prop.value:.2f} FPS."
                         )
                 else:
                     log.warning(
-                        f"'{PROP_ACQUISITION_FRAME_RATE}' property not found or not available."
+                        f"'{PROP_ACQUISITION_FRAME_RATE}' property not available."
                     )
 
+                # Other essential settings
                 self._set_property_value(PROP_ACQUISITION_MODE, "Continuous")
                 self._set_property_value(PROP_TRIGGER_MODE, "Off")
 
                 log.info(
-                    f"Camera configured (simplified): W={self.pm.find(PROP_WIDTH).value}, H={self.pm.find(PROP_HEIGHT).value}, "
-                    f"PF='{self.pm.find(PROP_PIXEL_FORMAT).value}', FPS={self.pm.find(PROP_ACQUISITION_FRAME_RATE).value if fps_prop and fps_prop.is_available else 'N/A'}"
+                    f"Camera configured (simplified): W={self.pm.find(PROP_WIDTH).value}, "
+                    f"H={self.pm.find(PROP_HEIGHT).value}, "
+                    f"PF='{self.pm.find(PROP_PIXEL_FORMAT).value}', "
+                    f"FPS={self.pm.find(PROP_ACQUISITION_FRAME_RATE).value if fps_prop and fps_prop.is_available else 'N/A'}"
                 )
 
-            except Exception as e_initial_setup:
+            except Exception as e_initial:
                 log.error(
-                    f"Critical error during simplified camera setup phase: {e_initial_setup}",
+                    f"Critical error during simplified camera setup: {e_initial}",
                     exc_info=True,
                 )
                 self.camera_error.emit(
-                    f"SimplifiedSetupFail: {e_initial_setup}",
-                    type(e_initial_setup).__name__,
+                    f"SimplifiedSetupFail: {e_initial}", type(e_initial).__name__
                 )
                 return
 
@@ -527,6 +540,7 @@ class SDKCameraThread(QThread):
             self._apply_pending_properties()
             self._emit_available_resolutions()
             self._emit_camera_properties()
+            # === SIMPLIFIED CAMERA SETUP LOGIC END ===
 
             # start sink + streaming
             self.sink = ic4.QueueSink(self.dummy_listener)
@@ -545,54 +559,37 @@ class SDKCameraThread(QThread):
 
             while not self._stop_requested:
                 self._apply_pending_properties()
-
                 try:
                     buf = self.sink.pop_output_buffer()
-
                 except ic4.IC4Exception as ex:
-                    if ex.code == ic4.ErrorCode.Timeout:
-                        no_data_count += 1
-                        if no_data_count % 25 == 0:
-                            log.warning(
-                                f"pop_output_buffer timed out ({self.sink.timeout}ms). Total timeouts: {no_data_count}"
-                            )
-                        self.msleep(20)
-                        continue
-
                     name = ex.code.name if getattr(ex, "code", None) else ""
-                    if "NoData" in name or "Time" in name:
+                    if (
+                        ex.code == ic4.ErrorCode.Timeout
+                        or "NoData" in name
+                        or "Time" in name
+                    ):
                         no_data_count += 1
                         if no_data_count % 100 == 0:
                             log.warning(
-                                f"No frames (IC4Exception {name}) for ~{no_data_count*0.05:.1f}s"
+                                f"No frames ({name}) for ~{no_data_count*0.05:.1f}s"
                             )
                         self.msleep(50)
                         continue
-                    log.error(
-                        f"Sink pop failed with IC4Exception: {ex} (Code: {name})",
-                        exc_info=True,
-                    )
+                    log.error(f"Sink pop failed: {ex} (Code: {name})", exc_info=True)
                     self.camera_error.emit(str(ex), name)
                     break
 
-                if buf is None:
+                if not buf or not buf.is_valid:
                     no_data_count += 1
                     if no_data_count % 100 == 0:
                         log.warning(
-                            f"pop_output_buffer returned None (no IC4Exception.Timeout) for ~{no_data_count*0.05:.1f}s"
+                            f"Invalid or empty buffer for ~{no_data_count*0.05:.1f}s"
                         )
                     self.msleep(50)
                     continue
 
-                if not buf.is_valid:
-                    log.warning(
-                        f"Popped buffer (ID: {buf.image_id_device if hasattr(buf, 'image_id_device') else 'N/A'}) is not valid. Skipping."
-                    )
-                    self.msleep(1)
-                    continue
-
-                frame_count += 1
                 no_data_count = 0
+                frame_count += 1
                 w = buf.image_type.width
                 h = buf.image_type.height
                 log.info(
@@ -620,9 +617,6 @@ class SDKCameraThread(QThread):
                         raw = ctypes.string_at(ptr, pitch * h)
                         stride = pitch
                     else:
-                        log.error(
-                            "No image-buffer interface (numpy_wrap, numpy_copy, or pointer) found on buffer."
-                        )
                         raise RuntimeError("No image-buffer interface found")
 
                     if raw:
@@ -634,11 +628,10 @@ class SDKCameraThread(QThread):
                     else:
                         log.warning("Raw data could not be extracted from buffer.")
 
-                except Exception as e_img_conv:
-                    log.error(
-                        f"QImage construction or data extraction failed: {e_img_conv}",
-                        exc_info=True,
-                    )
+                except Exception as e_img:
+                    log.error(f"QImage construction failed: {e_img}", exc_info=True)
+
+            log.info("Exited acquisition loop")
 
         except Exception as e_unhandled:
             log.exception(
