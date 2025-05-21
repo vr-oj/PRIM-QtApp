@@ -1,4 +1,3 @@
-# test_ic4.py
 import time
 import imagingcontrol4 as ic4
 
@@ -16,25 +15,25 @@ grabber = ic4.Grabber()
 grabber.device_open(cam)
 print("Opened", cam.model_name)
 
-# 3) Configure exactly as IC Capture does:
+# 3) Configure like IC Capture
 pm = grabber.device_property_map
 
 
 def safe_set(name, val):
     p = pm.find(name)
     if p and p.is_available and not getattr(p, "is_readonly", False):
-        p.set_value(val)
+        pm.set_value(name, val)
         print(f"  Set {name} → {val}")
 
 
 safe_set("PixelFormat", "Mono8")
 safe_set("AcquisitionMode", "Continuous")
 safe_set("TriggerMode", "Off")
-# you can optionally set AcquisitionFrameRate here if you like:
+# optionally:
 # safe_set("AcquisitionFrameRate", 10.0)
 
 
-# 4) Attach a sink/listener and start streaming
+# 4) Attach sink & start streaming
 class DummyListener:
     def sink_connected(self, sink, image_type, min_buffers_required):
         return True
@@ -47,25 +46,28 @@ class DummyListener:
 
 
 sink = ic4.QueueSink(DummyListener())
-sink.timeout = 500  # milliseconds
+sink.timeout = 500  # ms
 grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
 print("Stream started – waiting for first frame...")
 
-# 5) Wait up to 5 seconds for a frame
+# 5) Try to pop one buffer
 buf = None
 for _ in range(50):
     try:
         buf = sink.pop_output_buffer()
         break
-    except ic4.IC4Exception:  # NoData yet
+    except ic4.IC4Exception:  # NoData
         time.sleep(0.1)
 
 if not buf or not buf.is_valid:
-    print("❌ still no frames – something’s wrong at the driver/GenTL level")
+    print("❌ No frames received – GenTL/driver issue remains")
 else:
     print(
-        f"✅ got frame: {buf.image_type.width}×{buf.image_type.height} "
-        f"{buf.image_type.pixel_format.name}"
+        "✅ got frame:",
+        buf.image_type.width,
+        "×",
+        buf.image_type.height,
+        buf.image_type.pixel_format.name,
     )
 
 # 6) Clean up
