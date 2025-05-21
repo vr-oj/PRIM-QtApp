@@ -56,7 +56,7 @@ class SDKCameraThread(QThread):
     # emitted on any camera error: (message, code)
     camera_error = pyqtSignal(str, str)
 
-        def __init__(
+    def __init__(
         self,
         device_info: "ic4.DeviceInfo" = None,
         target_fps: float = 20.0,
@@ -377,9 +377,7 @@ class SDKCameraThread(QThread):
 
             resolution_string = f"{w}x{h} ({pf_name})"
             self.camera_resolutions_available.emit([resolution_string])
-            log.debug(
-                f"Emitted available resolution: {resolution_string}"
-            )
+            log.debug(f"Emitted available resolution: {resolution_string}")
 
         except Exception as e:
             log.warning(
@@ -434,7 +432,12 @@ class SDKCameraThread(QThread):
             if self.selected_video_format_identifier:
                 descs = self.grabber.device_info.video_format_descs
                 chosen = next(
-                    (d for d in descs if d.name == self.selected_video_format_identifier), None
+                    (
+                        d
+                        for d in descs
+                        if d.name == self.selected_video_format_identifier
+                    ),
+                    None,
                 )
                 if chosen:
                     log.info(f"Applying user-selected video format: {chosen.name}")
@@ -445,7 +448,9 @@ class SDKCameraThread(QThread):
                     )
 
             # === Simplified default + FPS clamp setup ===
-            log.info("Attempting simplified setup using camera defaults and FPS clamping.")
+            log.info(
+                "Attempting simplified setup using camera defaults and FPS clamping."
+            )
             try:
                 wp = self.pm.find(PROP_WIDTH)
                 hp = self.pm.find(PROP_HEIGHT)
