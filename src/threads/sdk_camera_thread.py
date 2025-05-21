@@ -51,10 +51,19 @@ class SDKCameraThread(QThread):
     camera_properties_updated = pyqtSignal(dict)
     camera_error = pyqtSignal(str, str)
 
-    def __init__(self, device_info=None, target_fps: float = 20.0, parent=None):
+    def __init__(
+        self,
+        device_info=None,
+        target_fps: float = 20.0,
+        desired_width: int = None,
+        desired_height: int = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.device_info = device_info
         self.target_fps = target_fps
+        self.desired_width = desired_width
+        self.desired_height = desired_height
         self._stop = False
         self.grabber = None
         self.sink = None
@@ -92,53 +101,78 @@ class SDKCameraThread(QThread):
             self.pm = self.grabber.device_property_map
             model = getattr(self.device_info, "model_name", "")
 
-            # pick the smallest supported resolution (last entry)
-            try:
-                w, h, _ = MODEL_FORMAT_TABLES[model][-1]
-                log.info(f"Setting low resolution: {w}×{h}")
-                self._set(PROP_WIDTH, w)
-                self._set(PROP_HEIGHT, h)
-            except (KeyError, IndexError):
-                log.warning(
-                    "No low‑res fallback defined for this model; using defaults"
-                )
+            # 2) Emit UI choices
+            formats = MODEL_FORMAT_TABLES.get(model, [])
+            self.camera_resolutions_available.emit([f"{w}×{h}" for w, h, _ in formats])
+            self.camera_video_formats_available.emit([PROP_PIXEL_FORMAT])
 
-            # 2) Set pixel format, FPS, continuous & trigger
+            # 3) If the UI has asked for a specific WxH, try that first
+            candidates = []
+            if self.desired_width and self.desired_height:
+                candidates.append((self.desired_width, self.desired_height))
+            # then fall back to every supported resolution (small to large)
+            candidates += [
+                (w, h) for w, h, _ in sorted(formats, key=lambda t: t[0] * t[1])
+            ]
+
+            # 4) Configure common props once
             self._set(PROP_PIXEL_FORMAT, "Mono8")
-            fps_p = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
-            if fps_p and fps_p.is_available:
-                mn, mx = fps_p.minimum, fps_p.maximum
-                tgt = max(mn, min(self.target_fps, mx))
-                self._set(PROP_ACQUISITION_FRAME_RATE, tgt)
+            fps_prop = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
+            mn, mx = (None, None)
+            if fps_prop and fps_prop.is_available:
+                mn, mx = fps_prop.minimum, fps_prop.maximum
 
             self._set(PROP_ACQUISITION_MODE, "Continuous")
             self._set(PROP_TRIGGER_MODE, "Off")
 
-            # 3) Try streaming immediately
             self.sink = ic4.QueueSink(self.listener)
             self.sink.timeout = 200
 
-            try:
-                self.grabber.stream_setup(
-                    self.sink,
-                    setup_option=ic4.StreamSetupOption.ACQUISITION_START,
-                )
-            except ic4.IC4Exception as ex:
-                log.warning(
-                    f"Initial stream failed: {ex}; clamping to min FPS and retrying"
-                )
-                if fps_p and fps_p.is_available:
-                    self.grabber.stream_stop()
-                    time.sleep(0.1)
-                    self._set(PROP_ACQUISITION_FRAME_RATE, fps_p.minimum)
+            # 5) Try each resolution until one works
+            for w, h in candidates:
+                log.info(f"Trying resolution {w}×{h} @ target {self.target_fps} FPS")
+                # set it
+                try:
+                    self._set(PROP_WIDTH, w)
+                    self._set(PROP_HEIGHT, h)
+                    if mn is not None:
+                        tgt = max(mn, min(self.target_fps, mx))
+                        self._set(PROP_ACQUISITION_FRAME_RATE, tgt)
+                    # give the camera a moment
+                    time.sleep(0.05)
+                    # attempt full‐acquisition start
                     self.grabber.stream_setup(
                         self.sink,
                         setup_option=ic4.StreamSetupOption.ACQUISITION_START,
                     )
+                    log.info("  → success!")
+                    break
+                except Exception as e:
+                    log.warning(f"  x failed at {w}×{h}: {e}")
+                    # try minimum‐fps fallback on that resolution
+                    if fps_prop and fps_prop.is_available:
+                        try:
+                            if self.grabber.is_streaming:
+                                self.grabber.stream_stop()
+                                time.sleep(0.05)
+                            self._set(PROP_ACQUISITION_FRAME_RATE, fps_prop.minimum)
+                            self.grabber.stream_setup(
+                                self.sink,
+                                setup_option=ic4.StreamSetupOption.ACQUISITION_START,
+                            )
+                            log.info("  → success @ min-FPS fallback!")
+                            break
+                        except Exception as e2:
+                            log.warning(f"    also failed @ min-FPS: {e2}")
+                    # nothing worked, move on to next resolution
+            else:
+                raise RuntimeError(
+                    "Could not start streaming on any supported resolution"
+                )
 
             log.info("Streaming started—entering acquisition loop")
 
-            # 4) Acquisition loop
+            # 6) Acquisition loop
             while not self._stop:
                 try:
                     buf = self.sink.pop_output_buffer()
