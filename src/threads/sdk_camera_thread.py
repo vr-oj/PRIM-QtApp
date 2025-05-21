@@ -91,15 +91,16 @@ class SDKCameraThread(QThread):
             self.grabber.device_open(self.device_info)
             self.pm = self.grabber.device_property_map
             model = getattr(self.device_info, "model_name", "")
-            # pick the smallest supported resolution (last entry in your list)
+
+            # pick the smallest supported resolution (last entry)
             try:
-                w, h, _ = MODEL_FORMAT_TABLES[model][-1]  # e.g. (640, 480, …)
+                w, h, _ = MODEL_FORMAT_TABLES[model][-1]
                 log.info(f"Setting low resolution: {w}×{h}")
                 self._set(PROP_WIDTH, w)
                 self._set(PROP_HEIGHT, h)
             except (KeyError, IndexError):
                 log.warning(
-                    "No low‐res fallback defined for this model; using defaults"
+                    "No low‑res fallback defined for this model; using defaults"
                 )
 
             # 2) Set pixel format, FPS, continuous & trigger
@@ -113,7 +114,7 @@ class SDKCameraThread(QThread):
             self._set(PROP_ACQUISITION_MODE, "Continuous")
             self._set(PROP_TRIGGER_MODE, "Off")
 
-            # 3) Try streaming immediately (camera picks resolution)
+            # 3) Try streaming immediately
             self.sink = ic4.QueueSink(self.listener)
             self.sink.timeout = 200
 
@@ -126,7 +127,6 @@ class SDKCameraThread(QThread):
                 log.warning(
                     f"Initial stream failed: {ex}; clamping to min FPS and retrying"
                 )
-                # fallback: clamp to minimum FPS
                 if fps_p and fps_p.is_available:
                     self.grabber.stream_stop()
                     time.sleep(0.1)
