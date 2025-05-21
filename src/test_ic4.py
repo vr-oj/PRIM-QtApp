@@ -15,7 +15,7 @@ grabber = ic4.Grabber()
 grabber.device_open(cam)
 print("Opened", cam.model_name)
 
-# 3) Configure like IC Capture
+# 3) Helper to safely set properties
 pm = grabber.device_property_map
 
 
@@ -26,14 +26,16 @@ def safe_set(name, val):
         print(f"  Set {name} → {val}")
 
 
+# 4) Configure exactly what we want:
 safe_set("PixelFormat", "Mono8")
+safe_set("Width", 2448)
+safe_set("Height", 2048)
+safe_set("AcquisitionFrameRate", 20.0)
 safe_set("AcquisitionMode", "Continuous")
 safe_set("TriggerMode", "Off")
-# optionally:
-# safe_set("AcquisitionFrameRate", 10.0)
 
 
-# 4) Attach sink & start streaming
+# 5) Attach sink & start streaming
 class DummyListener:
     def sink_connected(self, sink, image_type, min_buffers_required):
         return True
@@ -50,7 +52,7 @@ sink.timeout = 500  # ms
 grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
 print("Stream started – waiting for first frame...")
 
-# 5) Try to pop one buffer
+# 6) Try to pop one buffer
 buf = None
 for _ in range(50):
     try:
@@ -59,7 +61,6 @@ for _ in range(50):
     except ic4.IC4Exception:  # NoData
         time.sleep(0.1)
 
-# DROP the “.is_valid” check — ImageBuffer in the Python wrapper doesn’t expose that.
 if buf is None:
     print("❌ No frames received – GenTL/driver issue remains")
 else:
@@ -68,7 +69,7 @@ else:
     pf = buf.image_type.pixel_format.name
     print(f"✅ got frame: {w}×{h}  {pf}")
 
-# clean up
+# 7) Clean up
 grabber.stream_stop()
 grabber.device_close()
 ic4.Library.exit()
