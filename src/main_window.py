@@ -61,10 +61,7 @@ except Exception as e:
 
 from threads.qtcamera_widget import QtCameraWidget
 from threads.serial_thread import SerialThread
-from recording import (
-    TrialRecorder,
-    RecordingWorker,
-)  # Assuming recording.py is the last version provided
+from recording import TrialRecorder, RecordingWorker
 from utils import list_serial_ports
 
 from control_panels.top_control_panel import TopControlPanel
@@ -259,7 +256,8 @@ class MainWindow(QMainWindow):
         if ports:
             for port_path, desc in ports:
                 self.serial_port_combobox.addItem(
-                    f"{os.path.basename(port_path)} ({desc})", QVariant(port_path)
+                    f"{os.path.basename(port_path)} ({desc})",
+                    QVariant(port_path),
                 )
         else:
             self.serial_port_combobox.addItem("No Serial Ports Found", QVariant())
@@ -306,7 +304,6 @@ class MainWindow(QMainWindow):
         tc.resolution_selected.connect(self._handle_resolution_selection)
 
         # adjustments → QtCameraWidget
-        # these must each go to exactly one slot
         tc.exposure_changed.connect(self.qt_cam_widget.set_exposure)
         tc.gain_changed.connect(self.qt_cam_widget.set_gain)
         tc.auto_exposure_toggled.connect(self.qt_cam_widget.set_auto_exposure)
@@ -319,7 +316,8 @@ class MainWindow(QMainWindow):
         )
         pc.reset_btn.clicked.connect(
             lambda: self.pressure_plot_widget.reset_zoom(
-                pc.auto_x_cb.isChecked(), pc.auto_y_cb.isChecked()
+                pc.auto_x_cb.isChecked(),
+                pc.auto_y_cb.isChecked(),
             )
         )
 
@@ -334,9 +332,7 @@ class MainWindow(QMainWindow):
         self.qt_cam_widget.camera_error.connect(self._handle_camera_error)
         self.qt_cam_widget.frame_ready.connect(self._handle_new_camera_frame)
 
-    @pyqtSlot(
-        object
-    )  # Changed from ic4_sdk.DeviceInfo to object for broader compatibility
+    @pyqtSlot(object)
     def _handle_camera_selection(self, device_info_obj):
         log.debug(
             f"MainWindow: Camera selection changed. DeviceInfo type: {type(device_info_obj)}"
