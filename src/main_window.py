@@ -122,7 +122,7 @@ class MainWindow(QMainWindow):
         # Get the total width of the splitter
         total = self.main_splitter.size().width()
         # You can tweak these ratios however you like
-        left = int(total * 0.0001)
+        left = int(total * 0.35)
         right = total - left
         self.main_splitter.setSizes([left, right])
 
@@ -573,6 +573,13 @@ class MainWindow(QMainWindow):
             self.current_camera_frame_height = qimage.height()
             log.info(f"Actual camera frame size: {qimage.width()}x{qimage.height()}")
 
+        # ────────── NEW: update the on-panel “Current:” label ──────────
+        cc = self.top_ctrl.camera_controls
+        # only if the label exists (you added it in CameraControlPanel)
+        if hasattr(cc, "current_res_label"):
+            w, h = qimage.width(), qimage.height()
+            cc.current_res_label.setText(f"{w}×{h}")
+
         if self._is_recording and self._recording_worker and not qimage.isNull():
             try:
                 numpy_frame = None
@@ -590,14 +597,6 @@ class MainWindow(QMainWindow):
                     numpy_frame = np.array(ptr, dtype=np.uint8).reshape(
                         qimage.height(), qimage.width(), 3
                     )
-                # Add other formats if necessary, e.g. Format_RGB32 (BGRA typically)
-                # elif qimage.format() == QImage.Format_RGB32:
-                #     ptr = qimage.constBits()
-                #     ptr.setsize(qimage.sizeInBytes())
-                #     numpy_frame = np.array(ptr, dtype=np.uint8).reshape(
-                #         qimage.height(), qimage.width(), 4
-                #     ) # BGRA
-                #     # numpy_frame = numpy_frame[..., :3] # If you need to convert to RGB
 
                 if numpy_frame is not None:
                     self._recording_worker.add_video_frame(

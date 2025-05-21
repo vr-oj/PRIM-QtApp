@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QSlider,
     QCheckBox,
+    QLabel,
     QSizePolicy,
     QDoubleSpinBox,
 )
@@ -77,6 +78,10 @@ class CameraControlPanel(QGroupBox):
         )
         self.res_selector.setEnabled(False)
         basic_layout.addRow("Resolution:", self.res_selector)
+
+        # ↓ add a status‐label
+        self.current_res_label = QLabel("––")
+        basic_layout.addRow("Current:", self.current_res_label)
 
         self.tabs.addTab(basic_tab, "Source")
 
@@ -216,128 +221,4 @@ class CameraControlPanel(QGroupBox):
             self.exposure_ms_box.setRange(min_ms, max_ms)
             self.exposure_ms_box.setValue(val_ms)
             self.exposure_ms_box.setEnabled(exp_enabled and not exp_auto)
-            self.exposure_ms_box.blockSignals(False)
-
-            # Gain
-            gain_enabled = gain.get("enabled", False)
-            min_g, max_g = float(gain.get("min", 0.0)), float(gain.get("max", 0.0))
-            val_g = float(gain.get("value", min_g))
-
-            self.gain_spinbox.blockSignals(True)
-            self.gain_slider.blockSignals(True)
-
-            self.gain_spinbox.setRange(min_g, max_g)
-            self.gain_spinbox.setValue(val_g)
-
-            # map to 0–1000 slider
-            smin, smax = 0, 1000
-            self.gain_slider.setRange(smin, smax)
-            pos = (
-                int((val_g - min_g) / (max_g - min_g) * (smax - smin))
-                if max_g > min_g
-                else smin
-            )
-            self.gain_slider.setValue(max(smin, min(pos, smax)))
-
-            self.gain_spinbox.setEnabled(gain_enabled)
-            self.gain_slider.setEnabled(gain_enabled)
-
-            self.gain_spinbox.blockSignals(False)
-            self.gain_slider.blockSignals(False)
-
-            # enable the tab if either is available
-            self.tabs.widget(1).setEnabled(exp_enabled or gain_enabled)
-            return
-
-        # 2) partial updates
-        if "ExposureTime" in props:
-            v_us = int(props["ExposureTime"])
-            v_ms = v_us / 1000.0
-            self.exposure_ms_box.blockSignals(True)
-            self.exposure_ms_box.setValue(v_ms)
-            self.exposure_ms_box.blockSignals(False)
-
-        if "ExposureAuto" in props:
-            auto_on = props["ExposureAuto"] in (True, "Continuous")
-            self.auto_exposure_cb.blockSignals(True)
-            self.auto_exposure_cb.setChecked(auto_on)
-            self.exposure_ms_box.setEnabled(not auto_on)
-            self.auto_exposure_cb.blockSignals(False)
-
-        if "Gain" in props:
-            g = float(props["Gain"])
-            self.gain_spinbox.blockSignals(True)
-            self.gain_slider.blockSignals(True)
-
-            self.gain_spinbox.setValue(g)
-            min_g, max_g = self.gain_spinbox.minimum(), self.gain_spinbox.maximum()
-            smin, smax = self.gain_slider.minimum(), self.gain_slider.maximum()
-            pos = (
-                int((g - min_g) / (max_g - min_g) * (smax - smin))
-                if max_g > min_g
-                else smin
-            )
-            self.gain_slider.setValue(max(smin, min(pos, smax)))
-
-            self.gain_spinbox.setEnabled(True)
-            self.gain_slider.setEnabled(True)
-
-            self.gain_spinbox.blockSignals(False)
-            self.gain_slider.blockSignals(False)
-
-    @pyqtSlot()
-    def _on_exposure_ms_entered(self):
-        """User typed in a new exposure (ms) → emit µs to camera."""
-        ms = self.exposure_ms_box.value()
-        μs = int(ms * 1000)
-        self.exposure_changed.emit(μs)
-
-    @pyqtSlot(bool)
-    def _on_auto_exposure_toggled(self, chk):
-        self.auto_exposure_toggled.emit(chk)
-
-    @pyqtSlot(int)
-    def _on_gain_slider_changed(self, slider_val):
-        min_v, max_v = self.gain_spinbox.minimum(), self.gain_spinbox.maximum()
-        val = (
-            (slider_val - self.gain_slider.minimum())
-            / (self.gain_slider.maximum() - self.gain_slider.minimum())
-            * (max_v - min_v)
-            + min_v
-            if max_v > min_v
-            else min_v
-        )
-        self.gain_spinbox.blockSignals(True)
-        self.gain_spinbox.setValue(round(val, 1))
-        self.gain_spinbox.blockSignals(False)
-        self.gain_changed.emit(self.gain_spinbox.value())
-
-    @pyqtSlot(float)
-    def _on_gain_spinbox_changed(self, v):
-        smin, smax = self.gain_slider.minimum(), self.gain_slider.maximum()
-        gmin, gmax = self.gain_spinbox.minimum(), self.gain_spinbox.maximum()
-        pos = int((v - gmin) / (gmax - gmin) * (smax - smin)) if gmax > gmin else smin
-        self.gain_slider.blockSignals(True)
-        self.gain_slider.setValue(max(smin, min(pos, smax)))
-        self.gain_slider.blockSignals(False)
-        self.gain_changed.emit(v)
-
-    def disable_all_controls(self):
-        """Disable the Adjustments tab & reset resolution list."""
-        log.debug("Disabling all controls.")
-        # disable Adjustments tab
-        self.tabs.widget(1).setEnabled(False)
-        for w in (
-            self.exposure_ms_box,
-            self.auto_exposure_cb,
-            self.gain_slider,
-            self.gain_spinbox,
-        ):
-            w.setEnabled(False)
-
-        # reset resolution combo
-        self.res_selector.blockSignals(True)
-        self.res_selector.clear()
-        self.res_selector.addItem("N/A", QVariant())
-        self.res_selector.setEnabled(False)
-        self.res_selector.blockSignals(False)
+            self.exposure_ms_box.block
