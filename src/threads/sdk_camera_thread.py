@@ -52,6 +52,7 @@ class SDKCameraThread(QThread):
     frame_ready = pyqtSignal(QImage, object)
     camera_resolutions_available = pyqtSignal(list)
     camera_video_formats_available = pyqtSignal(list)
+    camera_properties_updated = pyqtSignal(dict)
     camera_error = pyqtSignal(str, str)
 
     def __init__(
