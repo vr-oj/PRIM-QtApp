@@ -189,7 +189,7 @@ class SDKCameraThread(QThread):
 
             # 4) Start streaming
             self.sink = ic4.QueueSink(self.listener)
-            self.sink.timeout = 500  # match your test harness
+            self.sink.timeout = 5000  # give the camera up to 5 s to start
 
             # a brief pause lets the camera apply settings
             time.sleep(0.05)
@@ -226,7 +226,8 @@ class SDKCameraThread(QThread):
                 )
                 img = QImage(data, w, h, stride, fmt)
                 if not img.isNull():
-                    self.frame_ready.emit(img.copy(), data)
+                    # emit the QImage directly
+                    self.frame_ready.emit(img, data)
 
             log.info("Acquisition loop exited")
 
