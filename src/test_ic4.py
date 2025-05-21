@@ -59,18 +59,16 @@ for _ in range(50):
     except ic4.IC4Exception:  # NoData
         time.sleep(0.1)
 
-if not buf or not buf.is_valid:
+# DROP the “.is_valid” check — ImageBuffer in the Python wrapper doesn’t expose that.
+if buf is None:
     print("❌ No frames received – GenTL/driver issue remains")
 else:
-    print(
-        "✅ got frame:",
-        buf.image_type.width,
-        "×",
-        buf.image_type.height,
-        buf.image_type.pixel_format.name,
-    )
+    w = buf.image_type.width
+    h = buf.image_type.height
+    pf = buf.image_type.pixel_format.name
+    print(f"✅ got frame: {w}×{h}  {pf}")
 
-# 6) Clean up
+# clean up
 grabber.stream_stop()
 grabber.device_close()
 ic4.Library.exit()
