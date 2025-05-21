@@ -196,8 +196,10 @@ class CameraControlPanel(QGroupBox):
         Enables/disables and updates the Exposure & Gain controls based on
         the 'controls' dict coming from the camera thread.
         """
-        log.debug(f"CameraControlPanel updating UI from properties: {props}")
-        controls = props.get("controls", {})
+        if "controls" not in props:
+            return
+        log.debug(f"CameraControlPanel updating UI from CONTROLS: {props['controls']}")
+        controls = props["controls"]
 
         # Exposure
         exp = controls.get("exposure", {})
