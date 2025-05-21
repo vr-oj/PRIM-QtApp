@@ -85,7 +85,7 @@ class SDKCameraThread(QThread):
         self._set(PROP_GAIN, gain_db)
 
     def update_auto_exposure(self, enable_auto: bool):
-        """Turn auto-exposure on or off."""
+        log.debug(f"update_auto_exposure called with → {enable_auto}")
         prop = self.pm.find(PROP_EXPOSURE_AUTO)
         if not prop or not prop.is_available:
             log.warning("Auto-exposure property not available")
