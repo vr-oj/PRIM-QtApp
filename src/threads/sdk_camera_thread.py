@@ -188,8 +188,8 @@ class SDKCameraThread(QThread):
             self._set(PROP_TRIGGER_MODE, "Off")
 
             # 4) Start streaming
-            self.sink = ic4.VideoSink(self.listener)
-            self.sink.timeout = 5000  # give the camera up to 5 s to start
+            self.sink = ic4.QueueSink(self.listener)
+            self.sink.timeout = 15000  # 15 s
 
             # a brief pause lets the camera apply settings
             time.sleep(0.05)
