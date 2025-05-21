@@ -56,6 +56,9 @@ class SDKCameraThread(QThread):
 
     def __init__(self, device_info=None, target_fps=20.0, parent=None):
         super().__init__(parent)
+        self.desired_width = desired_width
+        self.desired_height = desired_height
+        self.desired_pixel_format_str = desired_pixel_format
         self.device_info = device_info
         self.target_fps = target_fps
         self._stop = False
