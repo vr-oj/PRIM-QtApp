@@ -347,7 +347,7 @@ class SDKCameraThread(QThread):
                             "Device is not open before enumerating video formats."
                         )
 
-                    video_format_descs = self.device_info.get_video_format_descs()
+                    video_format_descs = self.device_info.video_format_descs
                     if not video_format_descs:
                         log.warning(
                             "Camera did not report any video format descriptors. Using fallback."
@@ -498,14 +498,28 @@ class SDKCameraThread(QThread):
                     # ... (rest of your pixel format mapping logic) ...
 
                     # Determine QImage format based on the actual pixel format set by the video format
-                    current_pf_name = self.pm.find(PROP_PIXEL_FORMAT).value
-                    if isinstance(
-                        current_pf_name, ic4.PixelFormatInfo
-                    ):  # if it's an object
-                        current_pf_name = current_pf_name.name
-                    current_pf_name = current_pf_name.lower()
+                    pf_property_value = self.pm.find(
+                        PROP_PIXEL_FORMAT
+                    ).value  # Renamed for clarity
+                    current_pf_name_from_prop = (
+                        pf_property_value  # Default if not an object
+                    )
 
-                    if "mono8" in current_pf_name:
+                    if isinstance(
+                        pf_property_value, ic4.PixelFormat
+                    ):  # <<< CORRECTED TYPE HERE
+                        current_pf_name_from_prop = pf_property_value.name
+                    elif isinstance(pf_property_value, str):  # If it's already a string
+                        current_pf_name_from_prop = pf_property_value
+                    else:  # Fallback for other unexpected types
+                        current_pf_name_from_prop = str(pf_property_value)
+
+                    current_pf_name_lower = current_pf_name_from_prop.lower()
+                    log.info(
+                        f"Determining QImage format based on PixelFormat property: '{current_pf_name_lower}' (original type: {type(pf_property_value)})"
+                    )
+
+                    if "mono8" in current_pf_name_lower:
                         self.actual_qimage_format = QImage.Format_Grayscale8
                     elif any(
                         pf in current_pf_name for pf in ["mono10", "mono12", "mono16"]
