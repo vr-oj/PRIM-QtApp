@@ -301,13 +301,15 @@ class MainWindow(QMainWindow):
 
     def _connect_top_control_panel_signals(self):
         tc = self.top_ctrl
+        # camera/device wiring
         tc.camera_selected.connect(self._handle_camera_selection)
         tc.resolution_selected.connect(self._handle_resolution_selection)
-        tc.exposure_changed.connect(lambda v: self.qt_cam_widget.set_exposure(v))
-        tc.gain_changed.connect(lambda v: self.qt_cam_widget.set_gain(v))
-        tc.auto_exposure_toggled.connect(
-            lambda b: self.qt_cam_widget.set_auto_exposure(b)
-        )
+
+        # adjustments → QtCameraWidget
+        # these must each go to exactly one slot
+        tc.exposure_changed.connect(self.qt_cam_widget.set_exposure)
+        tc.gain_changed.connect(self.qt_cam_widget.set_gain)
+        tc.auto_exposure_toggled.connect(self.qt_cam_widget.set_auto_exposure)
 
         pc = tc.plot_controls
         pc.x_axis_limits_changed.connect(self.pressure_plot_widget.set_manual_x_limits)
