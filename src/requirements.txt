@@ -7,3 +7,4 @@ tifffile>=2021.10.29
 opencv-python>=4.5
 pyserial>=3.4
 imagingcontrol4>=1.0
+PyOpenGL>=3.1.9
