@@ -182,11 +182,18 @@ class SDKCameraThread(QThread):
                         )
 
             else:
-                # If none match, clamp to minimum FPS at full res
+                # stop the live stream first
+                if self.grabber.is_streaming:
+                    self.grabber.stream_stop()
+                    time.sleep(0.1)
+
+                # apply the clamped FPS
                 self._set(PROP_ACQUISITION_FRAME_RATE, fps_p.minimum)
                 log.warning("Clamped to minimum FPS and retrying")
+                # now restart acquisition
                 self.grabber.stream_setup(
-                    self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
+                    self.sink,
+                    setup_option=ic4.StreamSetupOption.ACQUISITION_START,
                 )
 
             log.info("Streaming started—entering acquisition loop")
