@@ -122,7 +122,7 @@ class MainWindow(QMainWindow):
         # Get the total width of the splitter
         total = self.main_splitter.size().width()
         # You can tweak these ratios however you like
-        left = int(total * 0.001)
+        left = int(total * 0.0001)
         right = total - left
         self.main_splitter.setSizes([left, right])
 
