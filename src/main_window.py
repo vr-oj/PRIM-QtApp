@@ -41,9 +41,9 @@ _IC4_AVAILABLE = False
 _IC4_INITIALIZED = False
 _ic4_module = None
 try:
-    current_file_dir = os.path.dirname(os.path.abspath(__file__))
-    if current_file_dir not in sys.path:
-        sys.path.insert(0, current_file_dir)
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    if base_dir not in sys.path:
+        sys.path.insert(0, base_dir)
     import prim_app
 
     _IC4_AVAILABLE = getattr(prim_app, "IC4_AVAILABLE", False)
@@ -53,7 +53,8 @@ try:
 
         _ic4_module = ic4_sdk
     logging.getLogger(__name__).info(
-        "Successfully checked prim_app for IC4 flags in MainWindow. Initialized: %s",
+        "IC4 flags: AVAILABLE=%s INITIALIZED=%s",
+        _IC4_AVAILABLE,
         _IC4_INITIALIZED,
     )
 except Exception as e:
@@ -147,14 +148,14 @@ class MainWindow(QMainWindow):
         self.dock_console.setVisible(False)
 
     def _build_central_widget_layout(self):
-        central_container_widget = QWidget()
-        outer_layout = QVBoxLayout(central_container_widget)
-        outer_layout.setContentsMargins(2, 2, 2, 2)
-        outer_layout.setSpacing(3)
+        central = QWidget()
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(2, 2, 2, 2)
+        outer.setSpacing(3)
 
         self.top_ctrl = TopControlPanel(self)
         self.top_ctrl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        outer_layout.addWidget(self.top_ctrl)
+        outer.addWidget(self.top_ctrl)
 
         self.main_splitter = QSplitter(Qt.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
@@ -167,27 +168,27 @@ class MainWindow(QMainWindow):
         self.main_splitter.setStretchFactor(0, 1)
         self.main_splitter.setStretchFactor(1, 0)
 
-        outer_layout.addWidget(self.main_splitter, 1)
-        self.setCentralWidget(central_container_widget)
+        outer.addWidget(self.main_splitter, 1)
+        self.setCentralWidget(central)
 
     def _build_menus(self):
-        menubar = self.menuBar()
-        file_menu = menubar.addMenu("&File")
-        export_plot_data_action = QAction("Export Plot &Data (CSV)…", self)
-        export_plot_data_action.triggered.connect(self._export_plot_data_as_csv)
-        file_menu.addAction(export_plot_data_action)
+        mb = self.menuBar()
+        # --- File Menu ---
+        fm = mb.addMenu("&File")
+        exp_data = QAction("Export Plot &Data (CSV)…", self)
+        exp_data.triggered.connect(self._export_plot_data_as_csv)
+        fm.addAction(exp_data)
 
-        export_plot_image_action = QAction("Export Plot &Image…", self)
-        export_plot_image_action.triggered.connect(
-            self.pressure_plot_widget.export_as_image
-        )
-        file_menu.addAction(export_plot_image_action)
-        file_menu.addSeparator()
-        exit_action = QAction("&Exit", self, shortcut=QKeySequence.Quit)
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+        exp_img = QAction("Export Plot &Image…", self)
+        exp_img.triggered.connect(self.pressure_plot_widget.export_as_image)
+        fm.addAction(exp_img)
+        fm.addSeparator()
+        exit_act = QAction("&Exit", self, shortcut=QKeySequence.Quit)
+        exit_act.triggered.connect(self.close)
+        fm.addAction(exit_act)
 
-        acq_menu = menubar.addMenu("&Acquisition")
+        # --- Acquisition ---
+        am = mb.addMenu("&Acquisition")
         self.start_recording_action = QAction(
             self.icon_record_start,
             "Start &Recording",
@@ -196,8 +197,7 @@ class MainWindow(QMainWindow):
             triggered=self._trigger_start_recording_dialog,
             enabled=False,
         )
-        acq_menu.addAction(self.start_recording_action)
-
+        am.addAction(self.start_recording_action)
         self.stop_recording_action = QAction(
             self.icon_record_stop,
             "Stop R&ecording",
@@ -206,17 +206,19 @@ class MainWindow(QMainWindow):
             triggered=self._trigger_stop_recording,
             enabled=False,
         )
-        acq_menu.addAction(self.stop_recording_action)
+        am.addAction(self.stop_recording_action)
 
-        view_menu = menubar.addMenu("&View")
-        view_menu.addAction(self.dock_console.toggleViewAction())
+        # --- View ---
+        vm = mb.addMenu("&View")
+        vm.addAction(self.dock_console.toggleViewAction())
 
-        plot_menu = menubar.addMenu("&Plot")
-        clear_plot_action = QAction(
+        # --- Plot ---
+        pm = mb.addMenu("&Plot")
+        clear_plot = QAction(
             "&Clear Plot Data", self, triggered=self._clear_pressure_plot
         )
-        plot_menu.addAction(clear_plot_action)
-        reset_plot_zoom_action = QAction(
+        pm.addAction(clear_plot)
+        reset_zoom = QAction(
             "&Reset Plot Zoom",
             self,
             triggered=lambda: self.pressure_plot_widget.reset_zoom(
@@ -224,21 +226,20 @@ class MainWindow(QMainWindow):
                 self.top_ctrl.plot_controls.auto_y_cb.isChecked(),
             ),
         )
-        plot_menu.addAction(reset_plot_zoom_action)
+        pm.addAction(reset_zoom)
 
-        help_menu = menubar.addMenu("&Help")
-        about_app_action = QAction(
-            f"&About {APP_NAME}", self, triggered=self._show_about_dialog
-        )
-        help_menu.addAction(about_app_action)
-        help_menu.addAction("About &Qt", QApplication.instance().aboutQt)
+        # --- Help ---
+        hm = mb.addMenu("&Help")
+        about = QAction(f"&About {APP_NAME}", self, triggered=self._show_about_dialog)
+        hm.addAction(about)
+        hm.addAction("About &Qt", QApplication.instance().aboutQt)
 
     def _build_main_toolbar(self):
-        toolbar = QToolBar("Main Controls")
-        toolbar.setObjectName("MainControlsToolbar")
-        toolbar.setIconSize(QSize(20, 20))
-        toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.addToolBar(Qt.TopToolBarArea, toolbar)
+        tb = QToolBar("Main Controls")
+        tb.setObjectName("MainControlsToolbar")
+        tb.setIconSize(QSize(20, 20))
+        tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.addToolBar(Qt.TopToolBarArea, tb)
 
         self.connect_serial_action = QAction(
             self.icon_connect,
@@ -246,7 +247,7 @@ class MainWindow(QMainWindow):
             self,
             triggered=self._toggle_serial_connection,
         )
-        toolbar.addAction(self.connect_serial_action)
+        tb.addAction(self.connect_serial_action)
 
         self.serial_port_combobox = QComboBox()
         self.serial_port_combobox.setToolTip("Select Serial Port for PRIM device")
@@ -254,37 +255,36 @@ class MainWindow(QMainWindow):
         self.serial_port_combobox.addItem("🔌 Simulated Data", QVariant())
         ports = list_serial_ports()
         if ports:
-            for port_path, desc in ports:
+            for p, d in ports:
                 self.serial_port_combobox.addItem(
-                    f"{os.path.basename(port_path)} ({desc})",
-                    QVariant(port_path),
+                    f"{os.path.basename(p)} ({d})", QVariant(p)
                 )
         else:
             self.serial_port_combobox.addItem("No Serial Ports Found", QVariant())
             self.serial_port_combobox.setEnabled(False)
-        toolbar.addWidget(self.serial_port_combobox)
+        tb.addWidget(self.serial_port_combobox)
 
         self.video_format_combobox = QComboBox()
         self.video_format_combobox.setToolTip("Select Video Recording Format")
-        for fmt_str in SUPPORTED_FORMATS:
-            self.video_format_combobox.addItem(fmt_str.upper(), QVariant(fmt_str))
+        for fmt in SUPPORTED_FORMATS:
+            self.video_format_combobox.addItem(fmt.upper(), QVariant(fmt))
         default_idx = self.video_format_combobox.findData(
             QVariant(DEFAULT_VIDEO_EXTENSION.lower())
         )
         if default_idx != -1:
             self.video_format_combobox.setCurrentIndex(default_idx)
-        toolbar.addWidget(self.video_format_combobox)
+        tb.addWidget(self.video_format_combobox)
 
-        toolbar.addSeparator()
-        toolbar.addAction(self.start_recording_action)
-        toolbar.addAction(self.stop_recording_action)
+        tb.addSeparator()
+        tb.addAction(self.start_recording_action)
+        tb.addAction(self.stop_recording_action)
 
     def _build_status_bar(self):
-        status_bar = self.statusBar() or QStatusBar(self)
-        self.setStatusBar(status_bar)
+        sb = self.statusBar() or QStatusBar(self)
+        self.setStatusBar(sb)
 
         self.app_session_time_label = QLabel("Session: 00:00:00")
-        status_bar.addPermanentWidget(self.app_session_time_label)
+        sb.addPermanentWidget(self.app_session_time_label)
         self._app_session_seconds = 0
         self._app_session_timer = QTimer(self, interval=1000)
         self._app_session_timer.timeout.connect(self._update_app_session_time)
@@ -299,11 +299,8 @@ class MainWindow(QMainWindow):
 
     def _connect_top_control_panel_signals(self):
         tc = self.top_ctrl
-        # camera/device wiring
         tc.camera_selected.connect(self._handle_camera_selection)
         tc.resolution_selected.connect(self._handle_resolution_selection)
-
-        # adjustments → QtCameraWidget
         tc.exposure_changed.connect(self.qt_cam_widget.set_exposure)
         tc.gain_changed.connect(self.qt_cam_widget.set_gain)
         tc.auto_exposure_toggled.connect(self.qt_cam_widget.set_auto_exposure)
@@ -316,19 +313,30 @@ class MainWindow(QMainWindow):
         )
         pc.reset_btn.clicked.connect(
             lambda: self.pressure_plot_widget.reset_zoom(
-                pc.auto_x_cb.isChecked(),
-                pc.auto_y_cb.isChecked(),
+                pc.auto_x_cb.isChecked(), pc.auto_y_cb.isChecked()
             )
         )
 
     def _connect_camera_widget_signals(self):
-        if hasattr(self.top_ctrl, "camera_controls") and self.top_ctrl.camera_controls:
+        # Safely only hook up if that slot actually exists
+        if (
+            hasattr(self.top_ctrl, "camera_controls")
+            and self.top_ctrl.camera_controls
+            and hasattr(self.top_ctrl.camera_controls, "update_camera_resolutions_list")
+        ):
             self.qt_cam_widget.camera_resolutions_updated.connect(
                 self.top_ctrl.camera_controls.update_camera_resolutions_list
             )
+
+        if (
+            hasattr(self.top_ctrl, "camera_controls")
+            and self.top_ctrl.camera_controls
+            and hasattr(self.top_ctrl.camera_controls, "update_camera_properties_ui")
+        ):
             self.qt_cam_widget.camera_properties_updated.connect(
                 self.top_ctrl.camera_controls.update_camera_properties_ui
             )
+
         self.qt_cam_widget.camera_error.connect(self._handle_camera_error)
         self.qt_cam_widget.frame_ready.connect(self._handle_new_camera_frame)
 

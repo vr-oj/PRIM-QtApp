@@ -9,14 +9,13 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QComboBox,
     QSlider,
-    QLabel,
     QCheckBox,
-    QPushButton,
     QSizePolicy,
     QDoubleSpinBox,
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QVariant, pyqtSlot
 
+# IC4‐SDK flags
 _IC4_AVAILABLE = False
 _IC4_INITIALIZED = False
 _ic4_module = None
@@ -33,12 +32,10 @@ try:
     _IC4_AVAILABLE = getattr(prim_app, "IC4_AVAILABLE", False)
     _IC4_INITIALIZED = getattr(prim_app, "IC4_INITIALIZED", False)
     if _IC4_INITIALIZED:
-        if hasattr(prim_app, "ic4_library_module"):
-            _ic4_module = prim_app.ic4_library_module
-        else:
-            import imagingcontrol4 as ic4_sdk
-
-            _ic4_module = ic4_sdk
+        # if prim_app exposed its ic4 module, use it; otherwise import directly
+        _ic4_module = getattr(prim_app, "ic4_library_module", None) or __import__(
+            "imagingcontrol4"
+        )
     logging.getLogger(__name__).info(
         f"Checked prim_app for IC4 flags. AVAILABLE: {_IC4_AVAILABLE}, INITIALIZED: {_IC4_INITIALIZED}"
     )
@@ -53,7 +50,7 @@ log = logging.getLogger(__name__)
 class CameraControlPanel(QGroupBox):
     camera_selected = pyqtSignal(object)
     resolution_selected = pyqtSignal(str)
-    exposure_changed = pyqtSignal(int)  # µs
+    exposure_changed = pyqtSignal(int)  # microseconds
     gain_changed = pyqtSignal(float)  # dB
     auto_exposure_toggled = pyqtSignal(bool)
 
@@ -80,20 +77,21 @@ class CameraControlPanel(QGroupBox):
         )
         self.res_selector.setEnabled(False)
         basic_layout.addRow("Resolution:", self.res_selector)
+
         self.tabs.addTab(basic_tab, "Source")
 
         # — Adjustments tab —
         adj_tab = QWidget()
         adj_layout = QFormLayout(adj_tab)
 
-        # Exposure (in ms)
+        # Exposure (now in ms)
         self.exposure_ms_box = QDoubleSpinBox()
         self.exposure_ms_box.setDecimals(1)
-        # Range will be updated from camera min/max
-        self.exposure_ms_box.setRange(0.1, 10000.0)  # fallback, in ms
+        self.exposure_ms_box.setRange(0.1, 10000.0)  # fallback range in ms
         self.exposure_ms_box.setSuffix(" ms")
         self.exposure_ms_box.setKeyboardTracking(False)
         adj_layout.addRow("Exposure:", self.exposure_ms_box)
+
         self.auto_exposure_cb = QCheckBox("Auto Exposure")
         adj_layout.addRow(self.auto_exposure_cb)
 
@@ -110,27 +108,22 @@ class CameraControlPanel(QGroupBox):
         self.tabs.addTab(adj_tab, "Adjustments")
         adj_tab.setEnabled(False)
 
-        # — wire up adjustment controls —
+        # — wire up controls —
         self.exposure_ms_box.editingFinished.connect(self._on_exposure_ms_entered)
         self.auto_exposure_cb.toggled.connect(self._on_auto_exposure_toggled)
         self.gain_slider.valueChanged.connect(self._on_gain_slider_changed)
         self.gain_spinbox.valueChanged.connect(self._on_gain_spinbox_changed)
 
-        # initial population
+        # initial populate
         self.populate_camera_list()
         self.disable_all_controls()
 
-    @pyqtSlot()
-    def _on_exposure_ms_entered(self):
-        # convert ms → µs and emit
-        ms = self.exposure_ms_box.value()
-        μs = int(ms * 1000)
-        self.exposure_changed.emit(μs)
-
     def populate_camera_list(self):
+        """Fill the camera combo via the IC4 device enumeration."""
         self.cam_selector.blockSignals(True)
         self.cam_selector.clear()
         self.cam_selector.addItem("Select Camera...", QVariant())
+
         if _IC4_INITIALIZED and _ic4_module:
             try:
                 devices = _ic4_module.DeviceEnum.devices()
@@ -146,12 +139,14 @@ class CameraControlPanel(QGroupBox):
                 self.cam_selector.addItem("Error listing cameras", QVariant())
         else:
             self.cam_selector.addItem("TIS SDK N/A", QVariant())
+
         self.cam_selector.setEnabled(self.cam_selector.count() > 1)
         self.cam_selector.blockSignals(False)
-        # trigger initial
+        # trigger initial change
         if self.cam_selector.currentIndex() >= 0:
             self._on_camera_selection_changed(self.cam_selector.currentIndex())
 
+    @pyqtSlot(int)
     def _on_camera_selection_changed(self, idx):
         data = self.cam_selector.itemData(idx)
         dev = data.value() if isinstance(data, QVariant) else data
@@ -163,21 +158,46 @@ class CameraControlPanel(QGroupBox):
             self.camera_selected.emit(None)
             self.disable_all_controls()
 
+    @pyqtSlot(int)
     def _on_resolution_selection_changed(self, idx):
         data = self.res_selector.itemData(idx)
         res = data.value() if isinstance(data, QVariant) else data
         if isinstance(res, str):
             self.resolution_selected.emit(res)
 
+    @pyqtSlot(list)
+    def update_camera_resolutions_list(self, modes: list):
+        """
+        Slot to receive a list of resolution strings (e.g. "640x480 Mono8").
+        Populates the resolution combo.
+        """
+        current = self.res_selector.currentData()
+        self.res_selector.blockSignals(True)
+        self.res_selector.clear()
+        if modes:
+            for m in modes:
+                self.res_selector.addItem(m, QVariant(m))
+            self.res_selector.setEnabled(True)
+            # emit first selection so widget can pick up defaults
+            self._on_resolution_selection_changed(self.res_selector.currentIndex())
+        else:
+            self.res_selector.addItem("N/A", QVariant())
+            self.res_selector.setEnabled(False)
+        self.res_selector.blockSignals(False)
+
     @pyqtSlot(dict)
     def update_camera_properties_ui(self, props):
-        # Full rebuild
+        """
+        Rebuild or partially update the Exposure/Gain controls
+        based on the dict coming from the camera thread.
+        """
+        # 1) full rebuild on 'controls'
         if "controls" in props:
             controls = props["controls"]
             exp = controls.get("exposure", {})
             gain = controls.get("gain", {})
 
-            # --- Exposure settings ---
+            # Exposure
             exp_enabled = exp.get("enabled", False)
             exp_auto = exp.get("is_auto_on", False)
             min_us = int(exp.get("min", 0))
@@ -198,7 +218,7 @@ class CameraControlPanel(QGroupBox):
             self.exposure_ms_box.setEnabled(exp_enabled and not exp_auto)
             self.exposure_ms_box.blockSignals(False)
 
-            # --- Gain settings ---
+            # Gain
             gain_enabled = gain.get("enabled", False)
             min_g, max_g = float(gain.get("min", 0.0)), float(gain.get("max", 0.0))
             val_g = float(gain.get("value", min_g))
@@ -209,7 +229,7 @@ class CameraControlPanel(QGroupBox):
             self.gain_spinbox.setRange(min_g, max_g)
             self.gain_spinbox.setValue(val_g)
 
-            # map 0–1000 slider range
+            # map to 0–1000 slider
             smin, smax = 0, 1000
             self.gain_slider.setRange(smin, smax)
             pos = (
@@ -225,11 +245,11 @@ class CameraControlPanel(QGroupBox):
             self.gain_spinbox.blockSignals(False)
             self.gain_slider.blockSignals(False)
 
-            # Enable tab if anything is available
+            # enable the tab if either is available
             self.tabs.widget(1).setEnabled(exp_enabled or gain_enabled)
             return
 
-        # Partial updates:
+        # 2) partial updates
         if "ExposureTime" in props:
             v_us = int(props["ExposureTime"])
             v_ms = v_us / 1000.0
@@ -265,6 +285,13 @@ class CameraControlPanel(QGroupBox):
             self.gain_spinbox.blockSignals(False)
             self.gain_slider.blockSignals(False)
 
+    @pyqtSlot()
+    def _on_exposure_ms_entered(self):
+        """User typed in a new exposure (ms) → emit µs to camera."""
+        ms = self.exposure_ms_box.value()
+        μs = int(ms * 1000)
+        self.exposure_changed.emit(μs)
+
     @pyqtSlot(bool)
     def _on_auto_exposure_toggled(self, chk):
         self.auto_exposure_toggled.emit(chk)
@@ -273,16 +300,13 @@ class CameraControlPanel(QGroupBox):
     def _on_gain_slider_changed(self, slider_val):
         min_v, max_v = self.gain_spinbox.minimum(), self.gain_spinbox.maximum()
         val = (
-            (
-                (slider_val - self.gain_slider.minimum())
-                / (self.gain_slider.maximum() - self.gain_slider.minimum())
-                * (max_v - min_v)
-                + min_v
-            )
+            (slider_val - self.gain_slider.minimum())
+            / (self.gain_slider.maximum() - self.gain_slider.minimum())
+            * (max_v - min_v)
+            + min_v
             if max_v > min_v
             else min_v
         )
-
         self.gain_spinbox.blockSignals(True)
         self.gain_spinbox.setValue(round(val, 1))
         self.gain_spinbox.blockSignals(False)
@@ -293,13 +317,13 @@ class CameraControlPanel(QGroupBox):
         smin, smax = self.gain_slider.minimum(), self.gain_slider.maximum()
         gmin, gmax = self.gain_spinbox.minimum(), self.gain_spinbox.maximum()
         pos = int((v - gmin) / (gmax - gmin) * (smax - smin)) if gmax > gmin else smin
-
         self.gain_slider.blockSignals(True)
         self.gain_slider.setValue(max(smin, min(pos, smax)))
         self.gain_slider.blockSignals(False)
         self.gain_changed.emit(v)
 
     def disable_all_controls(self):
+        """Disable the Adjustments tab & reset resolution list."""
         log.debug("Disabling all controls.")
         # disable Adjustments tab
         self.tabs.widget(1).setEnabled(False)
@@ -310,6 +334,7 @@ class CameraControlPanel(QGroupBox):
             self.gain_spinbox,
         ):
             w.setEnabled(False)
+
         # reset resolution combo
         self.res_selector.blockSignals(True)
         self.res_selector.clear()
