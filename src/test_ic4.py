@@ -1,32 +1,49 @@
+# test_ic4.py
 import imagingcontrol4 as ic4
 
-# Initialize library
+# 1) Initialize
 ic4.Library.init()
 
-# Find first camera
+# 2) Find cameras
 devs = ic4.DeviceEnum.devices()
 if not devs:
     raise RuntimeError("No cameras found")
-dev = devs[0]
-print("Found camera:", dev.model_name, dev.serial)
+cam = devs[0]
+print("Found camera:", cam.model_name, cam.serial)
 
-# Open, configure minimal settings, grab one frame
+# 3) Open
 grabber = ic4.Grabber()
-grabber.device_open(dev)
+grabber.device_open(cam)
+print("Opened", cam.model_name)
 
-# Force a known safe resolution
-grabber.device_property_map.find("Width").value = 640
-grabber.device_property_map.find("Height").value = 480
-grabber.device_property_map.find("PixelFormat").value = "Mono8"
 
-# Start streaming
-sink = ic4.QueueSink()
+# 4) Dummy listener for the sink callbacks
+class DummyListener:
+    def sink_connected(self, sink, image_type, min_buffers_required):
+        return True
+
+    def frames_queued(self, sink):
+        pass
+
+    def sink_disconnected(self, sink):
+        pass
+
+
+listener = DummyListener()
+
+# 5) Create sink with listener and start streaming
+sink = ic4.QueueSink(listener)
 grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
+print("Stream started")
 
-# Pull one buffer
+# 6) Grab one frame
 buf = sink.pop_output_buffer()
-print("Grabbed frame:", buf.image_type.width, "x", buf.image_type.height)
+print(
+    f"Got buffer: {buf.image_type.width}×{buf.image_type.height} "
+    f"{buf.image_type.pixel_format.name}"
+)
 
-# Clean up
+# 7) Tear down
 grabber.stream_stop()
 grabber.device_close()
+ic4.Library.exit()
