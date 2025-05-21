@@ -15,6 +15,16 @@ PROP_PIXEL_FORMAT = "PixelFormat"
 PROP_ACQUISITION_FRAME_RATE = "AcquisitionFrameRate"
 PROP_ACQUISITION_MODE = "AcquisitionMode"
 PROP_TRIGGER_MODE = "TriggerMode"
+PROP_EXPOSURE_TIME = (
+    "ExposureTime"  # manual shutter time (µs) :contentReference[oaicite:1]{index=1}
+)
+PROP_GAIN = "Gain"  # sensor amplification (dB) :contentReference[oaicite:3]{index=3}
+PROP_EXPOSURE_AUTO = (
+    "ExposureAuto"  # enable/disable auto‐exposure :contentReference[oaicite:5]{index=5}
+)
+PROP_GAIN_AUTO = (
+    "GainAuto"  # enable/disable auto‐gain :contentReference[oaicite:7]{index=7}
+)
 
 
 class DummySinkListener:
@@ -70,6 +80,25 @@ class SDKCameraThread(QThread):
             self.pm.set_value(name, val)
             log.info(f"Set {name} → {val}")
             self.camera_properties_updated.emit({name: val})
+
+    # ─── NEW: public API for exposure & gain control ──────────────────────────
+    def update_exposure(self, exposure_us: float):
+        """Manually set exposure time in microseconds."""
+        self._set(PROP_EXPOSURE_TIME, exposure_us)
+
+    def update_gain(self, gain_db: float):
+        """Manually set gain in dB."""
+        self._set(PROP_GAIN, gain_db)
+
+    def update_auto_exposure(self, enable_auto: bool):
+        """Toggle auto‐exposure on/off."""
+        val = "Continuous" if enable_auto else "Off"
+        self._set(PROP_EXPOSURE_AUTO, val)
+
+    def update_auto_gain(self, enable_auto: bool):
+        """Toggle auto‐gain on/off."""
+        val = "Continuous" if enable_auto else "Off"
+        self._set(PROP_GAIN_AUTO, val)
 
     def run(self):
         self._safe_init()
