@@ -305,19 +305,62 @@ class SDKCameraThread(QThread):
             )
             self.camera_video_formats_available.emit([])
 
-    #    def _emit_available_resolutions(self):
-    #        if not self.pm:
-    #            self.camera_resolutions_available.emit([])
-    #            return
-    #
-    #        try:
-    #            w = self.pm.find(PROP_WIDTH).value
-    #            h = self.pm.find(PROP_HEIGHT).value
-    #            pf = self.pm.find(PROP_PIXEL_FORMAT).value
-    #            self.camera_resolutions_available.emit([f"{w}x{h} ({pf})"]) # This signal is still used by CameraControlPanel for now
-    #        except Exception as e:
-    #            log.warning(f"Couldn’t list resolutions: {e}")
-    #            self.camera_resolutions_available.emit([])
+    def _emit_available_resolutions(
+        self,
+    ):  # This is the OLD method UI relies on for now
+        if not self.pm:
+            self.camera_resolutions_available.emit([])
+            return
+        try:
+            w_prop = self.pm.find(PROP_WIDTH)
+            h_prop = self.pm.find(PROP_HEIGHT)
+            pf_prop = self.pm.find(PROP_PIXEL_FORMAT)
+
+            # Check if properties were found and are available
+            if not (
+                w_prop
+                and w_prop.is_available
+                and h_prop
+                and h_prop.is_available
+                and pf_prop
+                and pf_prop.is_available
+            ):
+                log.warning(
+                    "One or more properties (Width, Height, PixelFormat) not available for _emit_available_resolutions."
+                )
+                self.camera_resolutions_available.emit([])
+                return
+
+            w = w_prop.value
+            h = h_prop.value
+            pf_val = pf_prop.value  # This could be an enum object or a string
+
+            # Robustly get the pixel format name
+            pf_name = ""
+            if hasattr(
+                pf_val, "name"
+            ):  # If it's an enum entry object with a .name attribute
+                pf_name = pf_val.name
+            elif isinstance(pf_val, str):  # If it's already a string
+                pf_name = pf_val
+            else:  # Fallback if it's something else (e.g., an integer ID)
+                pf_name = str(pf_val)
+                log.warning(
+                    f"PixelFormat value is not a standard enum or string: {pf_val}. Using its string representation."
+                )
+
+            resolution_string = f"{w}x{h} ({pf_name})"
+            self.camera_resolutions_available.emit([resolution_string])
+            log.debug(
+                f"Emitted (old style) available resolution via camera_resolutions_available: {resolution_string}"
+            )
+
+        except Exception as e:
+            log.warning(
+                f"Could not list resolutions (old style for camera_resolutions_available signal): {e}",
+                exc_info=True,
+            )
+            self.camera_resolutions_available.emit([])
 
     def run(self):
         log.info(
@@ -347,7 +390,7 @@ class SDKCameraThread(QThread):
                             "Device is not open before enumerating video formats."
                         )
 
-                    video_format_descs = self.device_info.video_format_descs
+                    video_format_descs = self.grabber.available_video_format_descs
                     if not video_format_descs:
                         log.warning(
                             "Camera did not report any video format descriptors. Using fallback."
