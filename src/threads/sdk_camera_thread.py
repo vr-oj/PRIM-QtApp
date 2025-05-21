@@ -120,6 +120,13 @@ class SDKCameraThread(QThread):
     def run(self):
         self._safe_init()
         self.grabber = ic4.Grabber()
+        # give the grabber up to 5 seconds to negotiate AcquisitionStart
+        try:
+            # some versions expose a setter...
+            self.grabber.set_timeout(5000)
+        except AttributeError:
+            # ...others use a property
+            self.grabber.timeout = 5000
 
         try:
             # 1) Open camera
