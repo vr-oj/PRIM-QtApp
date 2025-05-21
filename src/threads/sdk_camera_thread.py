@@ -137,6 +137,16 @@ class SDKCameraThread(QThread):
                 self.device_info = devs[0]
             self.grabber.device_open(self.device_info)
             self.pm = self.grabber.device_property_map
+            # --- GigE optimization: set packet size to max (e.g. 8228) ---
+            try:
+                psize_prop = self.pm.find("GevSCPSPacketSize")
+                if psize_prop and psize_prop.is_available:
+                    # use the lesser of max supported and typical jumbo frame size
+                    jumbo = min(int(psize_prop.maximum), 8228)
+                    self.pm.set_value("GevSCPSPacketSize", jumbo)
+                    log.info(f"Optimized packet size set to {jumbo}")
+            except Exception as e:
+                log.warning(f"Could not set GevSCPSPacketSize: {e}")
 
             # --- enumerate exposure & gain caps for the UI ---
             controls = {}
@@ -199,7 +209,7 @@ class SDKCameraThread(QThread):
             self.sink.timeout = 15000  # 15 s
 
             # a brief pause lets the camera apply settings
-            time.sleep(0.05)
+            time.sleep(0.2)
 
             self.grabber.stream_setup(
                 self.sink,
