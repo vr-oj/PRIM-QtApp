@@ -173,7 +173,7 @@ class CameraControlPanel(QGroupBox):
         if isinstance(res, str):
             self.resolution_selected.emit(res)
 
-    @pyqtSlot(object)
+    @pyqtSlot(list)
     def update_camera_resolutions_list(self, modes: list):
         """Update the resolution drop-down with available modes."""
         self.res_selector.blockSignals(True)
