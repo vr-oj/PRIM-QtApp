@@ -67,7 +67,7 @@ class SDKCameraThread(QThread):
     ):
         super().__init__(parent)
 
-        # user-requested parameters (we keep them for signature compatibility)
+        # user-requested parameters
         self.device_info = device_info
         self.target_fps = target_fps
         self.desired_width = desired_width
@@ -94,12 +94,13 @@ class SDKCameraThread(QThread):
         # listener for QueueSink
         self.dummy_listener = DummySinkListener()
 
+        # for video-format selection
         self.selected_video_format_identifier = None
 
     def request_stop(self):
         self._stop_requested = True
 
-    # these are called from the GUI thread
+    # GUI thread slots
     def update_exposure(self, exp_us: int):
         self._pending_exposure_us = float(exp_us)
 
@@ -282,7 +283,7 @@ class SDKCameraThread(QThread):
             else:  # Fallback if it's something unexpected (e.g. int id of pixel format)
                 pf_name = str(pf_val)
 
-            dummy_id = f"current_{w}x{h}_{pf_name.replace(' ','_')}"  # Make a somewhat unique ID
+            dummy_id = f"current_{w}x{h}_{pf_name.replace(' ','_')}"
             display_text = f"{w}x{h} ({pf_name})"
 
             log.info(
@@ -292,11 +293,10 @@ class SDKCameraThread(QThread):
                 [{"text": display_text, "id": dummy_id}]
             )
 
-            # Also set this as the 'selected' one if no other choice yet
             if not self.selected_video_format_identifier:
                 self.selected_video_format_identifier = dummy_id
                 log.info(
-                    f"Set selected_video_format_identifier to fallback: {dummy_id}"
+                    f" Set selected_video_format_identifier to fallback: {dummy_id}"
                 )
 
         except Exception as e:
@@ -305,9 +305,7 @@ class SDKCameraThread(QThread):
             )
             self.camera_video_formats_available.emit([])
 
-    def _emit_available_resolutions(
-        self,
-    ):  # This is the OLD method UI relies on for now
+    def _emit_available_resolutions(self):
         if not self.pm:
             self.camera_resolutions_available.emit([])
             return
@@ -316,7 +314,6 @@ class SDKCameraThread(QThread):
             h_prop = self.pm.find(PROP_HEIGHT)
             pf_prop = self.pm.find(PROP_PIXEL_FORMAT)
 
-            # Check if properties were found and are available
             if not (
                 w_prop
                 and w_prop.is_available
@@ -333,43 +330,55 @@ class SDKCameraThread(QThread):
 
             w = w_prop.value
             h = h_prop.value
-            pf_val = pf_prop.value  # This could be an enum object or a string
+            pf_val = pf_prop.value
 
-            # Robustly get the pixel format name
             pf_name = ""
-            if hasattr(
-                pf_val, "name"
-            ):  # If it's an enum entry object with a .name attribute
+            if hasattr(pf_val, "name"):
                 pf_name = pf_val.name
-            elif isinstance(pf_val, str):  # If it's already a string
+            elif isinstance(pf_val, str):
                 pf_name = pf_val
-            else:  # Fallback if it's something else (e.g., an integer ID)
+            else:
                 pf_name = str(pf_val)
                 log.warning(
-                    f"PixelFormat value is not a standard enum or string: {pf_val}. Using its string representation."
+                    f"PixelFormat value is not standard: {pf_val}. Using str()."
                 )
 
             resolution_string = f"{w}x{h} ({pf_name})"
             self.camera_resolutions_available.emit([resolution_string])
-            log.debug(
-                f"Emitted (old style) available resolution via camera_resolutions_available: {resolution_string}"
-            )
+            log.debug(f"Emitted available resolution: {resolution_string}")
 
         except Exception as e:
             log.warning(
-                f"Could not list resolutions (old style for camera_resolutions_available signal): {e}",
+                f"Could not list resolutions: {e}",
                 exc_info=True,
             )
             self.camera_resolutions_available.emit([])
 
+    def _enumerate_video_formats(self):
+        """
+        Ask the SDK for its complete VideoFormatDesc list,
+        then emit them as a list of {'id': name, 'text': description}.
+        """
+        try:
+            descs = self.grabber.device_info.video_format_descs
+            options = []
+            for d in descs:
+                min_w, min_h = d.min_size.width, d.min_size.height
+                max_w, max_h = d.max_size.width, d.max_size.height
+                txt = f"{d.name}: {min_w}×{min_h} → {max_w}×{max_h}"
+                options.append({"id": d.name, "text": txt})
+            log.info(f"Discovered {len(options)} video formats")
+            self.camera_video_formats_available.emit(options)
+        except Exception as ex:
+            log.error(f"Failed to enumerate video formats: {ex}", exc_info=True)
+            self.camera_video_formats_available.emit([])
+
     def run(self):
         log.info(
-            f"SDKCameraThread starting for {self.device_info.model_name if self.device_info else 'Unknown'} "
-            # f"Type of self.device_info: {type(self.device_info)}" # You added this, which is good for debugging
+            f"SDKCameraThread starting for {self.device_info.model_name if self.device_info else 'Unknown'}"
         )
         self.grabber = ic4.Grabber()
         try:
-            # pick first camera if none given
             if not self.device_info:
                 devs = ic4.DeviceEnum.devices()
                 if not devs:
@@ -379,21 +388,38 @@ class SDKCameraThread(QThread):
                     f"No device_info provided, selected first device: {self.device_info.model_name}"
                 )
 
-            log.info(
-                f"Attempting to open device: {self.device_info.model_name}"
-            )  # Added this
+            log.info(f"Attempting to open device: {self.device_info.model_name}")
             self.grabber.device_open(self.device_info)
             self.pm = self.grabber.device_property_map
-            log.info(
-                f"Opened {self.device_info.model_name} successfully."
-            )  # Added this
+            log.info(f"Opened {self.device_info.model_name} successfully.")
 
-            # === TEMPORARY SIMPLIFIED SETUP: USE CAMERA DEFAULTS + CLAMP FPS ===
+            # Enumerate & emit all SDK-defined video formats
+            self._enumerate_video_formats()
+
+            # Apply user-selected format if any
+            if self.selected_video_format_identifier:
+                descs = self.grabber.device_info.video_format_descs
+                chosen = next(
+                    (
+                        d
+                        for d in descs
+                        if d.name == self.selected_video_format_identifier
+                    ),
+                    None,
+                )
+                if chosen:
+                    log.info(f"Applying user-selected video format: {chosen.name}")
+                    chosen.create_video_format()
+                else:
+                    log.warning(
+                        f"Selected format ID '{self.selected_video_format_identifier}' not found."
+                    )
+
+            # === Simplified default + FPS clamp setup ===
             log.info(
                 "Attempting simplified setup using camera defaults and FPS clamping."
             )
             try:
-                # Log current state (mostly for Width, Height, PixelFormat as they are default)
                 wp = self.pm.find(PROP_WIDTH)
                 hp = self.pm.find(PROP_HEIGHT)
                 pfp = self.pm.find(PROP_PIXEL_FORMAT)
@@ -402,34 +428,26 @@ class SDKCameraThread(QThread):
                 initial_h = hp.value if hp and hp.is_available else "N/A"
                 initial_pf_val = pfp.value if pfp and pfp.is_available else "N/A"
 
-                initial_pf_name = initial_pf_val  # Default if not an object
-                if hasattr(initial_pf_val, "name"):  # If it's an enum entry object
+                initial_pf_name = initial_pf_val
+                if hasattr(initial_pf_val, "name"):
                     initial_pf_name = initial_pf_val.name
-                elif isinstance(initial_pf_val, str):  # If it's already a string
+                elif isinstance(initial_pf_val, str):
                     initial_pf_name = initial_pf_val
-                else:  # Fallback
+                else:
                     initial_pf_name = str(initial_pf_val)
 
                 log.info(
                     f"Camera default state: W={initial_w}, H={initial_h}, PF='{initial_pf_name}'"
                 )
 
-                # Determine QImage format based on this default PixelFormat
                 current_pf_name_lower = initial_pf_name.lower()
                 if "mono8" in current_pf_name_lower:
                     self.actual_qimage_format = QImage.Format_Grayscale8
                     log.info(
                         f"QImage format set to Grayscale8 for PF: {initial_pf_name}"
                     )
-                elif (
-                    "bayer" in current_pf_name_lower
-                ):  # Example for Bayer, if you ever use it
-                    # For Bayer, you'd typically convert to RGB before creating QImage for display
-                    # Or use a QImage format that can represent raw Bayer if your display logic handles it.
-                    # This is just a placeholder.
-                    self.actual_qimage_format = (
-                        QImage.Format_RGB888
-                    )  # Assuming debayering will happen
+                elif "bayer" in current_pf_name_lower:
+                    self.actual_qimage_format = QImage.Format_RGB888
                     log.info(
                         f"QImage format set for potential RGB (from Bayer PF: {initial_pf_name})"
                     )
@@ -439,7 +457,6 @@ class SDKCameraThread(QThread):
                     )
                     self.actual_qimage_format = QImage.Format_Grayscale8
 
-                # Configure FrameRate
                 fps_prop = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
                 desired_fps_to_set = float(self.target_fps)
 
@@ -455,9 +472,7 @@ class SDKCameraThread(QThread):
                             log.warning(
                                 f"Desired FPS {desired_fps_to_set:.2f} is out of range ({min_fps:.2f}-{max_fps:.2f})."
                             )
-                            if (
-                                desired_fps_to_set > max_fps and max_fps > 0
-                            ):  # Ensure max_fps is sensible
+                            if desired_fps_to_set > max_fps and max_fps > 0:
                                 desired_fps_to_set = max_fps
                                 log.info(
                                     f"Clamping FPS to maximum: {desired_fps_to_set:.2f}"
@@ -467,8 +482,6 @@ class SDKCameraThread(QThread):
                                 log.info(
                                     f"Clamping FPS to minimum: {desired_fps_to_set:.2f}"
                                 )
-                            # else: # max_fps might be 0 or invalid if camera doesn't support rate control
-                            #     log.warning(f"Could not clamp FPS {desired_fps_to_set:.2f} as max_fps is {max_fps:.2f}. Frame rate might not be controllable.")
 
                         if self._is_prop_writable(fps_prop):
                             self._set_property_value(
@@ -491,7 +504,6 @@ class SDKCameraThread(QThread):
                         f"'{PROP_ACQUISITION_FRAME_RATE}' property not found or not available."
                     )
 
-                # Other essential settings
                 self._set_property_value(PROP_ACQUISITION_MODE, "Continuous")
                 self._set_property_value(PROP_TRIGGER_MODE, "Off")
 
@@ -513,13 +525,12 @@ class SDKCameraThread(QThread):
 
             # push initial state to UI
             self._apply_pending_properties()
-            self._emit_available_resolutions()  # This will use the current (default) W,H,PF
+            self._emit_available_resolutions()
             self._emit_camera_properties()
-            # === SIMPLIFIED CAMERA SETUP LOGIC END ===
 
             # start sink + streaming
             self.sink = ic4.QueueSink(self.dummy_listener)
-            self.sink.timeout = 200  # Timeout for pop_output_buffer in milliseconds
+            self.sink.timeout = 200
             if hasattr(self.sink, "accept_incomplete_frames"):
                 self.sink.accept_incomplete_frames = False
             log.info("QueueSink created with 200ms timeout.")
@@ -536,12 +547,7 @@ class SDKCameraThread(QThread):
                 self._apply_pending_properties()
 
                 try:
-                    # log.debug("Attempting to pop output buffer...")
                     buf = self.sink.pop_output_buffer()
-                    # if buf:
-                    #    log.debug(f"pop_output_buffer returned: {type(buf)}, id: {buf.image_id_device if buf else 'N/A'}, valid: {buf.is_valid if buf else 'N/A'}")
-                    # else:
-                    #    log.debug("pop_output_buffer returned None (likely timeout if no IC4Exception.Timeout)")
 
                 except ic4.IC4Exception as ex:
                     if ex.code == ic4.ErrorCode.Timeout:
@@ -595,27 +601,22 @@ class SDKCameraThread(QThread):
 
                 try:
                     fmt = self.actual_qimage_format
-                    stride = w  # Default stride assumption for simple formats
+                    stride = w
                     raw = None
 
                     if hasattr(buf, "numpy_wrap"):
                         arr = buf.numpy_wrap()
-                        # For 2D (mono), arr.strides might be (bytes_per_row, bytes_per_pixel)
-                        # For 3D (color), (bytes_per_row, bytes_per_pixel_group, bytes_per_channel)
                         stride = arr.strides[0]
                         raw = arr.tobytes()
-                    elif hasattr(
-                        buf, "numpy_copy"
-                    ):  # Should ideally not be used in hot path if numpy_wrap is available
+                    elif hasattr(buf, "numpy_copy"):
                         arr = buf.numpy_copy()
                         stride = arr.strides[0]
                         raw = arr.tobytes()
                     elif hasattr(buf, "pointer"):
                         ptr = buf.pointer
-                        # pitch is usually the number of bytes per line (stride)
                         pitch = getattr(
                             buf, "pitch", w * buf.image_type.bytes_per_pixel
-                        )  # Calculate if not available
+                        )
                         raw = ctypes.string_at(ptr, pitch * h)
                         stride = pitch
                     else:
@@ -629,9 +630,7 @@ class SDKCameraThread(QThread):
                         if img.isNull():
                             log.warning("Built QImage is null")
                         else:
-                            self.frame_ready.emit(
-                                img.copy(), raw
-                            )  # Send a copy of QImage
+                            self.frame_ready.emit(img.copy(), raw)
                     else:
                         log.warning("Raw data could not be extracted from buffer.")
 
@@ -641,9 +640,7 @@ class SDKCameraThread(QThread):
                         exc_info=True,
                     )
 
-            log.info("Exited acquisition loop")
-
-        except Exception as e_unhandled:  # Catch-all for the main try block in run()
+        except Exception as e_unhandled:
             log.exception(
                 f"Unhandled exception in SDKCameraThread.run(): {e_unhandled}"
             )
@@ -653,7 +650,6 @@ class SDKCameraThread(QThread):
 
         finally:
             log.info("Shutting down grabber in SDKCameraThread.run() finally block")
-            # ... (rest of your finally block)
             if self.grabber:
                 try:
                     if self.grabber.is_streaming:
