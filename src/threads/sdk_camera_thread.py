@@ -160,19 +160,22 @@ class SDKCameraThread(QThread):
                         )
                         break
                 else:
-                    # 2) No documented resolution fits → clamp to minimum FPS and retry
+                    # no matching resolution → clamp to minimum FPS and retry
                     fps_p = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
                     if fps_p and fps_p.is_available:
                         log.warning(
                             "No matching resolution; clamping to min FPS and retrying"
                         )
+                        # stop any partial stream first
                         try:
                             if self.grabber.is_streaming:
                                 self.grabber.stream_stop()
                                 time.sleep(0.1)
                         except Exception:
                             pass
+                        # apply min-FPS
                         self._set(PROP_ACQUISITION_FRAME_RATE, fps_p.minimum)
+                        # now restart acquisition
                         self.grabber.stream_setup(
                             self.sink,
                             setup_option=ic4.StreamSetupOption.ACQUISITION_START,
