@@ -144,12 +144,9 @@ class QtCameraWidget(QWidget):
         log.info(
             f"Starting new SDKCameraThread for {self._active_device_info.model_name} with WxH: {self.current_width}x{self.current_height}"
         )
-        # pass desired_width/desired_height so the thread will try our UI choice first
         self._camera_thread = SDKCameraThread(
             device_info=self._active_device_info,
             target_fps=self.current_target_fps,
-            desired_width=self.current_width,
-            desired_height=self.current_height,
             parent=self,
         )
 
@@ -189,13 +186,6 @@ class QtCameraWidget(QWidget):
                     self._start_new_camera_thread()
         except ValueError:
             log.error(f"Could not parse resolution string: {resolution_str}")
-
-    @pyqtSlot(bool)
-    def set_auto_gain(self, enable_auto: bool):
-        """(if you ever add an 'Auto Gain' checkbox)"""
-        log.debug(f"QtCameraWidget: Queuing auto‐gain={enable_auto}")
-        if self._camera_thread and self._camera_thread.isRunning():
-            self._camera_thread.update_auto_gain(enable_auto)
 
     # -------------------- debounced exposure & gain --------------------
 
