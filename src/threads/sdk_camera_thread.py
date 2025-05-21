@@ -101,10 +101,11 @@ class SDKCameraThread(QThread):
             log.info(f"Opened {self.device_info.model_name}")
 
             # list supported resolutions & formats
-            # (widget can fill comboboxes)
             model = getattr(self.device_info, "model_name", "")
             formats = MODEL_FORMAT_TABLES.get(model, [])
-            self.camera_resolutions_available.emit([(w, h) for w, h, _ in formats])
+            # emit strings like "2592×2048"
+            res_list = [f"{w}×{h}" for w, h, _ in formats]
+            self.camera_resolutions_available.emit(res_list)
             self.camera_video_formats_available.emit([PROP_PIXEL_FORMAT])
 
             # PixelFormat → Mono8
