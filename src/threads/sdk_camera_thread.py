@@ -45,7 +45,11 @@ class DummySinkListener:
 
 
 class SDKCameraThread(QThread):
+    # Signals for the widget to hook up
     frame_ready = pyqtSignal(QImage, object)
+    camera_resolutions_available = pyqtSignal(list)
+    camera_video_formats_available = pyqtSignal(list)
+    camera_properties_updated = pyqtSignal(dict)
     camera_error = pyqtSignal(str, str)
 
     def __init__(
@@ -73,54 +77,63 @@ class SDKCameraThread(QThread):
             pass
 
     def _set(self, name, val):
-        prop = self.pm.find(name)
-        if prop and prop.is_available and not getattr(prop, "is_readonly", True):
+        p = self.pm.find(name)
+        if p and p.is_available and not getattr(p, "is_readonly", True):
             self.pm.set_value(name, val)
             log.info(f"Set {name} → {val}")
+            # notify widget that a property changed
+            self.camera_properties_updated.emit({name: val})
 
     def run(self):
         self._safe_init()
         self.grabber = ic4.Grabber()
+
         try:
-            # Open camera
+            # open camera
             if not self.device_info:
                 devs = ic4.DeviceEnum.devices()
                 if not devs:
                     raise RuntimeError("No cameras found")
                 self.device_info = devs[0]
+
             self.grabber.device_open(self.device_info)
             self.pm = self.grabber.device_property_map
             log.info(f"Opened {self.device_info.model_name}")
 
-            # Base settings
+            # list supported resolutions & formats
+            # (widget can fill comboboxes)
+            model = getattr(self.device_info, "model_name", "")
+            formats = MODEL_FORMAT_TABLES.get(model, [])
+            self.camera_resolutions_available.emit([(w, h) for w, h, _ in formats])
+            self.camera_video_formats_available.emit([PROP_PIXEL_FORMAT])
+
+            # PixelFormat → Mono8
             self._set(PROP_PIXEL_FORMAT, "Mono8")
-            # clamp FPS into valid range
+
+            # clamp FPS
             fps_p = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
             if fps_p and fps_p.is_available:
                 mn, mx = fps_p.minimum, fps_p.maximum
                 tgt = max(mn, min(self.target_fps, mx))
                 self._set(PROP_ACQUISITION_FRAME_RATE, tgt)
+
+            # continuous streaming
             self._set(PROP_ACQUISITION_MODE, "Continuous")
             self._set(PROP_TRIGGER_MODE, "Off")
 
-            # Prepare sink
+            # build sink
             self.sink = ic4.QueueSink(self.listener)
             self.sink.timeout = 200
 
-            # Try to start streaming
+            # start stream with fallback logic
             try:
                 self.grabber.stream_setup(
                     self.sink,
                     setup_option=ic4.StreamSetupOption.ACQUISITION_START,
                 )
             except ic4.IC4Exception as ex:
-                log.warning(
-                    f"Initial stream start failed: {ex}. Trying documented fallbacks…"
-                )
-                model = getattr(self.device_info, "model_name", "")
-
-                # 1) Resolution‐based fallback
-                for w, h, maxfps in MODEL_FORMAT_TABLES.get(model, []):
+                log.warning(f"Initial stream start failed: {ex}; trying fallbacks…")
+                for w, h, maxfps in formats:
                     if maxfps >= self.target_fps:
                         log.warning(
                             f"{model}: fallback to {w}×{h} @ {self.target_fps} FPS"
@@ -136,11 +149,9 @@ class SDKCameraThread(QThread):
                         )
                         break
                 else:
-                    # 2) No resolution match → clamp to minimum FPS
+                    # clamp to minimum FPS
                     if fps_p and fps_p.is_available:
-                        log.warning(
-                            "No matching resolution; clamping to min FPS and retrying"
-                        )
+                        log.warning("No matching resolution; clamping to minimum FPS")
                         if getattr(self.grabber, "is_streaming", False):
                             self.grabber.stream_stop()
                             time.sleep(0.1)
@@ -150,9 +161,9 @@ class SDKCameraThread(QThread):
                             setup_option=ic4.StreamSetupOption.ACQUISITION_START,
                         )
 
-            log.info("Streaming started—entering acquisition loop")
+            log.info("Streaming started — entering acquisition loop")
 
-            # Acquisition loop
+            # acquisition loop
             while not self._stop:
                 try:
                     buf = self.sink.pop_output_buffer()
@@ -164,28 +175,26 @@ class SDKCameraThread(QThread):
                     time.sleep(0.01)
                     continue
 
-                w, h = buf.image_type.width, buf.image_type.height
-                pf = buf.image_type.pixel_format.name
+                it = buf.image_type
+                w, h = it.width, it.height
+                pf = it.pixel_format.name
 
-                # extract raw bytes
+                # grab the raw data
                 if hasattr(buf, "numpy_wrap"):
                     arr = buf.numpy_wrap()
                     data = arr.tobytes()
                     stride = arr.strides[0]
                 else:
-                    pitch = getattr(buf, "pitch", w * buf.image_type.bytes_per_pixel)
+                    pitch = getattr(buf, "pitch", w * it.bytes_per_pixel)
                     data = ctypes.string_at(buf.pointer, pitch * h)
                     stride = pitch
 
-                if data:
-                    fmt = (
-                        QImage.Format_Grayscale8
-                        if "Mono8" in pf
-                        else QImage.Format_RGB888
-                    )
-                    img = QImage(data, w, h, stride, fmt)
-                    if not img.isNull():
-                        self.frame_ready.emit(img.copy(), data)
+                fmt = (
+                    QImage.Format_Grayscale8 if "Mono8" in pf else QImage.Format_RGB888
+                )
+                img = QImage(data, w, h, stride, fmt)
+                if not img.isNull():
+                    self.frame_ready.emit(img.copy(), data)
 
             log.info("Acquisition loop exited")
 
@@ -195,12 +204,14 @@ class SDKCameraThread(QThread):
 
         finally:
             log.info("Cleaning up camera thread")
-            if self.grabber:
+            if self.grabber and getattr(self.grabber, "is_streaming", False):
                 try:
-                    if getattr(self.grabber, "is_streaming", False):
-                        self.grabber.stream_stop()
-                    if getattr(self.grabber, "is_device_open", False):
-                        self.grabber.device_close()
-                except Exception:
+                    self.grabber.stream_stop()
+                except:
+                    pass
+            if self.grabber and getattr(self.grabber, "is_device_open", False):
+                try:
+                    self.grabber.device_close()
+                except:
                     pass
             log.info("Camera thread stopped")
