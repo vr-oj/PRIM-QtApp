@@ -251,6 +251,10 @@ class CameraControlPanel(QGroupBox):
             )
             self.gain_slider.setValue(max(smin, min(pos, smax)))
 
+            # enable/disable gain controls based on availability
+            self.gain_slider.setEnabled(gain_enabled)
+            self.gain_spinbox.setEnabled(gain_enabled)
+
             self.gain_spinbox.blockSignals(False)
             self.gain_slider.blockSignals(False)
 
