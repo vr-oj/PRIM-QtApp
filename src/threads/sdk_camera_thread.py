@@ -132,7 +132,22 @@ class SDKCameraThread(QThread):
                 self.device_info = devs[0]
 
             self.grabber.device_open(self.device_info)
-            self.pm = self.grabber.device_property_map
+
+            log.info("=== GenICam property dump BEGIN ===")
+            for prop_name in self.pm.to_dict().keys():
+                prop = self.pm.find(prop_name)
+                if not prop or not prop.is_available:
+                    continue
+                # some props have min/max/value, some are enums or commands
+                info = {
+                    "value": prop.value,
+                    "min": getattr(prop, "minimum", None),
+                    "max": getattr(prop, "maximum", None),
+                    "access": "RW" if not getattr(prop, "is_readonly", True) else "RO",
+                    "type": type(prop.value).__name__,
+                }
+                log.info(f"  {prop_name}: {info}")
+            log.info("=== GenICam property dump END ===")
 
             # 2) GigE optimizations: packet size & throughput limits
             try:
