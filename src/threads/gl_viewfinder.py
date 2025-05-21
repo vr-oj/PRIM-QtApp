@@ -25,8 +25,7 @@ class GLViewfinder(QOpenGLWidget):
         self.update()  # schedule paintGL
 
     def initializeGL(self):
-        self.ctx = self.context().versionFunctions()
-        self.ctx.initializeOpenGLFunctions()
+        self.initializeOpenGLFunctions()
         # create a simple shader program to draw textured quad
         vs_src = """
             attribute vec2 pos;
