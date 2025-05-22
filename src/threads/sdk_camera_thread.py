@@ -208,7 +208,7 @@ class SDKCameraThread(QThread):
         self._safe_init()
         self.grabber = ic4.Grabber()
         try:
-            self.grabber.set_timeout(10000)  # General timeout for grabber operations
+            self.grabber.set_timeout(10000)
         except AttributeError:
             self.grabber.timeout = 10000
 
@@ -283,12 +283,9 @@ class SDKCameraThread(QThread):
             self._set(PROP_ACQUISITION_FRAME_RATE, self.target_fps)
             log.info("SDKCameraThread: Camera configuration attempt finished.")
 
-            # ---MODIFIED SINK TYPE AND SETUP ---
-            self.listener = DummySinkListener()  # Using simplified listener
-            self.sink = ic4.QueueSink(self.listener)  # Changed to QueueSink
-            self.sink.timeout = (
-                500  # Set timeout for pop_output_buffer, as in test_ic4.py
-            )
+            self.listener = DummySinkListener()
+            self.sink = ic4.QueueSink(self.listener)
+            self.sink.timeout = 500
             log.info("SDKCameraThread: QueueSink created.")
 
             log.info(
@@ -298,17 +295,25 @@ class SDKCameraThread(QThread):
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
             log.info("SDKCameraThread: Stream setup and acquisition possibly started.")
-            # --- END OF MODIFIED SINK TYPE AND SETUP ---
 
             frame_count = 0
             start_time = time.time()
 
             while not self._stop:
                 try:
-                    # For QueueSink, pop_output_buffer usually takes its timeout from sink.timeout
-                    # but providing an explicit timeout_ms here is also fine and overrides.
-                    buf = self.sink.pop_output_buffer(timeout_ms=100)
-                    if buf is None:
+                    # --- MODIFIED pop_output_buffer CALL ---
+                    buf = self.sink.pop_output_buffer()  # Removed timeout_ms argument
+                    # --- END OF MODIFICATION ---
+
+                    if (
+                        buf is None
+                    ):  # pop_output_buffer will return None on timeout (based on self.sink.timeout)
+                        log.debug(
+                            "pop_output_buffer timed out (expected behavior if no frame ready)"
+                        )
+                        time.sleep(
+                            0.005
+                        )  # Optional short sleep if timeouts are frequent
                         continue
 
                     frame_count += 1
@@ -372,6 +377,11 @@ class SDKCameraThread(QThread):
 
                 except ic4.IC4Exception as e:
                     if hasattr(e, "code") and e.code == ic4.ErrorCode.Timeout:
+                        # This specific error code for Timeout from pop_output_buffer is what QueueSink uses.
+                        # SnapSink used to raise an IC4Exception without a specific code, or just return None.
+                        log.debug(
+                            "pop_output_buffer IC4Exception Timeout (expected if no frame)"
+                        )
                         time.sleep(0.005)
                         continue
                     log.error(
