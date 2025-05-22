@@ -38,13 +38,17 @@ class DummySinkListener:
         log.debug("Sink disconnected")
 
 
+from PyQt5.QtCore import pyqtSignal
+
+
 class SDKCameraThread(QThread):
+    camera_configured = pyqtSignal(object, object)  # emits (device, sink)
     frame_ready = pyqtSignal(QImage, object)
-    # ... (other signals remain the same) ...
     camera_resolutions_available = pyqtSignal(list)
     camera_video_formats_available = pyqtSignal(list)
     camera_properties_updated = pyqtSignal(dict)
     camera_error = pyqtSignal(str, str)
+    camera_configured = pyqtSignal(object, object)  # emits (device, sink)
 
     def __init__(
         self,
@@ -311,9 +315,9 @@ class SDKCameraThread(QThread):
             log.info(
                 "SDKCameraThread: Attempting stream_setup with ACQUISITION_START option..."
             )
-            self.grabber.stream_setup(
-                self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
-            )
+            self.camera_configured.emit(self.device, self.sink)
+            return  # Exit the thread now that setup is done
+
             log.info("SDKCameraThread: Stream setup and acquisition possibly started.")
 
             frame_count = 0
@@ -426,7 +430,7 @@ class SDKCameraThread(QThread):
                         log.info(
                             "SDKCameraThread: Stopping stream (if it was considered started by the grabber)..."
                         )
-                        self.grabber.stream_stop()
+                        # moved to main thread
                         log.info("SDKCameraThread: Stream stopped.")
                 except Exception as e_stop:
                     log.exception(f"Exception during stream_stop: {e_stop}")
