@@ -23,7 +23,7 @@ PROP_GAIN = "Gain"
 
 class DummySinkListener:
     # Required by SnapSink: how many buffers to allocate and require on connect
-    num_buffers_alloc_on_connect = 6
+    num_buffers_allocation_threshold = 6
     num_buffers_required_on_connect = 6
 
     def sink_connected(self, sink, image_type, min_buffers_required):
