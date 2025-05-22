@@ -1,13 +1,5 @@
 import logging
-
-from PyQt5.QtWidgets import (
-    QWidget,
-    QGroupBox,
-    QFormLayout,
-    QHBoxLayout,
-    QVBoxLayout,
-    QLabel,
-)
+from PyQt5.QtWidgets import QWidget, QGroupBox, QHBoxLayout, QFormLayout
 from PyQt5.QtCore import pyqtSignal, pyqtSlot
 
 from .camera_control_panel import CameraControlPanel
@@ -21,18 +13,16 @@ class TopControlPanel(QWidget):
     Composite panel combining camera controls, device status, and plot controls.
     """
 
-    # Emitted when any camera parameter changes (name, value)
+    camera_selected = pyqtSignal(object)
+    resolution_selected = pyqtSignal(object)
     parameter_changed = pyqtSignal(str, object)
 
-    # Plot control signals
     x_axis_limits_changed = pyqtSignal(float, float)
     y_axis_limits_changed = pyqtSignal(float, float)
     export_plot_image_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-
-        # Layout
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 2, 5, 2)
         layout.setSpacing(10)
@@ -41,8 +31,8 @@ class TopControlPanel(QWidget):
         self.camera_controls = CameraControlPanel(self)
         layout.addWidget(self.camera_controls, 1)
 
-        # Re-emit parameter changes
-        self.camera_controls.parameter_changed.connect(self.parameter_changed)
+        # Wire camera_controls parameter_changed to internal router
+        self.camera_controls.parameter_changed.connect(self._route_camera_param)
 
         # PRIM Device status box
         status_box = QGroupBox("PRIM Device Status")
@@ -73,6 +63,16 @@ class TopControlPanel(QWidget):
         self.plot_controls.export_plot_image_requested.connect(
             self.export_plot_image_requested
         )
+
+    @pyqtSlot(str, object)
+    def _route_camera_param(self, name, value):
+        # Emit generic parameter change
+        self.parameter_changed.emit(name, value)
+        # Specific camera signals
+        if name == "CameraSelection":
+            self.camera_selected.emit(value)
+        elif name == "Resolution":
+            self.resolution_selected.emit(value)
 
     @pyqtSlot(dict)
     def update_camera_ui_from_properties(self, props: dict):
