@@ -44,6 +44,7 @@ class CameraControlPanel(QGroupBox):
 
         # Camera device selector
         self.cam_selector = QComboBox()
+        self.cam_selector.addItem("Select Camera", None)
         self.cam_selector.setToolTip("Select Camera Device")
         src_layout.addRow("Device:", self.cam_selector)
 
@@ -112,11 +113,16 @@ class CameraControlPanel(QGroupBox):
         Enumerate available TIS/IC4 cameras and populate the device combo.
         """
         self.cam_selector.blockSignals(True)
+        # clear everything and re-add placeholder
         self.cam_selector.clear()
+        self.cam_selector.addItem("Select Camera", None)
+
         # No IC4 backend
         if not ic4:
             self.cam_selector.addItem("IC4 library unavailable", None)
             self.cam_selector.blockSignals(False)
+            # ensure placeholder is selected; user then has to pick the real camera at index 1
+            self.cam_selector.setCurrentIndex(0)
             return
         try:
             devices = ic4.DeviceEnum.devices()
@@ -130,7 +136,6 @@ class CameraControlPanel(QGroupBox):
             for dev in devices:
                 label = f"{dev.model_name} (SN:{dev.serial})"
                 self.cam_selector.addItem(label, dev)
-        self.cam_selector.blockSignals(False)
 
     def disable_all_controls(self):
         """
