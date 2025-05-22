@@ -84,8 +84,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._set_initial_splitter_sizes)
         self._set_initial_control_states()
 
-        # route all camera UI changes through one slot
-        self.top_ctrl.parameter_changed.connect(self._on_camera_param)
+        # Hook the real CameraControlPanel signal
+        self.top_ctrl.camera_controls.parameter_changed.connect(self._on_camera_param)
 
         QTimer.singleShot(250, self.top_ctrl.camera_controls.populate_camera_list)
 
@@ -350,6 +350,11 @@ class MainWindow(QMainWindow):
 
         # Launch the camera thread
         self.camera_thread.start()
+
+        # now wire the UI → thread setter
+        self.top_ctrl.camera_controls.parameter_changed.connect(
+            self.camera_thread.set_parameter
+        )
 
     @pyqtSlot(str)
     def _handle_resolution_selection(self, resolution_str: str):
