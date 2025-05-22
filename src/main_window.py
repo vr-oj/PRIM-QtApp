@@ -2,6 +2,7 @@ import logging
 import os
 import sys
 import numpy as np
+import csv
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -44,6 +45,7 @@ from config import (
     DEFAULT_VIDEO_EXTENSION,
     DEFAULT_VIDEO_CODEC,
     SUPPORTED_FORMATS,
+    ABOUT_TEXT,
 )
 
 log = logging.getLogger(__name__)
@@ -86,8 +88,6 @@ class MainWindow(QMainWindow):
         self._set_initial_control_states()
         # Wire TopControlPanel signals now
         self.top_ctrl.camera_selected.connect(self._handle_camera_selection)
-        self.top_ctrl.parameter_changed.connect(self._on_parameter_changed)
-        # Camera-widget signals (resolution & properties) will be hooked in _handle_camera_selection
 
         # Populate camera list after a short delay
         if hasattr(self.top_ctrl, "camera_controls") and self.top_ctrl.camera_controls:
@@ -278,8 +278,8 @@ class MainWindow(QMainWindow):
 
     def _set_initial_control_states(self):
         self.top_ctrl.update_connection_status("Disconnected", False)
-        if hasattr(self.top_ctrl, "camera_controls") and self.top_ctrl.camera_controls:
-            self.top_ctrl.camera_controls.disable_all_controls()
+        # 👇 call the TopControlPanel helper instead
+        self.top_ctrl.disable_all_camera_controls()
         self.start_recording_action.setEnabled(False)
         self.stop_recording_action.setEnabled(False)
 

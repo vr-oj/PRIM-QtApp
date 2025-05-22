@@ -20,10 +20,17 @@ class TopControlPanel(QWidget):
     Composite panel combining camera controls, device status, and plot controls.
     """
 
-    # Unified camera-parameter signal
+    # camera signals (re-add these)
+    camera_selected = pyqtSignal(object)
+    resolution_selected = pyqtSignal(str)
+    exposure_changed = pyqtSignal(int)
+    gain_changed = pyqtSignal(float)
+    auto_exposure_toggled = pyqtSignal(bool)
+
+    # generic passthrough
     parameter_changed = pyqtSignal(str, object)
 
-    # Plot control signals
+    # plot signals…
     x_axis_limits_changed = pyqtSignal(float, float)
     y_axis_limits_changed = pyqtSignal(float, float)
     export_plot_image_requested = pyqtSignal()
@@ -38,6 +45,7 @@ class TopControlPanel(QWidget):
 
         # Camera control panel
         self.camera_controls = CameraControlPanel(self)
+        self.camera_controls.parameter_changed.connect(self._on_camera_param)
         layout.addWidget(self.camera_controls, 1)
 
         # Re-emit low-level camera control changes
@@ -107,3 +115,19 @@ class TopControlPanel(QWidget):
         self.idx_lbl.setText(str(idx))
         self.time_lbl.setText(f"{t_dev:.2f}")
         self.pres_lbl.setText(f"{p_dev:.2f} mmHg")
+
+    @pyqtSlot(str, object)
+    def _on_camera_param(self, name: str, val: object):
+        if name == "CameraSelection":
+            self.camera_selected.emit(val)
+        elif name == "Resolution":
+            self.resolution_selected.emit(val)
+        elif name == "ExposureTime":
+            self.exposure_changed.emit(int(val))
+        elif name == "Gain":
+            self.gain_changed.emit(float(val))
+        elif name == "AutoExposure":
+            self.auto_exposure_toggled.emit(bool(val))
+        else:
+            # any other custom nodes you might want to catch
+            self.parameter_changed.emit(name, val)
