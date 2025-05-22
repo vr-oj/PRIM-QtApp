@@ -931,7 +931,7 @@ class MainWindow(QMainWindow):
     def _test_ic4_main_thread(self):
         """Runs a simplified IC4 test entirely in the main thread."""
         import imagingcontrol4 as ic4
-        from imagingcontrol4.sinks import QueueSink
+        from imagingcontrol4 import QueueSink
 
         try:
             ic4.Library.init()
