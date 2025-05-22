@@ -232,7 +232,10 @@ class SDKCameraThread(QThread):
             )
             self.grabber.device_open(self.device_info)
             self.pm = self.grabber.device_property_map
-            self.device = self.grabber.device
+            self.device = (
+                self.device_info
+            )  # ✅ Just reuse the DeviceInfo you already have
+
             log.info(
                 f"SDKCameraThread: Device '{self.device_info.model_name}' opened successfully."
             )
