@@ -51,19 +51,19 @@ class SDKCameraThread(QThread):
         self,
         device_info=None,
         target_fps: float = 20.0,
-        desired_width: int = 2448,  # Default to a high-res, adjust as needed or via UI
+        desired_width: int = 2448,
         desired_height: int = 2048,
         parent=None,
     ):
         super().__init__(parent)
         self.device_info = device_info
-        self.target_fps = float(target_fps)  # Ensure it's float
+        self.target_fps = float(target_fps)
         self.desired_width = int(desired_width)
         self.desired_height = int(desired_height)
         self._stop = False
         self.grabber = None
         self.sink = None
-        self.pm = None  # PropertyMap
+        self.pm = None
         self.listener = DummySinkListener()
 
     def request_stop(self):
@@ -72,15 +72,13 @@ class SDKCameraThread(QThread):
     def _safe_init(self):
         try:
             ic4.Library.init()
-        except RuntimeError:  # Or ic4.IC4Exception if specific
-            pass  # Already initialized is fine
-        except ic4.IC4Exception:  # Catch specific library exception
+        except (RuntimeError, ic4.IC4Exception):  # Catch specific exceptions
             pass
 
     def _set(self, name, val):
         if not self.pm:
             log.error(f"PropertyMap (self.pm) not initialized. Cannot set {name}.")
-            return False  # Indicate failure
+            return False
 
         prop = self.pm.find(name)
         if not prop:
@@ -91,28 +89,15 @@ class SDKCameraThread(QThread):
             return False
 
         if prop.is_readonly:
-            # Allow setting for specific known-updatable properties usually related to live adjustments
             if name not in (PROP_EXPOSURE_TIME, PROP_GAIN, PROP_EXPOSURE_AUTO):
                 log.warning(
                     f"Skipping read-only property '{name}' during setup. Current value: {prop.value if hasattr(prop, 'value') else 'N/A'}"
                 )
-                return False  # Do not proceed for read-only setup properties
-            # If it IS Exposure/Gain/Auto, we might proceed if it's a pseudo read-only (e.g. auto mode is on)
-            # but for this function's primary use (setup), a true read-only should be skipped.
+                return False
 
         try:
             current_value_str = "N/A"
-            if isinstance(
-                prop,
-                (
-                    ic4.PropertyInteger,
-                    ic4.PropertyFloat,
-                    ic4.PropertyBoolean,
-                    ic4.PropertyString,
-                ),
-            ):
-                current_value_str = "N/A"
-            # Use correct property type names from ic4 library
+            # Corrected property type names
             if isinstance(
                 prop, (ic4.PropInteger, ic4.PropFloat, ic4.PropBoolean, ic4.PropString)
             ):
@@ -126,7 +111,8 @@ class SDKCameraThread(QThread):
                 f"Attempting to set '{name}': Current='{current_value_str}', Target='{val}'"
             )
 
-            if isinstance(prop, ic4.PropEnumeration):  # Corrected
+            # Corrected property type names
+            if isinstance(prop, ic4.PropEnumeration):
                 entry_to_set = None
                 for entry in prop.entries:
                     if entry.name == str(val):
@@ -140,46 +126,44 @@ class SDKCameraThread(QThread):
                         f"Failed to set enum '{name}': value '{val}' not found. Available: {available_entries}"
                     )
                     return False
-            elif isinstance(prop, ic4.PropInteger):  # Corrected
+            elif isinstance(prop, ic4.PropInteger):
                 prop.value = int(val)
-            elif isinstance(prop, ic4.PropFloat):  # Corrected
+            elif isinstance(prop, ic4.PropFloat):
                 prop.value = float(val)
-            elif isinstance(prop, ic4.PropBoolean):  # Corrected
+            elif isinstance(prop, ic4.PropBoolean):
                 prop.value = bool(val)
-            elif isinstance(prop, ic4.PropString):  # Corrected
+            elif isinstance(prop, ic4.PropString):
                 prop.value = str(val)
-            else:  # Command or other types not directly settable via .value
+            else:
                 log.warning(
                     f"Property '{name}' is of a type not directly settable by this _set method: {type(prop)}"
                 )
-                # For commands, it would be prop.execute() - not handled here.
                 return False
 
             log.info(f"Successfully set '{name}' -> {val}")
             self.camera_properties_updated.emit({name: val})
             return True
         except ic4.IC4Exception as e:
+            # Use str(e) for the message, and check if e.code exists
             log.error(
-                f"IC4Exception when setting '{name}' to '{val}': {e} (Code: {e.code}, Description: {e.description})"
+                f"IC4Exception when setting '{name}' to '{val}': {str(e)} (Code: {e.code if hasattr(e, 'code') else 'N/A'})"
             )
         except Exception as e:
             log.exception(f"Generic exception when setting '{name}' to '{val}'")
         return False
 
     def update_exposure(self, exposure_us: int):
-        # If auto exposure is on, trying to set exposure time might fail or be ignored.
-        # It's often necessary to turn auto exposure off first.
         current_auto_exposure = self.pm.find(PROP_EXPOSURE_AUTO)
         if current_auto_exposure and current_auto_exposure.is_available:
-            if isinstance(current_auto_exposure, ic4.PropertyEnumeration):
-                if current_auto_exposure.selected_entry.name != "Off":
+            # Corrected property type names
+            if isinstance(current_auto_exposure, ic4.PropEnumeration):
+                if (
+                    current_auto_exposure.selected_entry
+                    and current_auto_exposure.selected_entry.name != "Off"
+                ):
                     log.info("Turning ExposureAuto Off before setting ExposureTime.")
-                    self._set(
-                        PROP_EXPOSURE_AUTO, "Off"
-                    )  # Assuming "Off" is the correct enum string
-            elif isinstance(
-                current_auto_exposure, ic4.PropertyBoolean
-            ):  # Some older APIs might use boolean
+                    self._set(PROP_EXPOSURE_AUTO, "Off")
+            elif isinstance(current_auto_exposure, ic4.PropBoolean):
                 if current_auto_exposure.value:
                     log.info(
                         "Turning ExposureAuto Off (boolean) before setting ExposureTime."
@@ -189,8 +173,6 @@ class SDKCameraThread(QThread):
         self._set(PROP_EXPOSURE_TIME, exposure_us)
 
     def update_gain(self, gain_db: float):
-        # Similar to exposure, ensure auto gain (if it exists and is separate) is off
-        # For simplicity, assuming gain is not affected by ExposureAuto here, but it can be.
         self._set(PROP_GAIN, gain_db)
 
     def update_auto_exposure(self, enable_auto: bool):
@@ -200,10 +182,10 @@ class SDKCameraThread(QThread):
             return
 
         target_value = None
-        if isinstance(prop, ic4.PropertyEnumeration):
+        # Corrected property type names
+        if isinstance(prop, ic4.PropEnumeration):
             entries = [e.name for e in getattr(prop, "entries", [])]
             if enable_auto:
-                # Common names for continuous auto exposure. Adjust if your camera uses different ones.
                 continuous_options = ["Continuous", "Auto"]
                 target_value = next(
                     (opt for opt in continuous_options if opt in entries), None
@@ -217,8 +199,7 @@ class SDKCameraThread(QThread):
                     f"Could not find suitable enum value for {PROP_EXPOSURE_AUTO} enable={enable_auto}. Available: {entries}"
                 )
                 return
-
-        elif isinstance(prop, ic4.PropertyBoolean):  # If it's a simple boolean property
+        elif isinstance(prop, ic4.PropBoolean):
             target_value = enable_auto
         else:
             log.warning(
@@ -232,8 +213,8 @@ class SDKCameraThread(QThread):
         self._safe_init()
         self.grabber = ic4.Grabber()
         try:
-            self.grabber.set_timeout(10000)  # Increased timeout for grabber operations
-        except AttributeError:  # Fallback for older ic4py versions
+            self.grabber.set_timeout(10000)
+        except AttributeError:
             self.grabber.timeout = 10000
 
         try:
@@ -243,47 +224,30 @@ class SDKCameraThread(QThread):
                     log.error("SDKCameraThread: No cameras found.")
                     self.camera_error.emit("No cameras found", "NoDevice")
                     return
-                self.device_info = devices[0]  # Default to first camera
+                self.device_info = devices[0]
 
             log.info(
                 f"SDKCameraThread: Opening device '{self.device_info.model_name}' (SN: {self.device_info.serial})"
             )
             self.grabber.device_open(self.device_info)
-            self.pm = self.grabber.device_property_map  # Initialize self.pm here
+            self.pm = self.grabber.device_property_map
             log.info(
                 f"SDKCameraThread: Device '{self.device_info.model_name}' opened successfully."
             )
 
-            # == Crucial Camera Configuration ==
             log.info(
                 "SDKCameraThread: Configuring camera properties before streaming..."
             )
 
-            # 1. Set TriggerMode to Off for free-running
             if not self._set(PROP_TRIGGER_MODE, "Off"):
                 log.error(
                     f"Failed to set TriggerMode to Off. Acquisition may fail if camera expects triggers."
                 )
-                # Depending on strictness, you might want to emit an error and return here.
-                # For now, we'll log and proceed, but this is a high-risk failure point.
-
-            # 2. Set AcquisitionMode to Continuous
             self._set(PROP_ACQUISITION_MODE, "Continuous")
-
-            # 3. Set PixelFormat
-            #    IMPORTANT: Verify "Mono8" is supported and desired.
-            #    Alternatives: "BGR8Packed" or "RGB8Packed" for color if QImage.Format_RGB888 is used.
-            #    Use a tool like IC Capture to find your camera's exact pixel format names.
             self._set(PROP_PIXEL_FORMAT, "Mono8")
-
-            # 4. Set Width and Height
             self._set(PROP_WIDTH, self.desired_width)
             self._set(PROP_HEIGHT, self.desired_height)
 
-            # 5. Set AcquisitionFrameRate (optional, camera might have its own limits)
-            #    Some cameras require AcquisitionFrameRateEnable to be true first.
-            #    This is a simplified attempt.
-            # 5. Set AcquisitionFrameRate
             log.debug(f"Attempting to find property 'AcquisitionFrameRateEnable'")
             prop_fps_enable = self.pm.find("AcquisitionFrameRateEnable")
             if prop_fps_enable:
@@ -291,15 +255,14 @@ class SDKCameraThread(QThread):
                     f"'AcquisitionFrameRateEnable' found. Available: {prop_fps_enable.is_available}, ReadOnly: {prop_fps_enable.is_readonly}"
                 )
                 if prop_fps_enable.is_available and not prop_fps_enable.is_readonly:
-                    # Assuming it's an enumeration with "On"/"Off" or a boolean
-                    if isinstance(
-                        prop_fps_enable, ic4.PropEnumeration
-                    ):  # Corrected type
+                    # Corrected property type names
+                    if isinstance(prop_fps_enable, ic4.PropEnumeration):
                         if (
-                            prop_fps_enable.selected_entry.name != "On"
-                        ):  # Example target value
+                            prop_fps_enable.selected_entry
+                            and prop_fps_enable.selected_entry.name != "On"
+                        ):
                             self._set("AcquisitionFrameRateEnable", "On")
-                    elif isinstance(prop_fps_enable, ic4.PropBoolean):  # Corrected type
+                    elif isinstance(prop_fps_enable, ic4.PropBoolean):
                         if not prop_fps_enable.value:
                             self._set("AcquisitionFrameRateEnable", True)
                     else:
@@ -313,7 +276,6 @@ class SDKCameraThread(QThread):
 
             self._set(PROP_ACQUISITION_FRAME_RATE, self.target_fps)
             log.info("SDKCameraThread: Camera configuration attempt finished.")
-            # == End of Camera Configuration ==
 
             self.listener = DummySinkListener()
             self.sink = ic4.SnapSink(self.listener)
@@ -330,14 +292,12 @@ class SDKCameraThread(QThread):
 
             while not self._stop:
                 try:
-                    buf = self.sink.pop_output_buffer(
-                        timeout_ms=100
-                    )  # Add timeout to prevent hard lock
-                    if buf is None:  # Timeout occurred
+                    buf = self.sink.pop_output_buffer(timeout_ms=100)
+                    if buf is None:
                         continue
 
                     frame_count += 1
-                    if frame_count % 100 == 0:  # Log stats periodically
+                    if frame_count % 100 == 0:
                         elapsed_time = time.time() - start_time
                         current_fps = (
                             frame_count / elapsed_time if elapsed_time > 0 else 0
@@ -347,25 +307,15 @@ class SDKCameraThread(QThread):
                         )
 
                     w, h = buf.image_type.width, buf.image_type.height
-                    pf_name = (
-                        buf.image_type.pixel_format.name
-                    )  # Get pixel format name as string
+                    pf_name = buf.image_type.pixel_format.name
 
-                    # Determine QImage format based on camera's pixel format
                     qimage_format = None
                     if "Mono8" == pf_name:
                         qimage_format = QImage.Format_Grayscale8
-                    elif pf_name in ("BGR8", "BGR8Packed"):  # Common for color cameras
-                        qimage_format = (
-                            QImage.Format_RGB888
-                        )  # Data is BGR, QImage interprets as RGB if bytes are BGR
+                    elif pf_name in ("BGR8", "BGR8Packed"):
+                        qimage_format = QImage.Format_RGB888
                     elif pf_name in ("RGB8", "RGB8Packed"):
-                        qimage_format = (
-                            QImage.Format_RGB888
-                        )  # Data is RGB, QImage interprets as RGB
-                    # Add more pixel format mappings as needed (e.g., Mono10, Mono12, YUV formats etc.)
-                    # For formats like Mono10/12, you'd need to process the raw data into 8-bit for display
-                    # or use a QImage format that supports higher bit depths if your Qt version does.
+                        qimage_format = QImage.Format_RGB888
 
                     if qimage_format is None:
                         log.warning(
@@ -373,38 +323,22 @@ class SDKCameraThread(QThread):
                         )
                         continue
 
-                    # Extract bytes
-                    # Modern ic4py versions provide numpy_wrap or direct pointer access
                     image_data = None
                     stride = 0
-                    if hasattr(buf, "numpy_wrap"):  # Preferred method if available
+                    if hasattr(buf, "numpy_wrap"):
                         arr = buf.numpy_wrap()
-                        # For RGB8Packed/BGR8Packed, numpy_wrap usually gives correct shape.
-                        # For Mono8, it's (h, w).
-                        # Ensure data is contiguous for QImage if creating from numpy array directly (though we use bytes)
                         image_data = arr.tobytes()
                         stride = (
                             arr.strides[0]
                             if len(arr.strides) > 0
                             else w * buf.image_type.bytes_per_pixel
                         )
-
-                    else:  # Fallback to raw pointer if numpy_wrap is not there
+                    else:
                         bytes_per_pixel = buf.image_type.bytes_per_pixel
-                        # Pitch can sometimes be different from w * bpp due to alignment
                         pitch = getattr(buf, "pitch", w * bytes_per_pixel)
                         stride = pitch
-                        # Size of buffer: pitch * h
                         buffer_size = pitch * h
                         image_data = ctypes.string_at(buf.pointer, buffer_size)
-
-                    # Create QImage
-                    # For RGB8/BGR8, QImage.Format_RGB888 expects data in RGB order usually.
-                    # If pf_name is "BGR8", the bytes are B,G,R. QImage(data, w, h, stride, QImage.Format_RGB888)
-                    # might display colors swapped if it expects R,G,B.
-                    # A common trick for BGR data with Format_RGB888 is that it often works out if the
-                    # underlying system also expects BGR (like OpenCV on Windows).
-                    # If colors are swapped, you might need img.rgbSwapped() or manual byte reordering.
 
                     img = QImage(image_data, w, h, stride, qimage_format)
 
@@ -412,55 +346,40 @@ class SDKCameraThread(QThread):
                         pf_name in ("BGR8", "BGR8Packed")
                         and qimage_format == QImage.Format_RGB888
                     ):
-                        # If the source is BGR and QImage took it as RGB, it might be displayed with swapped R and B.
-                        # img = img.rgbSwapped() # Uncomment if Red and Blue are swapped in display
                         pass
 
                     if not img.isNull():
-                        # Emit a copy, as the buffer 'buf' will be requeued.
-                        # QImage uses implicit sharing, so a copy is often cheap unless modified.
-                        # To be absolutely safe if 'img' or 'image_data' might be changed by another thread
-                        # before it's processed, ensure a deep copy of the QImage or its data.
-                        # For now, emitting the QImage directly.
-                        self.frame_ready.emit(
-                            img.copy(), image_data
-                        )  # Emit a copy of QImage for safety
+                        self.frame_ready.emit(img.copy(), image_data)
                     else:
                         log.warning(
                             f"Failed to create QImage from buffer. w={w},h={h},pf={pf_name}"
                         )
 
-                    # buf.unlock() # Or similar if SnapSink requires manual unlocking; often automatic
-
                 except ic4.IC4Exception as e:
-                    if (
-                        e.code == ic4.ErrorCode.Timeout
-                    ):  # Expected if no new frame is ready
-                        time.sleep(0.005)  # Short sleep on timeout
+                    if hasattr(e, "code") and e.code == ic4.ErrorCode.Timeout:
+                        time.sleep(0.005)
                         continue
+                    # Use str(e) for the message
                     log.error(
-                        f"Acquisition loop IC4Exception: {str(e)} (Code: {e.code})"
+                        f"Acquisition loop IC4Exception: {str(e)} (Code: {e.code if hasattr(e, 'code') else 'N/A'})"
                     )
-                    # Decide if we need to stop on other IC4 errors
-                    # self._stop = True # Example: stop on other errors
-                    time.sleep(0.01)  # Brief pause
+                    time.sleep(0.01)
                 except Exception as e_loop:
                     log.exception(f"Unexpected error in acquisition loop: {e_loop}")
-                    self._stop = True  # Stop on unexpected errors
+                    self._stop = True
 
-        except ic4.IC4Exception as e:  # Catch exceptions from setup phase
+        except ic4.IC4Exception as e:
+            # Use str(e) for the message
             error_message = str(e)
             log.error(
                 f"Camera thread setup IC4Exception: {error_message} (Code: {e.code if hasattr(e, 'code') else 'N/A'})"
             )
-            self.camera_error.emit(
-                f"{error_message}", "IC4Exception"
-            )  # Emit the full string representation
-        except RuntimeError as e:  # Catch RuntimeError (e.g. "No cameras found")
+            self.camera_error.emit(f"{error_message}", "IC4Exception")
+        except RuntimeError as e:
             log.error(f"Camera thread setup RuntimeError: {str(e)}")
             self.camera_error.emit(str(e), "RuntimeError")
-        except Exception as e:  # Catch all other exceptions during setup
-            log.exception("Camera thread setup generic error")  # Log full traceback
+        except Exception as e:
+            log.exception("Camera thread setup generic error")
             self.camera_error.emit(str(e), type(e).__name__)
         finally:
             log.info(
