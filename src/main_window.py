@@ -31,6 +31,7 @@ from PyQt5.QtGui import QIcon, QKeySequence, QImage
 from threads.sdk_camera_thread import SDKCameraThread
 from control_panels.top_control_panel import TopControlPanel
 from canvas.pressure_plot_widget import PressurePlotWidget
+from threads.qtcamera_widget import QtCameraWidget
 from threads.serial_thread import SerialThread
 from recording import RecordingWorker, TrialRecorder
 from utils import list_serial_ports
