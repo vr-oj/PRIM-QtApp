@@ -937,9 +937,12 @@ class MainWindow(QMainWindow):
         grabber = None
 
         try:
-            # Only call init if it's not already initialized
-            if not ic4.Library.is_initialized():
+            # Try initializing, but skip if already initialized
+            try:
                 ic4.Library.init()
+            except RuntimeError as e:
+                if "already called" not in str(e):
+                    raise
 
             device_info = ic4.DeviceEnum.devices()[0]
             device = ic4.Device(device_info)
@@ -972,8 +975,7 @@ class MainWindow(QMainWindow):
                     grabber.stream_stop()
                 if device:
                     device.close()
-                if ic4.Library.is_initialized():
-                    ic4.Library.exit()
+                ic4.Library.exit()
                 print("✅ Cleaned up resources.")
             except Exception as cleanup_exception:
                 print(f"❌ Cleanup issue: {cleanup_exception}")
