@@ -111,8 +111,13 @@ class SDKCameraThread(QThread):
                     ic4.PropertyString,
                 ),
             ):
+                current_value_str = "N/A"
+            # Use correct property type names from ic4 library
+            if isinstance(
+                prop, (ic4.PropInteger, ic4.PropFloat, ic4.PropBoolean, ic4.PropString)
+            ):
                 current_value_str = str(prop.value)
-            elif isinstance(prop, ic4.PropertyEnumeration):
+            elif isinstance(prop, ic4.PropEnumeration):
                 selected_entry = prop.selected_entry
                 if selected_entry:
                     current_value_str = selected_entry.name
@@ -121,12 +126,10 @@ class SDKCameraThread(QThread):
                 f"Attempting to set '{name}': Current='{current_value_str}', Target='{val}'"
             )
 
-            if isinstance(prop, ic4.PropertyEnumeration):
+            if isinstance(prop, ic4.PropEnumeration):  # Corrected
                 entry_to_set = None
                 for entry in prop.entries:
-                    if entry.name == str(
-                        val
-                    ):  # Ensure val is compared as string if it's what names are
+                    if entry.name == str(val):
                         entry_to_set = entry
                         break
                 if entry_to_set:
@@ -137,13 +140,13 @@ class SDKCameraThread(QThread):
                         f"Failed to set enum '{name}': value '{val}' not found. Available: {available_entries}"
                     )
                     return False
-            elif isinstance(prop, ic4.PropertyInteger):
+            elif isinstance(prop, ic4.PropInteger):  # Corrected
                 prop.value = int(val)
-            elif isinstance(prop, ic4.PropertyFloat):
+            elif isinstance(prop, ic4.PropFloat):  # Corrected
                 prop.value = float(val)
-            elif isinstance(prop, ic4.PropertyBoolean):
+            elif isinstance(prop, ic4.PropBoolean):  # Corrected
                 prop.value = bool(val)
-            elif isinstance(prop, ic4.PropertyString):
+            elif isinstance(prop, ic4.PropString):  # Corrected
                 prop.value = str(val)
             else:  # Command or other types not directly settable via .value
                 log.warning(
@@ -280,21 +283,33 @@ class SDKCameraThread(QThread):
             # 5. Set AcquisitionFrameRate (optional, camera might have its own limits)
             #    Some cameras require AcquisitionFrameRateEnable to be true first.
             #    This is a simplified attempt.
-            prop_fps_enable = self.pm.find("AcquisitionFrameRateEnable")  # Example name
-            if (
-                prop_fps_enable
-                and prop_fps_enable.is_available
-                and not prop_fps_enable.is_readonly
-            ):
-                if (
-                    hasattr(prop_fps_enable, "value") and not prop_fps_enable.value
-                ):  # if it's boolean and false
-                    self._set("AcquisitionFrameRateEnable", True)
-                elif isinstance(
-                    prop_fps_enable, ic4.PropertyEnumeration
-                ):  # if it's enum
-                    if prop_fps_enable.selected_entry.name != "On":  # Example name
-                        self._set("AcquisitionFrameRateEnable", "On")
+            # 5. Set AcquisitionFrameRate
+            log.debug(f"Attempting to find property 'AcquisitionFrameRateEnable'")
+            prop_fps_enable = self.pm.find("AcquisitionFrameRateEnable")
+            if prop_fps_enable:
+                log.debug(
+                    f"'AcquisitionFrameRateEnable' found. Available: {prop_fps_enable.is_available}, ReadOnly: {prop_fps_enable.is_readonly}"
+                )
+                if prop_fps_enable.is_available and not prop_fps_enable.is_readonly:
+                    # Assuming it's an enumeration with "On"/"Off" or a boolean
+                    if isinstance(
+                        prop_fps_enable, ic4.PropEnumeration
+                    ):  # Corrected type
+                        if (
+                            prop_fps_enable.selected_entry.name != "On"
+                        ):  # Example target value
+                            self._set("AcquisitionFrameRateEnable", "On")
+                    elif isinstance(prop_fps_enable, ic4.PropBoolean):  # Corrected type
+                        if not prop_fps_enable.value:
+                            self._set("AcquisitionFrameRateEnable", True)
+                    else:
+                        log.warning(
+                            f"'AcquisitionFrameRateEnable' is of unexpected type: {type(prop_fps_enable)}"
+                        )
+            else:
+                log.warning(
+                    "'AcquisitionFrameRateEnable' property not found. Proceeding without setting it."
+                )
 
             self._set(PROP_ACQUISITION_FRAME_RATE, self.target_fps)
             log.info("SDKCameraThread: Camera configuration attempt finished.")
@@ -424,7 +439,7 @@ class SDKCameraThread(QThread):
                         time.sleep(0.005)  # Short sleep on timeout
                         continue
                     log.error(
-                        f"Acquisition loop IC4Exception: {e.description} (Code: {e.code})"
+                        f"Acquisition loop IC4Exception: {str(e)} (Code: {e.code})"
                     )
                     # Decide if we need to stop on other IC4 errors
                     # self._stop = True # Example: stop on other errors
@@ -434,10 +449,13 @@ class SDKCameraThread(QThread):
                     self._stop = True  # Stop on unexpected errors
 
         except ic4.IC4Exception as e:  # Catch exceptions from setup phase
+            error_message = str(e)
             log.error(
-                f"Camera thread setup IC4Exception: {e} (Code: {e.code}, Description: {e.description})"
+                f"Camera thread setup IC4Exception: {error_message} (Code: {e.code if hasattr(e, 'code') else 'N/A'})"
             )
-            self.camera_error.emit(f"{e.description} (Code: {e.code})", "IC4Exception")
+            self.camera_error.emit(
+                f"{error_message}", "IC4Exception"
+            )  # Emit the full string representation
         except RuntimeError as e:  # Catch RuntimeError (e.g. "No cameras found")
             log.error(f"Camera thread setup RuntimeError: {str(e)}")
             self.camera_error.emit(str(e), "RuntimeError")
