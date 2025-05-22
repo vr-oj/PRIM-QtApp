@@ -26,7 +26,7 @@ class DummySinkListener:
     num_buffers_alloc_on_connect = 6
     num_buffers_required_on_connect = 6
 
-    def sink_connected(self, sink, image_type, min_buffers_required):(self, sink, image_type, min_buffers_required):(self, sink, image_type, min_buffers_required):
+    def sink_connected(self, sink, image_type, min_buffers_required):
         log.debug(f"Sink connected: {image_type}, MinBuffers={min_buffers_required}")
         return True
 
@@ -36,8 +36,7 @@ class DummySinkListener:
     def sink_disconnected(self, sink):
         log.debug("Sink disconnected")
 
-
-class SDKCameraThread(QThread):
+class SDKCameraThread(QThread):(QThread):
     frame_ready = pyqtSignal(QImage, object)
     camera_resolutions_available = pyqtSignal(list)
     camera_video_formats_available = pyqtSignal(list)
