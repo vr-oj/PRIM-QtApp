@@ -61,6 +61,26 @@ def _initialize_ic4_globally():
                 True  # Mark success for this session
             )
             module_log.info("ic4.Library.init() called successfully.")
+
+            # ───── Monkey-patch DeviceInfo.__del__ to suppress finalizer RuntimeError ─────
+            try:
+                import imagingcontrol4.devenum as _dev
+
+                _orig_del = _dev.DeviceInfo.__del__
+
+                def __safe_del(self):
+                    try:
+                        _orig_del(self)
+                    except RuntimeError:
+                        # Suppress “Library.init was not called” errors
+                        pass
+
+                _dev.DeviceInfo.__del__ = __safe_del
+                module_log.info(
+                    "Patched DeviceInfo.__del__ to ignore finalizer errors."
+                )
+            except Exception as _e:
+                module_log.warning(f"Could not patch DeviceInfo.__del__: {_e}")
         except Exception as e_init:  # Catch any exception from init()
             err_msg_lower = str(e_init).lower()
             # Check for common phrases indicating already initialized
