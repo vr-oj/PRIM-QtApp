@@ -26,7 +26,7 @@ class DummySinkListener:
     num_buffers_alloc_on_connect = 6
     num_buffers_required_on_connect = 6
 
-    def sink_connected(self, sink, image_type, min_buffers_required):(self, sink, image_type, min_buffers_required):
+    def sink_connected(self, sink, image_type, min_buffers_required):(self, sink, image_type, min_buffers_required):(self, sink, image_type, min_buffers_required):
         log.debug(f"Sink connected: {image_type}, MinBuffers={min_buffers_required}")
         return True
 
