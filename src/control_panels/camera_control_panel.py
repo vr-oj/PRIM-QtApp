@@ -86,6 +86,13 @@ class CameraControlPanel(QGroupBox):
         adj_tab.setEnabled(False)
 
         # Connect UI signals to emit parameter changes
+        # DEBUG: log any raw combobox index change
+        self.cam_selector.currentIndexChanged.connect(
+            lambda idx: log.info(
+                f"[DEBUG] CameraControlPanel.cam_selector idx={idx}, data={self.cam_selector.itemData(idx)}"
+            )
+        )
+        # then emit the parameter_changed signal
         self.cam_selector.currentIndexChanged.connect(
             lambda idx: self.parameter_changed.emit(
                 "CameraSelection", self.cam_selector.itemData(idx)

@@ -84,7 +84,13 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._set_initial_splitter_sizes)
         self._set_initial_control_states()
 
-        # Hook the real CameraControlPanel signal
+        # DEBUG: see every parameter_changed come through
+        self.top_ctrl.camera_controls.parameter_changed.connect(
+            lambda name, val: log.info(
+                f"[DEBUG] parameter_changed signal: {name} -> {val}"
+            )
+        )
+        # and our real handler
         self.top_ctrl.camera_controls.parameter_changed.connect(self._on_camera_param)
 
         QTimer.singleShot(250, self.top_ctrl.camera_controls.populate_camera_list)
@@ -304,6 +310,7 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(object)
     def _handle_camera_selection(self, device_info_obj):
+        log.info(f"[DEBUG] _handle_camera_selection received: {device_info_obj}")
         # Stop any previously running camera thread
         if self.camera_thread and self.camera_thread.isRunning():
             self.camera_thread._stop = True
@@ -838,6 +845,7 @@ class MainWindow(QMainWindow):
         """
         Dispatch all camera-control changes coming from CameraControlPanel.
         """
+        log.info(f"[DEBUG] MainWindow._on_camera_param called: {name} -> {val}")
         if name == "CameraSelection":
             self._handle_camera_selection(val)
         elif name == "Resolution":
