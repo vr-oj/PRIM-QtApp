@@ -350,11 +350,12 @@ class MainWindow(QMainWindow):
 
         # Launch the camera thread
         self.camera_thread.start()
-
-        # now wire the UI → thread setter
+        # now wire the UI → thread setter for actual camera parameters
         self.top_ctrl.camera_controls.parameter_changed.connect(
             self.camera_thread.set_parameter
         )
+        # hook up camera_widget signals (resolutions, properties, frame_ready, etc.)
+        self._connect_camera_widget_signals()
 
     @pyqtSlot(str)
     def _handle_resolution_selection(self, resolution_str: str):
