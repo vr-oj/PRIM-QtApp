@@ -3,15 +3,30 @@ import os
 import sys
 import numpy as np
 from PyQt5.QtWidgets import (
+    QApplication,
     QMainWindow,
+    QDockWidget,
+    QTextEdit,
+    QPushButton,
+    QToolBar,
+    QStatusBar,
+    QAction,
+    QFileDialog,
+    QDialog,
+    QFormLayout,
+    QDialogButtonBox,
+    QLineEdit,
+    QComboBox,
+    QLabel,
     QVBoxLayout,
     QWidget,
     QSplitter,
     QSizePolicy,
     QMessageBox,
 )
-from PyQt5.QtCore import pyqtSlot, QTimer, QVariant
-from PyQt5.QtGui import QImage
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime
+from PyQt5.QtGui import QIcon, QKeySequence, QImage
+
 
 from threads.sdk_camera_thread import SDKCameraThread
 from control_panels.top_control_panel import TopControlPanel
@@ -76,13 +91,6 @@ class MainWindow(QMainWindow):
         # Populate camera list after a short delay
         if hasattr(self.top_ctrl, "camera_controls") and self.top_ctrl.camera_controls:
             QTimer.singleShot(250, self.top_ctrl.camera_controls.populate_camera_list)
-
-        # Debug button for camera test
-        debug_btn = QPushButton("Test IC4 Camera (Main Thread)", self)
-        debug_btn.clicked.connect(self._test_ic4_main_thread)
-        self.statusBar().addPermanentWidget(
-            debug_btn
-        )  # Adds button to the status bar for easy access
 
     def _set_initial_splitter_sizes(self):
         # Get the total width of the splitter
@@ -537,8 +545,8 @@ class MainWindow(QMainWindow):
         self.start_recording_action.setEnabled(bool(can_start_recording))
         self.stop_recording_action.setEnabled(bool(self._is_recording))
 
-    @pyqtSlot(QImage, object)
-    def _handle_new_camera_frame(self, qimage: QImage, frame_obj: object):
+    @pyqtSlot(QImage)
+    def _handle_new_camera_frame(self, qimage: QImage):
         if (
             qimage.width() != self.current_camera_frame_width
             or qimage.height() != self.current_camera_frame_height
@@ -841,7 +849,13 @@ class MainWindow(QMainWindow):
         self.app_session_time_label.setText(f"Session: {h:02}:{m:02}:{s:02}")
 
     def closeEvent(self, event):
+        # 1) Stop camera thread if running
+        if self.camera_thread and self.camera_thread.isRunning():
+            self.camera_thread._stop = True
+            self.camera_thread.wait()
+
         log.info(f"Close event received. Recording active: {self._is_recording}")
+        # 2) Handle in-flight recording
         if self._is_recording:
             reply = QMessageBox.question(
                 self,
@@ -852,15 +866,12 @@ class MainWindow(QMainWindow):
             )
             if reply == QMessageBox.Yes:
                 self._trigger_stop_recording()
-                # _trigger_stop_recording now handles waiting for the worker.
-                # Allow a brief moment for UI events related to stopping.
                 QApplication.processEvents()
             else:
                 event.ignore()
                 return
 
-        # Ensure recording worker is stopped and cleaned up if it still exists
-        # (e.g., if recording was not active but worker was somehow created and not cleaned)
+        # 3) Clean up recording worker if still around
         if self._recording_worker:
             log.info("Cleaning up recording worker on application exit...")
             if self._recording_worker.isRunning():
@@ -873,7 +884,7 @@ class MainWindow(QMainWindow):
             self._recording_worker.deleteLater()
             self._recording_worker = None
 
-        # Stop Serial Thread
+        # 4) Stop serial thread
         if self._serial_thread and self._serial_thread.isRunning():
             log.info("Stopping serial thread on application exit...")
             self._serial_thread.stop()
@@ -887,128 +898,10 @@ class MainWindow(QMainWindow):
             self._serial_thread.deleteLater()
             self._serial_thread = None
 
+        # 5) Close camera widget
         log.info("Closing camera widget.")
         if self.qt_cam_widget:  # Check if it exists
             self.qt_cam_widget.close()  # This should trigger its own cleanup
 
         log.info("Exiting application.")
         super().closeEvent(event)
-
-    def _on_camera_ready(self, device, sink):
-        try:
-            from imagingcontrol4 import StreamSetupOption
-
-            self.device = device
-            self.sink = sink
-            self.grabber = device.grabber(sink)
-            self.camera_poll_timer = QTimer(self)
-            self.camera_poll_timer.timeout.connect(self._poll_sink_for_frame)
-            self.camera_poll_timer.start(
-                1000 // int(DEFAULT_FPS)
-            )  # e.g., 50ms for 20 FPS
-
-            self.grabber.stream_setup(setup_option=StreamSetupOption.ACQUISITION_START)
-            print("✅ Camera stream started from main thread.")
-
-            # Here’s where you could add a QTimer to fetch frames and send to your UI
-        except Exception as e:
-            print(f"❌ Failed to start stream in main thread: {e}")
-            if device:
-                device.close()
-
-    @pyqtSlot()
-    def _poll_sink_for_frame(self):
-        if not hasattr(self, "sink") or self.sink is None:
-            return
-
-        try:
-            buf = self.sink.pop_output_buffer()
-            if not buf:
-                return  # No frame available this cycle
-
-            from PyQt5.QtGui import QImage
-            import ctypes
-
-            w, h = buf.image_type.width, buf.image_type.height
-            pf_name = buf.image_type.pixel_format.name
-
-            # Convert buffer to QImage
-            if pf_name == "Mono8":
-                qformat = QImage.Format_Grayscale8
-            elif pf_name in ("RGB8", "RGB8Packed", "BGR8", "BGR8Packed"):
-                qformat = QImage.Format_RGB888
-            else:
-                log.warning(f"Unsupported pixel format: {pf_name}")
-                return
-
-            # Extract image data
-            if hasattr(buf, "numpy_wrap"):
-                arr = buf.numpy_wrap()
-                img_bytes = arr.tobytes()
-                stride = arr.strides[0]
-            else:
-                pitch = getattr(buf, "pitch", w * buf.image_type.bytes_per_pixel)
-                stride = pitch
-                img_bytes = ctypes.string_at(buf.pointer, pitch * h)
-
-            img = QImage(img_bytes, w, h, stride, qformat)
-            if not img.isNull():
-                self._handle_new_camera_frame(img.copy(), img_bytes)
-
-        except Exception as e:
-            log.exception(f"Error polling sink for frame: {e}")
-
-    def _test_ic4_main_thread(self):
-        """Runs a simplified IC4 test entirely in the main thread."""
-        from imagingcontrol4 import QueueSink, Library, IC4Exception
-        from imagingcontrol4.devenum import DeviceEnum
-
-        device = None
-        grabber = None
-
-        try:
-            try:
-                Library.init()
-            except RuntimeError as e:
-                if "already called" not in str(e):
-                    raise
-
-            device_info = DeviceEnum.devices()[0]
-            device = device_info.open_device()
-            device.open()
-
-            device.properties["PixelFormat"].selected_entry = "Mono8"
-            device.properties["Width"].value = 2448
-            device.properties["Height"].value = 2048
-            device.properties["AcquisitionFrameRate"].value = 20.0
-            device.properties["TriggerMode"].selected_entry = "Off"
-            device.properties["AcquisitionMode"].selected_entry = "Continuous"
-
-            sink = QueueSink()
-            grabber = device.grabber(sink)
-
-            grabber.stream_setup(setup_option=ic4.StreamSetupOption.ACQUISITION_START)
-            print("✅ Streaming started successfully in main thread.")
-
-            frame = sink.snap_single(5000)
-            print(
-                f"✅ Captured frame: {frame.width}x{frame.height}, format: {frame.pixel_format}"
-            )
-
-        except IC4Exception as e:
-            print(f"❌ IC4Exception in main thread: {e}")
-
-        finally:
-            try:
-                if grabber:
-                    grabber.stream_stop()
-                if device:
-                    device.close()
-                Library.exit()
-                print("✅ Cleaned up resources.")
-            except Exception as cleanup_exception:
-                print(f"❌ Cleanup issue: {cleanup_exception}")
-
-    def closeEvent(self, event):
-        if hasattr(self, "camera_poll_timer"):
-            self.camera_poll_timer.stop()
