@@ -933,11 +933,15 @@ class MainWindow(QMainWindow):
         import imagingcontrol4 as ic4
         from imagingcontrol4 import QueueSink
 
+        device = None
+        grabber = None
+
         try:
-            ic4.Library.init()
-            device_info = ic4.DeviceEnum.devices()[
-                0
-            ]  # Assumes first camera is your DMK 33UX250
+            # Only call init if it's not already initialized
+            if not ic4.Library.is_initialized():
+                ic4.Library.init()
+
+            device_info = ic4.DeviceEnum.devices()[0]
             device = ic4.Device(device_info)
             device.open()
 
@@ -954,8 +958,7 @@ class MainWindow(QMainWindow):
             grabber.stream_setup(setup_option=ic4.StreamSetupOption.ACQUISITION_START)
             print("✅ Streaming started successfully in main thread.")
 
-            # Attempt to capture one frame to confirm functionality
-            frame = sink.snap_single(5000)  # Wait up to 5 seconds for a frame
+            frame = sink.snap_single(5000)
             print(
                 f"✅ Captured frame: {frame.width}x{frame.height}, format: {frame.pixel_format}"
             )
@@ -965,9 +968,12 @@ class MainWindow(QMainWindow):
 
         finally:
             try:
-                grabber.stream_stop()
-                device.close()
-                ic4.Library.exit()
+                if grabber:
+                    grabber.stream_stop()
+                if device:
+                    device.close()
+                if ic4.Library.is_initialized():
+                    ic4.Library.exit()
                 print("✅ Cleaned up resources.")
             except Exception as cleanup_exception:
                 print(f"❌ Cleanup issue: {cleanup_exception}")
