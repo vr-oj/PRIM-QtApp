@@ -192,9 +192,7 @@ class GLViewfinder(QOpenGLWidget):
 
         # Upload the image data
         # The QImage.Format_RGBA8888 matches GL_RGBA and GL_UNSIGNED_BYTE pixel types
-        self._texture.setData(
-            self._pending_qimg, QOpenGLTexture.MipMapGeneration.NoMipmapGeneration
-        )
+        self._texture.setData(self._pending_qimg, QOpenGLTexture.DontGenerateMipMaps)
         self._pending_qimg = None  # Consumed
 
         self.prog.bind()
