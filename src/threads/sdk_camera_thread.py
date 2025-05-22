@@ -288,11 +288,14 @@ class SDKCameraThread(QThread):
             self.sink = ic4.SnapSink(self.listener)
             log.info("SDKCameraThread: SnapSink created.")
 
-            self.grabber.stream_setup(self.sink)
-            log.info("SDKCameraThread: Stream setup complete.")
-
-            self.grabber.acquisition_start()
-            log.info("SDKCameraThread: Streaming started (acquisition_start called).")
+            log.info(
+                "SDKCameraThread: Attempting stream_setup with ACQUISITION_START option..."
+            )
+            self.grabber.stream_setup(
+                self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
+            )
+            # acquisition_start() is now handled by stream_setup with the option above
+            log.info("SDKCameraThread: Stream setup and acquisition possibly started.")
 
             frame_count = 0
             start_time = time.time()
