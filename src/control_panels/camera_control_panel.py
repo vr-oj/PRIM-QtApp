@@ -9,137 +9,87 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QCheckBox,
-    QPushButton,
     QSizePolicy,
 )
-from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
-
-# Import your CameraController that wraps Harvester/GenTL logic
-from camera_controller import CameraController
+from PyQt5.QtCore import Qt, pyqtSignal
 
 log = logging.getLogger(__name__)
 
 
 class CameraControlPanel(QGroupBox):
     """
-    Dynamic control panel that exposes all camera parameters available
-    via the provided CameraController instance.
+    Control panel for camera settings: device selection, resolution, exposure, and gain.
     """
 
+    # Emitted when any camera parameter changes (param_name, value)
     parameter_changed = pyqtSignal(str, object)
 
-    def __init__(self, controller: CameraController, parent=None):
+    def __init__(self, parent=None):
         super().__init__("Camera Controls", parent)
-        self.controller = controller
+        layout = QFormLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
 
-        # Main layout: a single tab widget
         self.tabs = QTabWidget()
-        main_layout = QFormLayout(self)
-        main_layout.addRow(self.tabs)
+        layout.addRow(self.tabs)
 
-        # Create a scrollable parameters panel
-        params_widget = QWidget()
-        params_layout = QFormLayout(params_widget)
-        params_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # -- Source Tab --
+        src_tab = QWidget()
+        src_layout = QFormLayout(src_tab)
 
-        self.controls = {}
-        # Build controls for each node in the camera
-        for name, node in sorted(self.controller.node_map.items()):
-            widget = self._create_widget_for_node(name, node)
-            if widget:
-                params_layout.addRow(QLabel(name), widget)
-                self.controls[name] = widget
+        self.cam_selector = QComboBox()
+        self.cam_selector.setToolTip("Select Camera Device")
+        src_layout.addRow("Device:", self.cam_selector)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(params_widget)
-        self.tabs.addTab(scroll, "Parameters")
+        self.res_selector = QComboBox()
+        self.res_selector.setToolTip("Select Resolution and Format")
+        src_layout.addRow("Resolution:", self.res_selector)
 
-        # Hook UI events back to controller
-        self.parameter_changed.connect(self._on_parameter_changed)
+        self.current_res_label = QLabel("––")
+        src_layout.addRow("Current:", self.current_res_label)
 
-        # If CameraController can emit when capabilities update, hook that
-        if hasattr(self.controller, "capabilities_changed"):
-            self.controller.capabilities_changed.connect(self._refresh_controls)
+        self.tabs.addTab(src_tab, "Source")
 
-    def _create_widget_for_node(self, name, node):
-        """
-        Factory: return an appropriate widget depending on node type.
-        """
-        # Enumeration node → combo box
-        if hasattr(node, "symbolics"):
-            combo = QComboBox()
-            for opt in node.symbolics:
-                combo.addItem(opt)
-            try:
-                combo.setCurrentText(str(node.value))
-            except Exception:
-                pass
-            combo.currentTextChanged.connect(
-                lambda v, n=name: self.parameter_changed.emit(n, v)
+        # -- Adjustments Tab --
+        adj_tab = QWidget()
+        adj_layout = QFormLayout(adj_tab)
+
+        self.exposure_box = QDoubleSpinBox()
+        self.exposure_box.setDecimals(1)
+        self.exposure_box.setSuffix(" ms")
+        self.exposure_box.setRange(0.1, 10000.0)
+        self.exposure_box.setKeyboardTracking(False)
+        adj_layout.addRow("Exposure:", self.exposure_box)
+
+        self.auto_exposure_cb = QCheckBox("Auto Exposure")
+        adj_layout.addRow(self.auto_exposure_cb)
+
+        self.gain_box = QDoubleSpinBox()
+        self.gain_box.setDecimals(1)
+        self.gain_box.setKeyboardTracking(False)
+        adj_layout.addRow("Gain (dB):", self.gain_box)
+
+        self.tabs.addTab(adj_tab, "Adjustments")
+        adj_tab.setEnabled(False)
+
+        # Connect UI signals to parameter_changed
+        self.cam_selector.currentIndexChanged.connect(
+            lambda idx: self.parameter_changed.emit(
+                "CameraSelection", self.cam_selector.itemData(idx)
             )
-            return combo
-
-        # Boolean node → check box
-        if node.__class__.__name__ == "IBoolean":
-            cb = QCheckBox()
-            try:
-                cb.setChecked(bool(node.value))
-            except Exception:
-                pass
-            cb.toggled.connect(lambda v, n=name: self.parameter_changed.emit(n, v))
-            return cb
-
-        # Numeric node (IInteger or IFloat) → double spin box
-        if node.__class__.__name__ in ("IInteger", "IFloat"):
-            spin = QDoubleSpinBox()
-            try:
-                spin.setRange(node.min, node.max)
-                spin.setSingleStep(getattr(node, "increment", 1))
-                spin.setValue(node.value)
-            except Exception:
-                pass
-            spin.valueChanged.connect(
-                lambda v, n=name: self.parameter_changed.emit(n, v)
+        )
+        self.res_selector.currentIndexChanged.connect(
+            lambda idx: self.parameter_changed.emit(
+                "Resolution", self.res_selector.itemData(idx)
             )
-            return spin
-
-        # Command node → button
-        if node.__class__.__name__ == "ICommand":
-            btn = QPushButton("Execute")
-            btn.clicked.connect(lambda _, n=name: self.parameter_changed.emit(n, None))
-            return btn
-
-        # Other node types not supported by UI
-        return None
-
-    @pyqtSlot(str, object)
-    def _on_parameter_changed(self, name, value):
-        """
-        Slot: send UI-driven changes to the camera controller.
-        """
-        try:
-            self.controller.set_node_value(name, value)
-            log.info(f"Set {name} to {value}")
-        except Exception as e:
-            log.error(f"Failed to set {name} to {value}: {e}")
-
-    @pyqtSlot()
-    def _refresh_controls(self):
-        """
-        Refresh widget values after capabilities changed in controller.
-        """
-        for name, widget in self.controls.items():
-            node = self.controller.node_map.get(name)
-            if not node:
-                continue
-            try:
-                if hasattr(node, "value"):
-                    if isinstance(widget, QComboBox):
-                        widget.setCurrentText(str(node.value))
-                    elif isinstance(widget, QCheckBox):
-                        widget.setChecked(bool(node.value))
-                    elif isinstance(widget, QDoubleSpinBox):
-                        widget.setValue(node.value)
-            except Exception:
-                pass
+        )
+        self.exposure_box.editingFinished.connect(
+            lambda: self.parameter_changed.emit(
+                "ExposureTime", int(self.exposure_box.value() * 1000)
+            )
+        )
+        self.auto_exposure_cb.toggled.connect(
+            lambda chk: self.parameter_changed.emit("AutoExposure", chk)
+        )
+        self.gain_box.valueChanged.connect(
+            lambda v: self.parameter_changed.emit("Gain", v)
+        )
