@@ -9,7 +9,7 @@ from PyQt5.QtGui import QImage
 
 log = logging.getLogger(__name__)
 
-# GenICam property names
+# GenICam property names (keep these as they are)
 PROP_WIDTH = "Width"
 PROP_HEIGHT = "Height"
 PROP_PIXEL_FORMAT = "PixelFormat"
@@ -21,19 +21,17 @@ PROP_EXPOSURE_AUTO = "ExposureAuto"
 PROP_GAIN = "Gain"
 
 
+# Simplified DummySinkListener, similar to test_ic4.py
 class DummySinkListener:
-    # Required by SnapSink for buffer strategy
-    num_buffers_required_on_connect = 4
-    num_buffers_allocation_threshold = 4
-    num_buffers_free_threshold = 7
-    num_buffers_alloc_on_connect = 8
-    num_buffers_max = 10
-
     def sink_connected(self, sink, image_type, min_buffers_required):
         log.debug(f"Sink connected: {image_type}, MinBuffers={min_buffers_required}")
+        # For QueueSink, we typically just need to return True if we are ready.
+        # The sink itself manages its buffers based on its internal strategy or defaults.
         return True
 
     def frames_queued(self, sink):
+        # This callback indicates new frames are in the sink's queue.
+        # In a polling model (pop_output_buffer), this might just be logged or used to wake a polling loop.
         pass
 
     def sink_disconnected(self, sink):
@@ -42,6 +40,7 @@ class DummySinkListener:
 
 class SDKCameraThread(QThread):
     frame_ready = pyqtSignal(QImage, object)
+    # ... (other signals remain the same) ...
     camera_resolutions_available = pyqtSignal(list)
     camera_video_formats_available = pyqtSignal(list)
     camera_properties_updated = pyqtSignal(dict)
@@ -64,8 +63,9 @@ class SDKCameraThread(QThread):
         self.grabber = None
         self.sink = None
         self.pm = None
-        self.listener = DummySinkListener()
+        self.listener = DummySinkListener()  # Use the simplified listener
 
+    # ... (request_stop, _safe_init, _set, update_exposure, update_gain, update_auto_exposure methods remain the same as the last version) ...
     def request_stop(self):
         self._stop = True
 
@@ -208,11 +208,11 @@ class SDKCameraThread(QThread):
         self._safe_init()
         self.grabber = ic4.Grabber()
         try:
-            self.grabber.set_timeout(10000)
+            self.grabber.set_timeout(10000)  # General timeout for grabber operations
         except AttributeError:
             self.grabber.timeout = 10000
 
-        try:  # Main try block for setup and acquisition loop
+        try:
             if not self.device_info:
                 devices = ic4.DeviceEnum.devices()
                 if not devices:
@@ -233,7 +233,6 @@ class SDKCameraThread(QThread):
             log.info(
                 "SDKCameraThread: Configuring camera properties before streaming..."
             )
-
             if not self._set(PROP_TRIGGER_MODE, "Off"):
                 log.error(
                     f"Failed to set TriggerMode to Off. Acquisition may fail if camera expects triggers."
@@ -284,9 +283,13 @@ class SDKCameraThread(QThread):
             self._set(PROP_ACQUISITION_FRAME_RATE, self.target_fps)
             log.info("SDKCameraThread: Camera configuration attempt finished.")
 
-            self.listener = DummySinkListener()
-            self.sink = ic4.SnapSink(self.listener)
-            log.info("SDKCameraThread: SnapSink created.")
+            # ---MODIFIED SINK TYPE AND SETUP ---
+            self.listener = DummySinkListener()  # Using simplified listener
+            self.sink = ic4.QueueSink(self.listener)  # Changed to QueueSink
+            self.sink.timeout = (
+                500  # Set timeout for pop_output_buffer, as in test_ic4.py
+            )
+            log.info("SDKCameraThread: QueueSink created.")
 
             log.info(
                 "SDKCameraThread: Attempting stream_setup with ACQUISITION_START option..."
@@ -294,14 +297,16 @@ class SDKCameraThread(QThread):
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
-            # acquisition_start() is now handled by stream_setup with the option above
             log.info("SDKCameraThread: Stream setup and acquisition possibly started.")
+            # --- END OF MODIFIED SINK TYPE AND SETUP ---
 
             frame_count = 0
             start_time = time.time()
 
-            while not self._stop:  # Acquisition loop
+            while not self._stop:
                 try:
+                    # For QueueSink, pop_output_buffer usually takes its timeout from sink.timeout
+                    # but providing an explicit timeout_ms here is also fine and overrides.
                     buf = self.sink.pop_output_buffer(timeout_ms=100)
                     if buf is None:
                         continue
@@ -356,7 +361,7 @@ class SDKCameraThread(QThread):
                         pf_name in ("BGR8", "BGR8Packed")
                         and qimage_format == QImage.Format_RGB888
                     ):
-                        pass  # img = img.rgbSwapped() # Uncomment if Red and Blue are swapped
+                        pass
 
                     if not img.isNull():
                         self.frame_ready.emit(img.copy(), image_data)
@@ -365,7 +370,7 @@ class SDKCameraThread(QThread):
                             f"Failed to create QImage from buffer. w={w},h={h},pf={pf_name}"
                         )
 
-                except ic4.IC4Exception as e:  # Exceptions within the acquisition loop
+                except ic4.IC4Exception as e:
                     if hasattr(e, "code") and e.code == ic4.ErrorCode.Timeout:
                         time.sleep(0.005)
                         continue
@@ -373,32 +378,32 @@ class SDKCameraThread(QThread):
                         f"Acquisition loop IC4Exception: {str(e)} (Code: {e.code if hasattr(e, 'code') else 'N/A'})"
                     )
                     time.sleep(0.01)
-                except Exception as e_loop:  # Other exceptions in acquisition loop
+                except Exception as e_loop:
                     log.exception(f"Unexpected error in acquisition loop: {e_loop}")
-                    self._stop = True  # Stop loop on unexpected errors
+                    self._stop = True
 
-        except (
-            ic4.IC4Exception
-        ) as e:  # Exceptions from setup phase (device open, config, stream_setup, acq_start)
+        except ic4.IC4Exception as e:
             error_message = str(e)
             log.error(
                 f"Camera thread setup IC4Exception: {error_message} (Code: {e.code if hasattr(e, 'code') else 'N/A'})"
             )
             self.camera_error.emit(f"{error_message}", "IC4Exception")
-        except RuntimeError as e:  # e.g. No devices found
+        except RuntimeError as e:
             log.error(f"Camera thread setup RuntimeError: {str(e)}")
             self.camera_error.emit(str(e), "RuntimeError")
-        except Exception as e:  # Other unexpected errors during setup
+        except Exception as e:
             log.exception("Camera thread setup generic error")
             self.camera_error.emit(str(e), type(e).__name__)
-        finally:  # Corresponds to the main try block
+        finally:
             log.info(
                 f"SDKCameraThread: Entering finally block. is_streaming: {self.grabber.is_streaming if self.grabber else 'N/A'}"
             )
             if self.grabber:
                 try:
                     if self.grabber.is_streaming:
-                        log.info("SDKCameraThread: Stopping stream...")
+                        log.info(
+                            "SDKCameraThread: Stopping stream (if it was considered started by the grabber)..."
+                        )
                         self.grabber.stream_stop()
                         log.info("SDKCameraThread: Stream stopped.")
                 except Exception as e_stop:
