@@ -214,7 +214,7 @@ class SDKCameraThread(QThread):
         self.grabber = ic4.Grabber()
         try:
             self.grabber.set_timeout(10000)
-        except AttributeError:
+        except AttributeError: 
             self.grabber.timeout = 10000
 
         try:
@@ -225,54 +225,46 @@ class SDKCameraThread(QThread):
                     self.camera_error.emit("No cameras found", "NoDevice")
                     return
                 self.device_info = devices[0]
-
-            log.info(
-                f"SDKCameraThread: Opening device '{self.device_info.model_name}' (SN: {self.device_info.serial})"
-            )
+            
+            log.info(f"SDKCameraThread: Opening device '{self.device_info.model_name}' (SN: {self.device_info.serial})")
             self.grabber.device_open(self.device_info)
-            self.pm = self.grabber.device_property_map
-            log.info(
-                f"SDKCameraThread: Device '{self.device_info.model_name}' opened successfully."
-            )
+            self.pm = self.grabber.device_property_map 
+            log.info(f"SDKCameraThread: Device '{self.device_info.model_name}' opened successfully.")
 
-            log.info(
-                "SDKCameraThread: Configuring camera properties before streaming..."
-            )
-
+            log.info("SDKCameraThread: Configuring camera properties before streaming...")
+            
             if not self._set(PROP_TRIGGER_MODE, "Off"):
-                log.error(
-                    f"Failed to set TriggerMode to Off. Acquisition may fail if camera expects triggers."
-                )
+                log.error(f"Failed to set TriggerMode to Off. Acquisition may fail if camera expects triggers.")
             self._set(PROP_ACQUISITION_MODE, "Continuous")
-            self._set(PROP_PIXEL_FORMAT, "Mono8")
+            self._set(PROP_PIXEL_FORMAT, "Mono8") 
             self._set(PROP_WIDTH, self.desired_width)
             self._set(PROP_HEIGHT, self.desired_height)
-
-            log.debug(f"Attempting to find property 'AcquisitionFrameRateEnable'")
-            prop_fps_enable = self.pm.find("AcquisitionFrameRateEnable")
-            if prop_fps_enable:
-                log.debug(
-                    f"'AcquisitionFrameRateEnable' found. Available: {prop_fps_enable.is_available}, ReadOnly: {prop_fps_enable.is_readonly}"
-                )
-                if prop_fps_enable.is_available and not prop_fps_enable.is_readonly:
-                    # Corrected property type names
-                    if isinstance(prop_fps_enable, ic4.PropEnumeration):
-                        if (
-                            prop_fps_enable.selected_entry
-                            and prop_fps_enable.selected_entry.name != "On"
-                        ):
-                            self._set("AcquisitionFrameRateEnable", "On")
-                    elif isinstance(prop_fps_enable, ic4.PropBoolean):
-                        if not prop_fps_enable.value:
-                            self._set("AcquisitionFrameRateEnable", True)
-                    else:
-                        log.warning(
-                            f"'AcquisitionFrameRateEnable' is of unexpected type: {type(prop_fps_enable)}"
-                        )
-            else:
-                log.warning(
-                    "'AcquisitionFrameRateEnable' property not found. Proceeding without setting it."
-                )
+            
+            # --- Modified section for AcquisitionFrameRateEnable ---
+            try:
+                log.debug(f"Attempting to find property 'AcquisitionFrameRateEnable'")
+                prop_fps_enable = self.pm.find("AcquisitionFrameRateEnable") 
+                if prop_fps_enable: # Should not be reached if find() throws on not found
+                    log.debug(f"'AcquisitionFrameRateEnable' found. Available: {prop_fps_enable.is_available}, ReadOnly: {prop_fps_enable.is_readonly}")
+                    if prop_fps_enable.is_available and not prop_fps_enable.is_readonly:
+                        if isinstance(prop_fps_enable, ic4.PropEnumeration): 
+                            if prop_fps_enable.selected_entry and prop_fps_enable.selected_entry.name != "On": 
+                                self._set("AcquisitionFrameRateEnable", "On")
+                        elif isinstance(prop_fps_enable, ic4.PropBoolean): 
+                            if not prop_fps_enable.value:
+                                self._set("AcquisitionFrameRateEnable", True)
+                        else:
+                            log.warning(f"'AcquisitionFrameRateEnable' is of unexpected type: {type(prop_fps_enable)}")
+            except ic4.IC4Exception as e_fps_enable:
+                # Check if the error is specifically GenICamFeatureNotFound (code 101)
+                if hasattr(e_fps_enable, 'code') and e_fps_enable.code == ic4.ErrorCode.GenICamFeatureNotFound:
+                    log.warning("'AcquisitionFrameRateEnable' property not found. Proceeding without setting it.")
+                else:
+                    # Re-raise other IC4Exceptions or handle them if necessary
+                    log.error(f"IC4Exception while trying to access 'AcquisitionFrameRateEnable': {str(e_fps_enable)}")
+            except Exception as e_generic_fps_enable:
+                log.error(f"Generic exception while trying to access 'AcquisitionFrameRateEnable': {str(e_generic_fps_enable)}")
+            # --- End of modified section ---
 
             self._set(PROP_ACQUISITION_FRAME_RATE, self.target_fps)
             log.info("SDKCameraThread: Camera configuration attempt finished.")
@@ -280,12 +272,105 @@ class SDKCameraThread(QThread):
             self.listener = DummySinkListener()
             self.sink = ic4.SnapSink(self.listener)
             log.info("SDKCameraThread: SnapSink created.")
-
+            
             self.grabber.stream_setup(self.sink)
-            log.info("SDKCameraThread: Stream setup complete.")
-
+            log.info("SDKCameraThread: Stream setup complete.") # Hopefully we reach here!
+            
             self.grabber.acquisition_start()
-            log.info("SDKCameraThread: Streaming started (acquisition_start called).")
+            log.info('SDKCameraThread: Streaming started (acquisition_start called).') # And here!
+
+            # ... (rest of your acquisition loop and finally block remains the same) ...
+            frame_count = 0
+            start_time = time.time()
+
+            while not self._stop:
+                try:
+                    buf = self.sink.pop_output_buffer(timeout_ms=100) 
+                    if buf is None: 
+                        continue
+
+                    frame_count += 1
+                    if frame_count % 100 == 0: 
+                        elapsed_time = time.time() - start_time
+                        current_fps = frame_count / elapsed_time if elapsed_time > 0 else 0
+                        log.debug(f"Grabbed 100 frames. Total: {frame_count}. Current ingest FPS: {current_fps:.2f}")
+
+                    w, h = buf.image_type.width, buf.image_type.height
+                    pf_name = buf.image_type.pixel_format.name 
+
+                    qimage_format = None
+                    if "Mono8" == pf_name:
+                        qimage_format = QImage.Format_Grayscale8
+                    elif pf_name in ("BGR8", "BGR8Packed"): 
+                        qimage_format = QImage.Format_RGB888 
+                    elif pf_name in ("RGB8", "RGB8Packed"):
+                        qimage_format = QImage.Format_RGB888 
+                    
+                    if qimage_format is None:
+                        log.warning(f"Unsupported pixel format for QImage conversion: {pf_name}. Skipping frame.")
+                        continue
+
+                    image_data = None
+                    stride = 0
+                    if hasattr(buf, 'numpy_wrap'): 
+                        arr = buf.numpy_wrap()
+                        image_data = arr.tobytes() 
+                        stride = arr.strides[0] if len(arr.strides) > 0 else w * buf.image_type.bytes_per_pixel
+                    else: 
+                        bytes_per_pixel = buf.image_type.bytes_per_pixel
+                        pitch = getattr(buf, 'pitch', w * bytes_per_pixel) 
+                        stride = pitch
+                        buffer_size = pitch * h
+                        image_data = ctypes.string_at(buf.pointer, buffer_size)
+                                        
+                    img = QImage(image_data, w, h, stride, qimage_format)
+                    
+                    if pf_name in ("BGR8", "BGR8Packed") and qimage_format == QImage.Format_RGB888:
+                        pass 
+
+                    if not img.isNull():
+                        self.frame_ready.emit(img.copy(), image_data) 
+                    else:
+                        log.warning(f"Failed to create QImage from buffer. w={w},h={h},pf={pf_name}")
+                    
+                except ic4.IC4Exception as e:
+                    if hasattr(e, 'code') and e.code == ic4.ErrorCode.Timeout: 
+                        time.sleep(0.005) 
+                        continue
+                    log.error(f"Acquisition loop IC4Exception: {str(e)} (Code: {e.code if hasattr(e, 'code') else 'N/A'})")
+                    time.sleep(0.01) 
+                except Exception as e_loop:
+                    log.exception(f"Unexpected error in acquisition loop: {e_loop}")
+                    self._stop = True 
+
+        except ic4.IC4Exception as e: 
+            error_message = str(e)
+            log.error(f"Camera thread setup IC4Exception: {error_message} (Code: {e.code if hasattr(e, 'code') else 'N/A'})")
+            self.camera_error.emit(f"{error_message}", "IC4Exception")
+        except RuntimeError as e: 
+            log.error(f"Camera thread setup RuntimeError: {str(e)}")
+            self.camera_error.emit(str(e), "RuntimeError")
+        except Exception as e: 
+            log.exception("Camera thread setup generic error") 
+            self.camera_error.emit(str(e), type(e).__name__)
+        finally:
+            log.info(f"SDKCameraThread: Entering finally block. is_streaming: {self.grabber.is_streaming if self.grabber else 'N/A'}")
+            if self.grabber:
+                try:
+                    if self.grabber.is_streaming:
+                        log.info("SDKCameraThread: Stopping stream...")
+                        self.grabber.stream_stop()
+                        log.info("SDKCameraThread: Stream stopped.")
+                except Exception as e_stop:
+                    log.exception(f"Exception during stream_stop: {e_stop}")
+                try:
+                    if self.grabber.is_device_open:
+                        log.info("SDKCameraThread: Closing device...")
+                        self.grabber.device_close()
+                        log.info("SDKCameraThread: Device closed.")
+                except Exception as e_close:
+                    log.exception(f"Exception during device_close: {e_close}")
+            log.info("SDKCameraThread: Thread run method finished.")
 
             frame_count = 0
             start_time = time.time()
