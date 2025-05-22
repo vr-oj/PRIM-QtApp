@@ -54,20 +54,14 @@ log = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        # Camera thread will be created when a device is selected
         self.camera_thread = None
-        # Serial and recording threads
         self._serial_thread = None
         self._recording_worker = None
         self._is_recording = False
-        self.last_trial_basepath = ""
 
-        # Connect top-panel signals early (thread not started yet)
-        #   camera_selected -> _handle_camera_selection
-        #   parameter_changed -> will be connected once thread is running
-
-        self.current_camera_frame_width = DEFAULT_FRAME_SIZE[0]
-        self.current_camera_frame_height = DEFAULT_FRAME_SIZE[1]
+        self.current_camera_frame_width, self.current_camera_frame_height = (
+            DEFAULT_FRAME_SIZE
+        )
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
@@ -78,20 +72,13 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION or '1.0'}")
         self.showMaximized()
-        self.statusBar().showMessage(
-            "Ready. Select camera (if available) and serial port.", 5000
-        )
+        self.statusBar().showMessage("Ready. Select camera and serial port.", 5000)
 
-        # set up your initial splitter sizes (e.g. 2/3 : 1/3)
         QTimer.singleShot(0, self._set_initial_splitter_sizes)
-
         self._set_initial_control_states()
-        # Wire TopControlPanel signals now
-        self.top_ctrl.camera_selected.connect(self._handle_camera_selection)
 
-        # Populate camera list after a short delay
-        if hasattr(self.top_ctrl, "camera_controls") and self.top_ctrl.camera_controls:
-            QTimer.singleShot(250, self.top_ctrl.camera_controls.populate_camera_list)
+        # *** Only this one connection ***
+        self.top_ctrl.parameter_changed.connect(self._on_camera_param)
 
     def _set_initial_splitter_sizes(self):
         # Get the total width of the splitter
@@ -841,6 +828,26 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _show_about_dialog(self):
         QMessageBox.about(self, f"About {APP_NAME}", ABOUT_TEXT)
+
+    @pyqtSlot(str, object)
+    def _on_camera_param(self, name: str, val: object):
+        """
+        Dispatch all camera-control changes coming from CameraControlPanel.
+        """
+        if name == "CameraSelection":
+            # val is whatever you stored in QComboBox.itemData()
+            self._handle_camera_selection(val)
+        elif name == "Resolution":
+            self._handle_resolution_selection(val)
+        elif name == "ExposureTime":
+            self.qt_cam_widget.set_exposure(val)
+        elif name == "Gain":
+            self.qt_cam_widget.set_gain(val)
+        elif name == "AutoExposure":
+            self.qt_cam_widget.set_auto_exposure(val)
+        else:
+            # any other custom node, if you need it
+            log.debug(f"Unhandled camera parameter {name} -> {val}")
 
     def _update_app_session_time(self):
         self._app_session_seconds += 1
