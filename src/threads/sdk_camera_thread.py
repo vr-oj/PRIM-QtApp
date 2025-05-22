@@ -36,7 +36,8 @@ class DummySinkListener:
     def sink_disconnected(self, sink):
         log.debug("Sink disconnected")
 
-class SDKCameraThread(QThread):(QThread):
+
+class SDKCameraThread(QThread):
     frame_ready = pyqtSignal(QImage, object)
     camera_resolutions_available = pyqtSignal(list)
     camera_video_formats_available = pyqtSignal(list)
@@ -103,11 +104,11 @@ class SDKCameraThread(QThread):(QThread):
         if not prop or not prop.is_available:
             log.warning("Auto-exposure not available")
             return
-        entries = [e.name for e in getattr(prop, 'entries', [])]
+        entries = [e.name for e in getattr(prop, "entries", [])]
         if enable_auto:
-            target = next((n for n in entries if 'Continuous' in n), None)
+            target = next((n for n in entries if "Continuous" in n), None)
         else:
-            target = next((n for n in entries if 'Off' in n), None)
+            target = next((n for n in entries if "Off" in n), None)
         self._set(PROP_EXPOSURE_AUTO, target or enable_auto)
 
     def run(self):
@@ -124,7 +125,7 @@ class SDKCameraThread(QThread):(QThread):
             if not self.device_info:
                 devices = ic4.DeviceEnum.devices()
                 if not devices:
-                    raise RuntimeError('No cameras found')
+                    raise RuntimeError("No cameras found")
                 self.device_info = devices[0]
             self.grabber.device_open(self.device_info)
             self.pm = self.grabber.device_property_map
@@ -134,7 +135,7 @@ class SDKCameraThread(QThread):(QThread):
             self.sink = ic4.SnapSink(self.listener)
             self.grabber.stream_setup(self.sink)
             self.grabber.acquisition_start()
-            log.info('Streaming started via SnapSink + acquisition_start')
+            log.info("Streaming started via SnapSink + acquisition_start")
 
             # Acquisition loop
             while not self._stop:
@@ -146,21 +147,23 @@ class SDKCameraThread(QThread):(QThread):
                 w, h = buf.image_type.width, buf.image_type.height
                 pf = buf.image_type.pixel_format.name
                 # extract bytes
-                if hasattr(buf, 'numpy_wrap'):
+                if hasattr(buf, "numpy_wrap"):
                     arr = buf.numpy_wrap()
                     data = arr.tobytes()
                     stride = arr.strides[0]
                 else:
-                    pitch = getattr(buf, 'pitch', w * buf.image_type.bytes_per_pixel)
+                    pitch = getattr(buf, "pitch", w * buf.image_type.bytes_per_pixel)
                     data = ctypes.string_at(buf.pointer, pitch * h)
                     stride = pitch
-                fmt = QImage.Format_Grayscale8 if 'Mono8' in pf else QImage.Format_RGB888
+                fmt = (
+                    QImage.Format_Grayscale8 if "Mono8" in pf else QImage.Format_RGB888
+                )
                 img = QImage(data, w, h, stride, fmt)
                 if not img.isNull():
                     self.frame_ready.emit(img, data)
 
         except Exception as e:
-            log.exception('Camera thread error')
+            log.exception("Camera thread error")
             self.camera_error.emit(str(e), type(e).__name__)
 
         finally:
@@ -176,4 +179,4 @@ class SDKCameraThread(QThread):(QThread):
                         self.grabber.device_close()
                 except Exception:
                     pass
-            log.info('Camera thread stopped')
+            log.info("Camera thread stopped")
