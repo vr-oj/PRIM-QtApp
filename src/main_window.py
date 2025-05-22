@@ -931,8 +931,7 @@ class MainWindow(QMainWindow):
     def _test_ic4_main_thread(self):
         """Runs a simplified IC4 test entirely in the main thread."""
         from imagingcontrol4 import QueueSink, Library, IC4Exception
-        from imagingcontrol4.devenum import DeviceEnum, DeviceInfo
-        from imagingcontrol4.device import Device
+        from imagingcontrol4.devenum import DeviceEnum
 
         device = None
         grabber = None
