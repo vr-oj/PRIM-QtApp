@@ -66,6 +66,8 @@ class MainWindow(QMainWindow):
         self._init_paths_and_icons()
         self._build_console_log_dock()
         self._build_central_widget_layout()
+        # wire camera widget signals before menus/toolbars
+        self._connect_camera_widget_signals()
         self._build_menus()
         self._build_main_toolbar()
         self._build_status_bar()
@@ -77,8 +79,10 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._set_initial_splitter_sizes)
         self._set_initial_control_states()
 
-        # *** Only this one connection ***
+        # route all camera UI changes through one slot
         self.top_ctrl.parameter_changed.connect(self._on_camera_param)
+
+        QTimer.singleShot(250, self.top_ctrl.camera_controls.populate_camera_list)
 
     def _set_initial_splitter_sizes(self):
         # Get the total width of the splitter
@@ -265,30 +269,10 @@ class MainWindow(QMainWindow):
 
     def _set_initial_control_states(self):
         self.top_ctrl.update_connection_status("Disconnected", False)
-        # 👇 call the TopControlPanel helper instead
+        # now use the TopControlPanel API rather than diving into camera_controls
         self.top_ctrl.disable_all_camera_controls()
         self.start_recording_action.setEnabled(False)
         self.stop_recording_action.setEnabled(False)
-
-    def _connect_top_control_panel_signals(self):
-        tc = self.top_ctrl
-        tc.camera_selected.connect(self._handle_camera_selection)
-        tc.resolution_selected.connect(self._handle_resolution_selection)
-        tc.exposure_changed.connect(self.qt_cam_widget.set_exposure)
-        tc.gain_changed.connect(self.qt_cam_widget.set_gain)
-        tc.auto_exposure_toggled.connect(self.qt_cam_widget.set_auto_exposure)
-
-        pc = tc.plot_controls
-        pc.x_axis_limits_changed.connect(self.pressure_plot_widget.set_manual_x_limits)
-        pc.y_axis_limits_changed.connect(self.pressure_plot_widget.set_manual_y_limits)
-        pc.export_plot_image_requested.connect(
-            self.pressure_plot_widget.export_as_image
-        )
-        pc.reset_btn.clicked.connect(
-            lambda: self.pressure_plot_widget.reset_zoom(
-                pc.auto_x_cb.isChecked(), pc.auto_y_cb.isChecked()
-            )
-        )
 
     def _connect_camera_widget_signals(self):
         # Safely only hook up if that slot actually exists
@@ -324,6 +308,8 @@ class MainWindow(QMainWindow):
         if device_info_obj is None:
             self.top_ctrl.update_connection_status("Disconnected", False)
             self.qt_cam_widget.clear()
+            # also grey‐out the source/resolution controls
+            self.top_ctrl.disable_all_camera_controls()
             return
 
         # Start a fresh SDKCameraThread for this device
@@ -341,14 +327,21 @@ class MainWindow(QMainWindow):
                 f"Connected: {dev.model_name}", True
             )
         )
+        # After connecting, re-enable camera controls and forward parameter changes into thread
+        self.camera_thread.camera_configured.connect(
+            lambda dev: (
+                self.top_ctrl.camera_controls.tabs.setTabEnabled(1, True),
+                self.top_ctrl.camera_controls.res_selector.setEnabled(True),
+                self.top_ctrl.parameter_changed.connect(
+                    self.camera_thread.set_parameter
+                ),
+            )
+        )
         self.camera_thread.frame_ready.connect(self.qt_cam_widget.update_frame)
         self.camera_thread.camera_properties_updated.connect(
             self.top_ctrl.update_camera_ui_from_properties
         )
         self.camera_thread.camera_error.connect(self._handle_camera_error)
-
-        # Wire UI → thread setter
-        self.top_ctrl.parameter_changed.connect(self.camera_thread.set_parameter)
 
         # Launch the camera thread
         self.camera_thread.start()
@@ -835,19 +828,21 @@ class MainWindow(QMainWindow):
         Dispatch all camera-control changes coming from CameraControlPanel.
         """
         if name == "CameraSelection":
-            # val is whatever you stored in QComboBox.itemData()
             self._handle_camera_selection(val)
         elif name == "Resolution":
             self._handle_resolution_selection(val)
-        elif name == "ExposureTime":
-            self.qt_cam_widget.set_exposure(val)
-        elif name == "Gain":
-            self.qt_cam_widget.set_gain(val)
-        elif name == "AutoExposure":
-            self.qt_cam_widget.set_auto_exposure(val)
+        elif name in ("ExposureTime", "Gain", "AutoExposure"):
+            # forward to both widget and camera thread
+            if name == "ExposureTime":
+                self.qt_cam_widget.set_exposure(val)
+            elif name == "Gain":
+                self.qt_cam_widget.set_gain(val)
+            else:  # AutoExposure
+                self.qt_cam_widget.set_auto_exposure(val)
+            if self.camera_thread:
+                self.camera_thread.set_parameter(name, val)
         else:
-            # any other custom node, if you need it
-            log.debug(f"Unhandled camera parameter {name} -> {val}")
+            log.debug(f"Ignored camera parameter: {name} -> {val}")
 
     def _update_app_session_time(self):
         self._app_session_seconds += 1

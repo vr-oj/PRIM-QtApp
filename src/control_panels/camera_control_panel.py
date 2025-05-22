@@ -15,6 +15,12 @@ from PyQt5.QtCore import Qt, pyqtSignal
 
 log = logging.getLogger(__name__)
 
+# Try to import the IC4 library for camera enumeration
+try:
+    import imagingcontrol4 as ic4
+except ImportError:
+    ic4 = None
+
 
 class CameraControlPanel(QGroupBox):
     """
@@ -36,14 +42,17 @@ class CameraControlPanel(QGroupBox):
         src_tab = QWidget()
         src_layout = QFormLayout(src_tab)
 
+        # Camera device selector
         self.cam_selector = QComboBox()
         self.cam_selector.setToolTip("Select Camera Device")
         src_layout.addRow("Device:", self.cam_selector)
 
+        # Resolution selector
         self.res_selector = QComboBox()
         self.res_selector.setToolTip("Select Resolution and Format")
         src_layout.addRow("Resolution:", self.res_selector)
 
+        # Display for current resolution
         self.current_res_label = QLabel("––")
         src_layout.addRow("Current:", self.current_res_label)
 
@@ -53,6 +62,7 @@ class CameraControlPanel(QGroupBox):
         adj_tab = QWidget()
         adj_layout = QFormLayout(adj_tab)
 
+        # Exposure control
         self.exposure_box = QDoubleSpinBox()
         self.exposure_box.setDecimals(1)
         self.exposure_box.setSuffix(" ms")
@@ -60,18 +70,21 @@ class CameraControlPanel(QGroupBox):
         self.exposure_box.setKeyboardTracking(False)
         adj_layout.addRow("Exposure:", self.exposure_box)
 
+        # Auto exposure checkbox
         self.auto_exposure_cb = QCheckBox("Auto Exposure")
         adj_layout.addRow(self.auto_exposure_cb)
 
+        # Gain control
         self.gain_box = QDoubleSpinBox()
         self.gain_box.setDecimals(1)
         self.gain_box.setKeyboardTracking(False)
         adj_layout.addRow("Gain (dB):", self.gain_box)
 
         self.tabs.addTab(adj_tab, "Adjustments")
+        # Initially disable adjustments until a camera is selected
         adj_tab.setEnabled(False)
 
-        # Connect UI signals to parameter_changed
+        # Connect UI signals to emit parameter changes
         self.cam_selector.currentIndexChanged.connect(
             lambda idx: self.parameter_changed.emit(
                 "CameraSelection", self.cam_selector.itemData(idx)
@@ -94,21 +107,45 @@ class CameraControlPanel(QGroupBox):
             lambda v: self.parameter_changed.emit("Gain", v)
         )
 
+    def populate_camera_list(self):
+        """
+        Enumerate available TIS/IC4 cameras and populate the device combo.
+        """
+        self.cam_selector.blockSignals(True)
+        self.cam_selector.clear()
+        # No IC4 backend
+        if not ic4:
+            self.cam_selector.addItem("IC4 library unavailable", None)
+            self.cam_selector.blockSignals(False)
+            return
+        try:
+            devices = ic4.DeviceEnum.devices()
+        except Exception as e:
+            log.error(f"Failed to enumerate cameras: {e}")
+            devices = []
+
+        if not devices:
+            self.cam_selector.addItem("No cameras found", None)
+        else:
+            for dev in devices:
+                label = f"{dev.model_name} (SN:{dev.serial})"
+                self.cam_selector.addItem(label, dev)
+        self.cam_selector.blockSignals(False)
+
     def disable_all_controls(self):
         """
         Disable all camera-related controls (used when no camera is active).
         """
-        # Disable adjustments tab entirely
+        # Grey out adjustments tab
         self.tabs.setTabEnabled(1, False)
         # Disable individual adjustment widgets
         for w in (self.exposure_box, self.auto_exposure_cb, self.gain_box):
             w.setEnabled(False)
-        # Clear and disable resolution selector
+        # Reset and disable resolution selector
         self.res_selector.blockSignals(True)
         self.res_selector.clear()
         self.res_selector.addItem("N/A", None)
         self.res_selector.setEnabled(False)
         self.res_selector.blockSignals(False)
-
         # Optionally disable camera selector until repopulated
-        # self.cam_selector.setEnabled(False)
+        self.cam_selector.setEnabled(True)
