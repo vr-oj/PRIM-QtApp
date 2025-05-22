@@ -93,3 +93,22 @@ class CameraControlPanel(QGroupBox):
         self.gain_box.valueChanged.connect(
             lambda v: self.parameter_changed.emit("Gain", v)
         )
+
+    def disable_all_controls(self):
+        """
+        Disable all camera-related controls (used when no camera is active).
+        """
+        # Disable adjustments tab entirely
+        self.tabs.setTabEnabled(1, False)
+        # Disable individual adjustment widgets
+        for w in (self.exposure_box, self.auto_exposure_cb, self.gain_box):
+            w.setEnabled(False)
+        # Clear and disable resolution selector
+        self.res_selector.blockSignals(True)
+        self.res_selector.clear()
+        self.res_selector.addItem("N/A", None)
+        self.res_selector.setEnabled(False)
+        self.res_selector.blockSignals(False)
+
+        # Optionally disable camera selector until repopulated
+        # self.cam_selector.setEnabled(False)
