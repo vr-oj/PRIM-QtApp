@@ -26,6 +26,7 @@ class DummySinkListener:
     num_buffers_alloc_on_connect = 6  # For snapsink.py line 98
     num_buffers_allocation_threshold = 6  # For snapsink.py line 99
     num_buffers_free_threshold = 6  # For snapsink.py line 100 (NEW)
+    num_buffers_max = 6
     num_buffers_required_on_connect = 6
 
     def sink_connected(self, sink, image_type, min_buffers_required):
