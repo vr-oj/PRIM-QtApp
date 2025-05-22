@@ -208,9 +208,10 @@ class SDKCameraThread(QThread):
         self._safe_init()
         self.grabber = ic4.Grabber()
         try:
-            self.grabber.set_timeout(10000)
+            # Setting a generous timeout for overall grabber operations
+            self.grabber.set_timeout(20000)  # Increased to 20 seconds
         except AttributeError:
-            self.grabber.timeout = 10000
+            self.grabber.timeout = 20000
 
         try:
             if not self.device_info:
@@ -233,15 +234,22 @@ class SDKCameraThread(QThread):
             log.info(
                 "SDKCameraThread: Configuring camera properties before streaming..."
             )
-            if not self._set(PROP_TRIGGER_MODE, "Off"):
-                log.error(
-                    f"Failed to set TriggerMode to Off. Acquisition may fail if camera expects triggers."
-                )
-            self._set(PROP_ACQUISITION_MODE, "Continuous")
-            self._set(PROP_PIXEL_FORMAT, "Mono8")
-            self._set(PROP_WIDTH, self.desired_width)
-            self._set(PROP_HEIGHT, self.desired_height)
 
+            # --- Reordered Property Settings to match test_ic4.py, with small delays ---
+            log.info("Setting PixelFormat, Width, Height first...")
+            if not self._set(PROP_PIXEL_FORMAT, "Mono8"):
+                log.error(f"Failed to set PixelFormat. This may cause further issues.")
+            time.sleep(0.1)  # Small delay
+
+            if not self._set(PROP_WIDTH, self.desired_width):
+                log.error(f"Failed to set Width. This may cause further issues.")
+            time.sleep(0.1)  # Small delay
+
+            if not self._set(PROP_HEIGHT, self.desired_height):
+                log.error(f"Failed to set Height. This may cause further issues.")
+            time.sleep(0.1)  # Small delay
+
+            # Frame Rate related settings
             try:
                 log.debug(f"Attempting to find property 'AcquisitionFrameRateEnable'")
                 prop_fps_enable = self.pm.find("AcquisitionFrameRateEnable")
@@ -280,7 +288,21 @@ class SDKCameraThread(QThread):
                     f"Generic exception while trying to access 'AcquisitionFrameRateEnable': {str(e_generic_fps_enable)}"
                 )
 
-            self._set(PROP_ACQUISITION_FRAME_RATE, self.target_fps)
+            if not self._set(PROP_ACQUISITION_FRAME_RATE, self.target_fps):
+                log.error(f"Failed to set AcquisitionFrameRate.")
+            time.sleep(0.1)  # Small delay
+
+            log.info("Setting AcquisitionMode and TriggerMode last...")
+            if not self._set(PROP_ACQUISITION_MODE, "Continuous"):
+                log.error(f"Failed to set AcquisitionMode.")
+            time.sleep(0.1)  # Small delay
+
+            if not self._set(PROP_TRIGGER_MODE, "Off"):
+                log.error(
+                    f"Failed to set TriggerMode to Off. Acquisition may fail if camera expects triggers."
+                )
+            # --- End of Reordered Property Settings ---
+
             log.info("SDKCameraThread: Camera configuration attempt finished.")
 
             self.listener = DummySinkListener()
@@ -301,19 +323,13 @@ class SDKCameraThread(QThread):
 
             while not self._stop:
                 try:
-                    # --- MODIFIED pop_output_buffer CALL ---
-                    buf = self.sink.pop_output_buffer()  # Removed timeout_ms argument
-                    # --- END OF MODIFICATION ---
+                    buf = self.sink.pop_output_buffer()
 
-                    if (
-                        buf is None
-                    ):  # pop_output_buffer will return None on timeout (based on self.sink.timeout)
+                    if buf is None:
                         log.debug(
                             "pop_output_buffer timed out (expected behavior if no frame ready)"
                         )
-                        time.sleep(
-                            0.005
-                        )  # Optional short sleep if timeouts are frequent
+                        time.sleep(0.005)
                         continue
 
                     frame_count += 1
@@ -377,8 +393,6 @@ class SDKCameraThread(QThread):
 
                 except ic4.IC4Exception as e:
                     if hasattr(e, "code") and e.code == ic4.ErrorCode.Timeout:
-                        # This specific error code for Timeout from pop_output_buffer is what QueueSink uses.
-                        # SnapSink used to raise an IC4Exception without a specific code, or just return None.
                         log.debug(
                             "pop_output_buffer IC4Exception Timeout (expected if no frame)"
                         )
