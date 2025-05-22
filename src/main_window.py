@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime
-from PyQt5.QtGui import QIcon, QKeySequence, QImage
+from PyQt5.QtGui import QIcon, QKeySequence, QImage, QSize
 
 
 from threads.sdk_camera_thread import SDKCameraThread
