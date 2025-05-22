@@ -207,11 +207,12 @@ class SDKCameraThread(QThread):
     def run(self):
         self._safe_init()
         self.grabber = ic4.Grabber()
-        try:
-            # Setting a generous timeout for overall grabber operations
-            self.grabber.set_timeout(20000)  # Increased to 20 seconds
-        except AttributeError:
-            self.grabber.timeout = 20000
+        # --- ENSURE THESE LINES ARE COMMENTED OUT or REMOVED ---
+        # try:
+        #     self.grabber.set_timeout(20000)
+        # except AttributeError:
+        #     self.grabber.timeout = 20000
+        # --- END OF SECTION TO ENSURE IS COMMENTED/REMOVED ---
 
         try:
             if not self.device_info:
@@ -235,21 +236,19 @@ class SDKCameraThread(QThread):
                 "SDKCameraThread: Configuring camera properties before streaming..."
             )
 
-            # --- Reordered Property Settings to match test_ic4.py, with small delays ---
             log.info("Setting PixelFormat, Width, Height first...")
             if not self._set(PROP_PIXEL_FORMAT, "Mono8"):
                 log.error(f"Failed to set PixelFormat. This may cause further issues.")
-            time.sleep(0.1)  # Small delay
+            time.sleep(0.1)
 
             if not self._set(PROP_WIDTH, self.desired_width):
                 log.error(f"Failed to set Width. This may cause further issues.")
-            time.sleep(0.1)  # Small delay
+            time.sleep(0.1)
 
             if not self._set(PROP_HEIGHT, self.desired_height):
                 log.error(f"Failed to set Height. This may cause further issues.")
-            time.sleep(0.1)  # Small delay
+            time.sleep(0.1)
 
-            # Frame Rate related settings
             try:
                 log.debug(f"Attempting to find property 'AcquisitionFrameRateEnable'")
                 prop_fps_enable = self.pm.find("AcquisitionFrameRateEnable")
@@ -290,18 +289,17 @@ class SDKCameraThread(QThread):
 
             if not self._set(PROP_ACQUISITION_FRAME_RATE, self.target_fps):
                 log.error(f"Failed to set AcquisitionFrameRate.")
-            time.sleep(0.1)  # Small delay
+            time.sleep(0.1)
 
             log.info("Setting AcquisitionMode and TriggerMode last...")
             if not self._set(PROP_ACQUISITION_MODE, "Continuous"):
                 log.error(f"Failed to set AcquisitionMode.")
-            time.sleep(0.1)  # Small delay
+            time.sleep(0.1)
 
             if not self._set(PROP_TRIGGER_MODE, "Off"):
                 log.error(
                     f"Failed to set TriggerMode to Off. Acquisition may fail if camera expects triggers."
                 )
-            # --- End of Reordered Property Settings ---
 
             log.info("SDKCameraThread: Camera configuration attempt finished.")
 
