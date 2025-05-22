@@ -930,22 +930,20 @@ class MainWindow(QMainWindow):
 
     def _test_ic4_main_thread(self):
         """Runs a simplified IC4 test entirely in the main thread."""
-        import imagingcontrol4 as ic4
-        from imagingcontrol4 import QueueSink
+        from imagingcontrol4 import QueueSink, Device, DeviceEnum, Library, IC4Exception
 
         device = None
         grabber = None
 
         try:
-            # Try initializing, but skip if already initialized
             try:
-                ic4.Library.init()
+                Library.init()
             except RuntimeError as e:
                 if "already called" not in str(e):
                     raise
 
-            device_info = ic4.DeviceEnum.devices()[0]
-            device = ic4.Device(device_info)
+            device_info = DeviceEnum.devices()[0]
+            device = Device(device_info)
             device.open()
 
             device.properties["PixelFormat"].selected_entry = "Mono8"
@@ -956,7 +954,7 @@ class MainWindow(QMainWindow):
             device.properties["AcquisitionMode"].selected_entry = "Continuous"
 
             sink = QueueSink()
-            grabber = ic4.Grabber(device, sink)
+            grabber = device.grabber(sink)
 
             grabber.stream_setup(setup_option=ic4.StreamSetupOption.ACQUISITION_START)
             print("✅ Streaming started successfully in main thread.")
@@ -966,7 +964,7 @@ class MainWindow(QMainWindow):
                 f"✅ Captured frame: {frame.width}x{frame.height}, format: {frame.pixel_format}"
             )
 
-        except ic4.IC4Exception as e:
+        except IC4Exception as e:
             print(f"❌ IC4Exception in main thread: {e}")
 
         finally:
@@ -975,7 +973,7 @@ class MainWindow(QMainWindow):
                     grabber.stream_stop()
                 if device:
                     device.close()
-                ic4.Library.exit()
+                Library.exit()
                 print("✅ Cleaned up resources.")
             except Exception as cleanup_exception:
                 print(f"❌ Cleanup issue: {cleanup_exception}")
