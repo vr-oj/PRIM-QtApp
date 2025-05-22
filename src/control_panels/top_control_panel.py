@@ -1,5 +1,5 @@
 import logging
-from PyQt5.QtWidgets import QWidget, QGroupBox, QHBoxLayout, QFormLayout
+from PyQt5.QtWidgets import QWidget, QGroupBox, QHBoxLayout, QFormLayout, QLabel
 from PyQt5.QtCore import pyqtSignal, pyqtSlot
 
 from .camera_control_panel import CameraControlPanel
