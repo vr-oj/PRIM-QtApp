@@ -928,47 +928,46 @@ class MainWindow(QMainWindow):
         log.info("Exiting application.")
         super().closeEvent(event)
 
+    def _test_ic4_main_thread(self):
+        """Runs a simplified IC4 test entirely in the main thread."""
+        import imagingcontrol4 as ic4
+        from imagingcontrol4.sinks import QueueSink
 
-def _test_ic4_main_thread(self):
-    """Runs a simplified IC4 test entirely in the main thread."""
-    import imagingcontrol4 as ic4
-    from imagingcontrol4.sinks import QueueSink
-
-    try:
-        ic4.Library.init()
-        device_info = ic4.DeviceEnum.devices()[
-            0
-        ]  # Assumes first camera is your DMK 33UX250
-        device = ic4.Device(device_info)
-        device.open()
-
-        device.properties["PixelFormat"].selected_entry = "Mono8"
-        device.properties["Width"].value = 2448
-        device.properties["Height"].value = 2048
-        device.properties["AcquisitionFrameRate"].value = 20.0
-        device.properties["TriggerMode"].selected_entry = "Off"
-        device.properties["AcquisitionMode"].selected_entry = "Continuous"
-
-        sink = QueueSink()
-        grabber = ic4.Grabber(device, sink)
-
-        grabber.stream_setup(setup_option=ic4.StreamSetupOption.ACQUISITION_START)
-        print("✅ Streaming started successfully in main thread.")
-
-        # Attempt to capture one frame to confirm functionality
-        frame = sink.snap_single(5000)  # Wait up to 5 seconds for a frame
-        print(
-            f"✅ Captured frame: {frame.width}x{frame.height}, format: {frame.pixel_format}"
-        )
-
-    except ic4.IC4Exception as e:
-        print(f"❌ IC4Exception in main thread: {e}")
-
-    finally:
         try:
-            grabber.stream_stop()
-            device.close()
-            ic4.Library.exit()
-            print("✅ Cleaned up resources.")
-        except Exception as cleanup_exception:
-            print(f"❌ Cleanup issue: {cleanup_exception}")
+            ic4.Library.init()
+            device_info = ic4.DeviceEnum.devices()[
+                0
+            ]  # Assumes first camera is your DMK 33UX250
+            device = ic4.Device(device_info)
+            device.open()
+
+            device.properties["PixelFormat"].selected_entry = "Mono8"
+            device.properties["Width"].value = 2448
+            device.properties["Height"].value = 2048
+            device.properties["AcquisitionFrameRate"].value = 20.0
+            device.properties["TriggerMode"].selected_entry = "Off"
+            device.properties["AcquisitionMode"].selected_entry = "Continuous"
+
+            sink = QueueSink()
+            grabber = ic4.Grabber(device, sink)
+
+            grabber.stream_setup(setup_option=ic4.StreamSetupOption.ACQUISITION_START)
+            print("✅ Streaming started successfully in main thread.")
+
+            # Attempt to capture one frame to confirm functionality
+            frame = sink.snap_single(5000)  # Wait up to 5 seconds for a frame
+            print(
+                f"✅ Captured frame: {frame.width}x{frame.height}, format: {frame.pixel_format}"
+            )
+
+        except ic4.IC4Exception as e:
+            print(f"❌ IC4Exception in main thread: {e}")
+
+        finally:
+            try:
+                grabber.stream_stop()
+                device.close()
+                ic4.Library.exit()
+                print("✅ Cleaned up resources.")
+            except Exception as cleanup_exception:
+                print(f"❌ Cleanup issue: {cleanup_exception}")
