@@ -66,8 +66,13 @@ class MainWindow(QMainWindow):
         self._init_paths_and_icons()
         self._build_console_log_dock()
         self._build_central_widget_layout()
-        # wire camera widget signals before menus/toolbars
-        self._connect_camera_widget_signals()
+        # Connect camera widget → control panel
+        self.qt_cam_widget.camera_resolutions_updated.connect(
+            self.top_ctrl.camera_controls.update_camera_resolutions_list
+        )
+        self.qt_cam_widget.camera_properties_updated.connect(
+            self.top_ctrl.camera_controls.update_camera_properties_ui
+        )
         self._build_menus()
         self._build_main_toolbar()
         self._build_status_bar()

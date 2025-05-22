@@ -149,3 +149,53 @@ class CameraControlPanel(QGroupBox):
         self.res_selector.blockSignals(False)
         # Optionally disable camera selector until repopulated
         self.cam_selector.setEnabled(True)
+
+    def update_camera_resolutions_list(self, resolutions):
+        """
+        Populate the resolution combo based on the active camera's supported modes.
+        """
+        self.res_selector.blockSignals(True)
+        self.res_selector.clear()
+        if not resolutions:
+            self.res_selector.addItem("N/A", None)
+            self.res_selector.setEnabled(False)
+        else:
+            for res in resolutions:
+                # resolution string e.g. '1024x768@30fps'
+                self.res_selector.addItem(res, res)
+            self.res_selector.setEnabled(True)
+        self.res_selector.blockSignals(False)
+        # now that a valid camera is selected, enable adjustments tab
+        self.tabs.setTabEnabled(1, True)
+
+    def update_camera_properties_ui(self, props: dict):
+        """
+        Sync the exposure, gain, and auto-exposure widgets with camera properties.
+        """
+        # ExposureTime comes in microseconds or as reported by backend
+        if "ExposureTime" in props:
+            self.exposure_box.blockSignals(True)
+            # convert to ms for display
+            try:
+                self.exposure_box.setValue(props["ExposureTime"] / 1000.0)
+            except Exception:
+                pass
+            self.exposure_box.blockSignals(False)
+        # Gain in dB
+        if "Gain" in props:
+            self.gain_box.blockSignals(True)
+            try:
+                self.gain_box.setValue(props["Gain"])
+            except Exception:
+                pass
+            self.gain_box.blockSignals(False)
+        # AutoExposure boolean
+        if "AutoExposure" in props:
+            self.auto_exposure_cb.blockSignals(True)
+            try:
+                self.auto_exposure_cb.setChecked(bool(props["AutoExposure"]))
+            except Exception:
+                pass
+            self.auto_exposure_cb.blockSignals(False)
+        # Ensure adjustments controls are enabled
+        self.tabs.setTabEnabled(1, True)
