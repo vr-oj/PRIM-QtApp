@@ -3,13 +3,11 @@ import logging
 from PyQt5.QtWidgets import (
     QWidget,
     QGroupBox,
-    QTabWidget,
-    QFormLayout,
     QHBoxLayout,
-    QVBoxLayout,
+    QFormLayout,
     QLabel,
 )
-from PyQt5.QtCore import pyqtSignal, pyqtSlot
+from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 
 from .camera_control_panel import CameraControlPanel
 from .plot_control_panel import PlotControlPanel
@@ -22,12 +20,8 @@ class TopControlPanel(QWidget):
     Composite panel combining camera controls, device status, and plot controls.
     """
 
-    # Camera control signals
-    camera_selected = pyqtSignal(object)
-    resolution_selected = pyqtSignal(str)
-    exposure_changed = pyqtSignal(int)
-    gain_changed = pyqtSignal(float)
-    auto_exposure_toggled = pyqtSignal(bool)
+    # Unified camera-parameter signal
+    parameter_changed = pyqtSignal(str, object)
 
     # Plot control signals
     x_axis_limits_changed = pyqtSignal(float, float)
@@ -36,6 +30,7 @@ class TopControlPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+
         # Layout
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 2, 5, 2)
@@ -43,8 +38,10 @@ class TopControlPanel(QWidget):
 
         # Camera control panel
         self.camera_controls = CameraControlPanel(self)
-        self.camera_controls.parameter_changed.connect(self._on_camera_param)
         layout.addWidget(self.camera_controls, 1)
+
+        # Re-emit low-level camera control changes
+        self.camera_controls.parameter_changed.connect(self.parameter_changed)
 
         # PRIM Device status box
         status_box = QGroupBox("PRIM Device Status")
@@ -62,16 +59,19 @@ class TopControlPanel(QWidget):
         self.pres_lbl = QLabel("N/A")
         self.pres_lbl.setStyleSheet("font-size:12pt;font-weight:bold;")
         status_layout.addRow("Current Pressure:", self.pres_lbl)
+
         layout.addWidget(status_box, 1)
 
         # Plot control panel
         self.plot_controls = PlotControlPanel(self)
         layout.addWidget(self.plot_controls, 1)
+
         # Forward plot signals
-        pc = self.plot_controls
-        pc.x_axis_limits_changed.connect(self.x_axis_limits_changed)
-        pc.y_axis_limits_changed.connect(self.y_axis_limits_changed)
-        pc.export_plot_image_requested.connect(self.export_plot_image_requested)
+        self.plot_controls.x_axis_limits_changed.connect(self.x_axis_limits_changed)
+        self.plot_controls.y_axis_limits_changed.connect(self.y_axis_limits_changed)
+        self.plot_controls.export_plot_image_requested.connect(
+            self.export_plot_image_requested
+        )
 
     @pyqtSlot(dict)
     def update_camera_ui_from_properties(self, props: dict):
@@ -107,19 +107,3 @@ class TopControlPanel(QWidget):
         self.idx_lbl.setText(str(idx))
         self.time_lbl.setText(f"{t_dev:.2f}")
         self.pres_lbl.setText(f"{p_dev:.2f} mmHg")
-
-    @pyqtSlot(str, object)
-    def _on_camera_param(self, name: str, val: object):
-        if name == "CameraSelection":
-            self.camera_selected.emit(val)
-        elif name == "Resolution":
-            self.resolution_selected.emit(val)
-        elif name == "ExposureTime":
-            self.exposure_changed.emit(int(val))
-        elif name == "Gain":
-            self.gain_changed.emit(float(val))
-        elif name == "AutoExposure":
-            self.auto_exposure_toggled.emit(bool(val))
-        else:
-            # any other custom nodes you might want to catch
-            self.parameter_changed.emit(name, val)
