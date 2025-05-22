@@ -25,6 +25,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QFileDialog,
     QMessageBox,
+    QPushButton,
 )
 from PyQt5.QtCore import (
     Qt,
