@@ -78,14 +78,14 @@ class SDKCameraThread(QThread):
             PROP_GAIN,
             PROP_EXPOSURE_AUTO,
         ):
-            log.warning(f"Skipping truly read-only prop {name}")
+            log.warning(f"Skipping read-only property {name}")
             return
         try:
             self.pm.set_value(name, val)
             log.info(f"Set {name} → {val}")
             self.camera_properties_updated.emit({name: val})
         except Exception as e:
-            log.error(f"Failed to write {name}: {e}")
+            log.error(f"Failed to set {name}: {e}")
 
     def update_exposure(self, exposure_us: int):
         self._set(PROP_EXPOSURE_AUTO, False)
@@ -96,182 +96,53 @@ class SDKCameraThread(QThread):
         self._set(PROP_GAIN, gain_db)
 
     def update_auto_exposure(self, enable_auto: bool):
-        log.info(f"→ update_auto_exposure({enable_auto}) called")
         prop = self.pm.find(PROP_EXPOSURE_AUTO)
         if not prop or not prop.is_available:
-            log.warning("Auto-exposure property not available")
+            log.warning("Auto-exposure not available")
             return
-        entry_names = [e.name for e in getattr(prop, "entries", [])]
-        target = (next((e for e in entry_names if "Continuous" in e), None)
-                  if enable_auto else next((e for e in entry_names if "Off" in e), None))
+        entries = [e.name for e in getattr(prop, "entries", [])]
+        if enable_auto:
+            target = next((n for n in entries if "Continuous" in n), None)
+        else:
+            target = next((n for n in entries if "Off" in n), None)
         self._set(PROP_EXPOSURE_AUTO, target or enable_auto)
 
     def run(self):
         self._safe_init()
         self.grabber = ic4.Grabber()
-        # Give grabber extended timeout for AcquisitionStart
+        # extend grabber-level timeout for AcquisitionStart
         try:
             self.grabber.set_timeout(10000)
         except AttributeError:
             self.grabber.timeout = 10000
 
         try:
-            # 1) Open camera
+            # Open device
             if not self.device_info:
-                devs = ic4.DeviceEnum.devices()
-                if not devs:
+                devices = ic4.DeviceEnum.devices()
+                if not devices:
                     raise RuntimeError("No cameras found")
-                self.device_info = devs[0]
+                self.device_info = devices[0]
             self.grabber.device_open(self.device_info)
             self.pm = self.grabber.device_property_map
 
-            # 2) Dump all available GenICam properties for inspection
-            #    including both device and driver property maps for USB3Vision features
-            log.info("=== Device PropertyMap dump ===")
-            if self.pm and hasattr(self.pm, "to_dict"):
-                for pname in self.pm.to_dict().keys():
-                    prop = self.pm.find(pname)
-                    if prop and prop.is_available:
-                        info = {
-                            "value": prop.value,
-                            "min": getattr(prop, "minimum", None),
-                            "max": getattr(prop, "maximum", None),
-                            "access": "RW" if not getattr(prop, "is_readonly", True) else "RO",
-                            "type": type(prop.value).__name__,
-                        }
-                        log.info(f"  {pname}: {info}")
-            else:
-                log.warning("Device PropertyMap has no to_dict(); cannot dump features")
-            log.info("=== End Device PropertyMap dump ===")
-
-            # Also check the driver-level PropertyMap for more low-level features
-            try:
-                dpm = self.grabber.driver_property_map
-                log.info("=== Driver PropertyMap dump ===")
-                if hasattr(dpm, "to_dict"):
-                    for pname in dpm.to_dict().keys():
-                        prop = dpm.find(pname)
-                        if prop and prop.is_available:
-                            info = {
-                                "value": prop.value,
-                                "min": getattr(prop, "minimum", None),
-                                "max": getattr(prop, "maximum", None),
-                                "access": "RW" if not getattr(prop, "is_readonly", True) else "RO",
-                                "type": type(prop.value).__name__,
-                            }
-                            log.info(f"  {pname}: {info}")
-                else:
-                    log.warning("Driver PropertyMap has no to_dict(); cannot dump features")
-                log.info("=== End Driver PropertyMap dump ===")
-            except Exception as e:
-                log.warning(f"Could not introspect driver_property_map: {e}")
-
-            if self.pm:
-                log.info("=== GenICam property dump BEGIN ===")
-                if hasattr(self.pm, "to_dict"):
-                    for pname, _ in self.pm.to_dict().items():
-                        prop = self.pm.find(pname)
-                        if prop and prop.is_available:
-                            info = {
-                                "value": prop.value,
-                                "min": getattr(prop, "minimum", None),
-                                "max": getattr(prop, "maximum", None),
-                                "access": "RW" if not getattr(prop, "is_readonly", True) else "RO",
-                                "type": type(prop.value).__name__,
-                            }
-                            log.info(f"  {pname}: {info}")
-                else:
-                    log.warning("PropertyMap has no to_dict(); cannot dump features")
-                log.info("=== GenICam property dump END ===")
-            else:
-                log.error("PropertyMap is None; cannot list GenICam features")
-
-            # 3) GigE optimizations: packet size & throughput limits
-            try:
-                psize = self.pm.find("GevSCPSPacketSize")
-                if psize and psize.is_available:
-                    jumbo = min(int(psize.maximum), 8228)
-                    self.pm.set_value("GevSCPSPacketSize", jumbo)
-                    log.info(f"Packet size set to {jumbo}")
-            except Exception as e:
-                log.warning(f"Could not set GevSCPSPacketSize: {e}")
-
-            try:
-                dlm = self.pm.find("DeviceLinkThroughputLimitMode")
-                if dlm and dlm.is_available:
-                    self.pm.set_value("DeviceLinkThroughputLimitMode", "Off")
-                    log.info("Disabled throughput limit mode")
-                dll = self.pm.find("DeviceLinkThroughputLimit")
-                if dll and dll.is_available:
-                    max_limit = int(dll.maximum)
-                    self.pm.set_value("DeviceLinkThroughputLimit", max_limit)
-                    log.info(f"Throughput limit set to {max_limit}")
-            except Exception as e:
-                log.warning(f"Could not set throughput limits: {e}")
-
-            # 4) Enumerate and emit UI controls
-            controls = {}
-            exp_prop = self.pm.find(PROP_EXPOSURE_TIME)
-            if exp_prop and exp_prop.is_available:
-                exp_ctrl = {
-                    "enabled": True,
-                    "min": int(exp_prop.minimum),
-                    "max": int(exp_prop.maximum),
-                    "value": int(exp_prop.value),
-                    "auto_available": False,
-                    "is_auto_on": False,
-                }
-                auto_prop = self.pm.find(PROP_EXPOSURE_AUTO)
-                if auto_prop and auto_prop.is_available:
-                    exp_ctrl["auto_available"] = True
-                    auto_val = auto_prop.value
-                    exp_ctrl["is_auto_on"] = (
-                        auto_val == "Continuous" if isinstance(auto_val, str) else bool(auto_val)
-                    )
-                controls["exposure"] = exp_ctrl
-            gain_prop = self.pm.find(PROP_GAIN)
-            if gain_prop and gain_prop.is_available:
-                controls["gain"] = {
-                    "enabled": True,
-                    "min": float(gain_prop.minimum),
-                    "max": float(gain_prop.maximum),
-                    "value": float(gain_prop.value),
-                }
-            self.camera_properties_updated.emit({"controls": controls})
-
-            # 5) Configure camera settings
-            self._set(PROP_PIXEL_FORMAT, "Mono8")
-            self._set(PROP_WIDTH, self.desired_width)
-            self._set(PROP_HEIGHT, self.desired_height)
-            fps_prop = self.pm.find(PROP_ACQUISITION_FRAME_RATE)
-            if fps_prop and fps_prop.is_available:
-                tgt = max(fps_prop.minimum, min(self.target_fps, fps_prop.maximum))
-                self._set(PROP_ACQUISITION_FRAME_RATE, tgt)
-            self._set(PROP_ACQUISITION_MODE, "Continuous")
-            self._set(PROP_TRIGGER_MODE, "Off")
-
-            # 6) Start streaming
-            # Use a callback-style SnapSink instead of QueueSink to mimic IC Capture's C++ sink
+            # Stream buffer negotiation and start
+            # Use native SnapSink callback model
             self.sink = ic4.SnapSink(self.listener)
-            # negotiate stream buffers (no timeout needed for SnapSink)
             self.grabber.stream_setup(self.sink)
-            # start acquisition explicitly via Grabber API
             self.grabber.acquisition_start()
-            log.info("SnapSink streaming started via Grabber.acquisition_start()")
+            log.info("Streaming started via SnapSink + acquisition_start")
 
-            # 7) Acquisition loop
-            while not self._stop:
-                try:
-                    buf = self.sink.pop_output_buffer()
-
+            # Acquisition loop
             while not self._stop:
                 try:
                     buf = self.sink.pop_output_buffer()
                 except ic4.IC4Exception:
-                    time.sleep(0.05)
+                    time.sleep(0.01)
                     continue
                 w, h = buf.image_type.width, buf.image_type.height
                 pf = buf.image_type.pixel_format.name
+                # extract bytes
                 if hasattr(buf, "numpy_wrap"):
                     arr = buf.numpy_wrap()
                     data = arr.tobytes()
@@ -280,28 +151,28 @@ class SDKCameraThread(QThread):
                     pitch = getattr(buf, "pitch", w * buf.image_type.bytes_per_pixel)
                     data = ctypes.string_at(buf.pointer, pitch * h)
                     stride = pitch
-                fmt = QImage.Format_Grayscale8 if "Mono8" in pf else QImage.Format_RGB888
+                fmt = (
+                    QImage.Format_Grayscale8 if "Mono8" in pf else QImage.Format_RGB888
+                )
                 img = QImage(data, w, h, stride, fmt)
                 if not img.isNull():
                     self.frame_ready.emit(img, data)
-
-            log.info("Acquisition loop exited")
 
         except Exception as e:
             log.exception("Camera thread error")
             self.camera_error.emit(str(e), type(e).__name__)
 
         finally:
-            log.info("Cleaning up camera thread")
-            if self.grabber and getattr(self.grabber, "is_streaming", False):
+            # cleanup
+            if self.grabber:
                 try:
-                    self.grabber.stream_stop()
+                    if self.grabber.is_streaming:
+                        self.grabber.stream_stop()
                 except Exception:
                     pass
-                    
-            if self.grabber and getattr(self.grabber, "is_device_open", False):
                 try:
-                    self.grabber.device_close()
+                    if self.grabber.is_device_open:
+                        self.grabber.device_close()
                 except Exception:
                     pass
             log.info("Camera thread stopped")
