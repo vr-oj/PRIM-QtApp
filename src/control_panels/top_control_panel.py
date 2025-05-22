@@ -10,7 +10,6 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import pyqtSignal, pyqtSlot
 
-from camera_controller import CameraController
 from .camera_control_panel import CameraControlPanel
 from .plot_control_panel import PlotControlPanel
 
@@ -30,9 +29,8 @@ class TopControlPanel(QWidget):
     y_axis_limits_changed = pyqtSignal(float, float)
     export_plot_image_requested = pyqtSignal()
 
-    def __init__(self, controller: CameraController, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.controller = controller
 
         # Layout
         layout = QHBoxLayout(self)
@@ -40,7 +38,7 @@ class TopControlPanel(QWidget):
         layout.setSpacing(10)
 
         # Camera control panel
-        self.camera_controls = CameraControlPanel(controller, self)
+        self.camera_controls = CameraControlPanel(self)
         layout.addWidget(self.camera_controls, 1)
 
         # Re-emit parameter changes
