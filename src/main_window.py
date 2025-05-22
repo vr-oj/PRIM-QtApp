@@ -1,81 +1,29 @@
+import logging
 import os
 import sys
-import csv
-import time
-import logging
 import numpy as np
-
 from PyQt5.QtWidgets import (
-    QApplication,
     QMainWindow,
-    QDockWidget,
-    QWidget,
-    QLabel,
-    QTextEdit,
     QVBoxLayout,
+    QWidget,
     QSplitter,
-    QStatusBar,
-    QAction,
-    QToolBar,
-    QComboBox,
-    QLineEdit,
-    QDialog,
-    QFormLayout,
-    QDialogButtonBox,
     QSizePolicy,
-    QFileDialog,
     QMessageBox,
-    QPushButton,
 )
-from PyQt5.QtCore import (
-    Qt,
-    QTimer,
-    pyqtSlot,
-    QDateTime,
-    QSize,
-    QVariant,
-)
-from PyQt5.QtGui import QIcon, QKeySequence, QImage
+from PyQt5.QtCore import pyqtSlot, QTimer, QVariant
+from PyQt5.QtGui import QImage
 
-# Check IC4 availability
-_IC4_AVAILABLE = False
-_IC4_INITIALIZED = False
-_ic4_module = None
-try:
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    if base_dir not in sys.path:
-        sys.path.insert(0, base_dir)
-    import prim_app
-
-    _IC4_AVAILABLE = getattr(prim_app, "IC4_AVAILABLE", False)
-    _IC4_INITIALIZED = getattr(prim_app, "IC4_INITIALIZED", False)
-    if _IC4_INITIALIZED:
-        import imagingcontrol4 as ic4_sdk
-
-        _ic4_module = ic4_sdk
-    logging.getLogger(__name__).info(
-        "IC4 flags: AVAILABLE=%s INITIALIZED=%s",
-        _IC4_AVAILABLE,
-        _IC4_INITIALIZED,
-    )
-except Exception as e:
-    logging.getLogger(__name__).warning(f"IC4 check failed: {e}")
-
-from threads.qtcamera_widget import QtCameraWidget
-from threads.serial_thread import SerialThread
-from recording import TrialRecorder, RecordingWorker
-from utils import list_serial_ports
 from threads.sdk_camera_thread import SDKCameraThread
-
 from control_panels.top_control_panel import TopControlPanel
 from canvas.pressure_plot_widget import PressurePlotWidget
-
+from threads.serial_thread import SerialThread
+from recording import RecordingWorker, TrialRecorder
+from utils import list_serial_ports
 from config import (
-    APP_NAME,
-    APP_VERSION,
-    ABOUT_TEXT,
     DEFAULT_FPS,
     DEFAULT_FRAME_SIZE,
+    APP_NAME,
+    APP_VERSION,
     PRIM_RESULTS_DIR,
     DEFAULT_VIDEO_EXTENSION,
     DEFAULT_VIDEO_CODEC,
@@ -88,14 +36,17 @@ log = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.sdk_thread = SDKCameraThread()
-        self.sdk_thread.camera_configured.connect(self._on_camera_ready)
-        self.sdk_thread.camera_error.connect(self._handle_camera_error)
-        self.sdk_thread.start()
+        # Camera thread will be created when a device is selected
+        self.camera_thread = None
+        # Serial and recording threads
         self._serial_thread = None
         self._recording_worker = None
         self._is_recording = False
         self.last_trial_basepath = ""
+
+        # Connect top-panel signals early (thread not started yet)
+        #   camera_selected -> _handle_camera_selection
+        #   parameter_changed -> will be connected once thread is running
 
         self.current_camera_frame_width = DEFAULT_FRAME_SIZE[0]
         self.current_camera_frame_height = DEFAULT_FRAME_SIZE[1]
@@ -117,8 +68,10 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._set_initial_splitter_sizes)
 
         self._set_initial_control_states()
-        self._connect_top_control_panel_signals()
-        self._connect_camera_widget_signals()
+        # Wire TopControlPanel signals now
+        self.top_ctrl.camera_selected.connect(self._handle_camera_selection)
+        self.top_ctrl.parameter_changed.connect(self._on_parameter_changed)
+        # Camera-widget signals (resolution & properties) will be hooked in _handle_camera_selection
 
         # Populate camera list after a short delay
         if hasattr(self.top_ctrl, "camera_controls") and self.top_ctrl.camera_controls:
@@ -366,35 +319,43 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(object)
     def _handle_camera_selection(self, device_info_obj):
-        log.debug(
-            f"MainWindow: Camera selection changed. DeviceInfo type: {type(device_info_obj)}"
+        # Stop any previously running camera thread
+        if self.camera_thread and self.camera_thread.isRunning():
+            self.camera_thread._stop = True
+            self.camera_thread.wait()
+
+        # If no camera selected, clean up and return
+        if device_info_obj is None:
+            self.top_ctrl.update_connection_status("Disconnected", False)
+            self.qt_cam_widget.clear()
+            return
+
+        # Start a fresh SDKCameraThread for this device
+        self.camera_thread = SDKCameraThread(
+            device_info=device_info_obj,
+            target_fps=DEFAULT_FPS,
+            desired_width=self.current_camera_frame_width,
+            desired_height=self.current_camera_frame_height,
+            parent=self,
         )
 
-        is_ic4_device = False
-        if (
-            _IC4_INITIALIZED
-            and _ic4_module
-            and isinstance(device_info_obj, _ic4_module.DeviceInfo)
-        ):
-            is_ic4_device = True
-            log.info(
-                f"Selected TIS Camera: {device_info_obj.model_name if device_info_obj else 'None'}"
+        # Wire thread → UI signals
+        self.camera_thread.camera_configured.connect(
+            lambda dev: self.top_ctrl.update_connection_status(
+                f"Connected: {dev.model_name}", True
             )
-        elif device_info_obj is not None:
-            log.warning(
-                f"Selected camera is not a TIS DeviceInfo object. Type: {type(device_info_obj)}"
-            )
+        )
+        self.camera_thread.frame_ready.connect(self.qt_cam_widget.update_frame)
+        self.camera_thread.camera_properties_updated.connect(
+            self.top_ctrl.update_camera_ui_from_properties
+        )
+        self.camera_thread.camera_error.connect(self._handle_camera_error)
 
-        if is_ic4_device:
-            self.qt_cam_widget.set_active_camera_device(device_info_obj)
-        else:
-            self.qt_cam_widget.set_active_camera_device(
-                None
-            )  # Handles None or non-IC4 objects
-            if hasattr(self.top_ctrl, "camera_controls"):
-                self.top_ctrl.camera_controls.disable_all_controls()
-                self.top_ctrl.camera_controls.update_camera_resolutions_list([])
-        self._update_recording_actions_enable_state()
+        # Wire UI → thread setter
+        self.top_ctrl.parameter_changed.connect(self.camera_thread.set_parameter)
+
+        # Launch the camera thread
+        self.camera_thread.start()
 
     @pyqtSlot(str)
     def _handle_resolution_selection(self, resolution_str: str):

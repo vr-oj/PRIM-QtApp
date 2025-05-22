@@ -3,44 +3,50 @@ import logging
 from PyQt5.QtWidgets import (
     QWidget,
     QGroupBox,
-    QTabWidget,
     QFormLayout,
     QHBoxLayout,
+    QVBoxLayout,
     QLabel,
 )
-from PyQt5.QtCore import pyqtSignal, QObject, pyqtSlot  # Added pyqtSlot here
+from PyQt5.QtCore import pyqtSignal, pyqtSlot
 
+from camera_controller import CameraController
 from .camera_control_panel import CameraControlPanel
 from .plot_control_panel import PlotControlPanel
-
-try:
-    import imagingcontrol4 as ic4
-except ImportError:
-    ic4 = None
 
 log = logging.getLogger(__name__)
 
 
 class TopControlPanel(QWidget):
-    camera_selected = pyqtSignal(object)
-    resolution_selected = pyqtSignal(str)
-    exposure_changed = pyqtSignal(int)
-    gain_changed = pyqtSignal(float)
-    auto_exposure_toggled = pyqtSignal(bool)
+    """
+    Composite panel combining camera controls, device status, and plot controls.
+    """
 
+    # Emitted when any camera parameter changes (name, value)
+    parameter_changed = pyqtSignal(str, object)
+
+    # Plot control signals
     x_axis_limits_changed = pyqtSignal(float, float)
     y_axis_limits_changed = pyqtSignal(float, float)
     export_plot_image_requested = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, controller: CameraController, parent=None):
         super().__init__(parent)
+        self.controller = controller
+
+        # Layout
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 2, 5, 2)
         layout.setSpacing(10)
 
-        self.camera_controls = CameraControlPanel(self)
+        # Camera control panel
+        self.camera_controls = CameraControlPanel(controller, self)
         layout.addWidget(self.camera_controls, 1)
 
+        # Re-emit parameter changes
+        self.camera_controls.parameter_changed.connect(self.parameter_changed)
+
+        # PRIM Device status box
         status_box = QGroupBox("PRIM Device Status")
         status_layout = QFormLayout(status_box)
         self.conn_lbl = QLabel("Disconnected")
@@ -56,33 +62,38 @@ class TopControlPanel(QWidget):
         self.pres_lbl = QLabel("N/A")
         self.pres_lbl.setStyleSheet("font-size:12pt;font-weight:bold;")
         status_layout.addRow("Current Pressure:", self.pres_lbl)
+
         layout.addWidget(status_box, 1)
 
+        # Plot control panel
         self.plot_controls = PlotControlPanel(self)
         layout.addWidget(self.plot_controls, 1)
 
-        cc = self.camera_controls
-        cc.camera_selected.connect(self.camera_selected)
-        cc.resolution_selected.connect(self.resolution_selected)
-        cc.exposure_changed.connect(self.exposure_changed)
-        cc.gain_changed.connect(self.gain_changed)
-        cc.auto_exposure_toggled.connect(self.auto_exposure_toggled)
-        # ROI signals removed
-
-        pc = self.plot_controls
-        pc.x_axis_limits_changed.connect(self.x_axis_limits_changed)
-        pc.y_axis_limits_changed.connect(self.y_axis_limits_changed)
-        pc.export_plot_image_requested.connect(self.export_plot_image_requested)
+        # Forward plot signals
+        self.plot_controls.x_axis_limits_changed.connect(self.x_axis_limits_changed)
+        self.plot_controls.y_axis_limits_changed.connect(self.y_axis_limits_changed)
+        self.plot_controls.export_plot_image_requested.connect(
+            self.export_plot_image_requested
+        )
 
     @pyqtSlot(dict)
     def update_camera_ui_from_properties(self, props: dict):
+        """
+        Update camera controls based on the latest properties dict.
+        """
         log.debug(f"TopControlPanel received camera properties: {props}")
         self.camera_controls.update_camera_properties_ui(props)
 
     def disable_all_camera_controls(self):
+        """
+        Disable camera UI (e.g., when no camera is connected).
+        """
         self.camera_controls.disable_all_controls()
 
     def update_connection_status(self, text: str, connected: bool):
+        """
+        Show connection status (with color coding).
+        """
         self.conn_lbl.setText(text)
         if connected:
             color = "#A3BE8C"
@@ -93,10 +104,9 @@ class TopControlPanel(QWidget):
         self.conn_lbl.setStyleSheet(f"font-weight:bold;color:{color};")
 
     def update_prim_data(self, idx: int, t_dev: float, p_dev: float):
+        """
+        Update the frame index, device time, and pressure readout.
+        """
         self.idx_lbl.setText(str(idx))
         self.time_lbl.setText(f"{t_dev:.2f}")
         self.pres_lbl.setText(f"{p_dev:.2f} mmHg")
-
-    @pyqtSlot(list)
-    def update_camera_resolutions(self, modes: list):
-        self.camera_controls.update_camera_resolutions_list(modes)
