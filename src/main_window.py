@@ -65,6 +65,7 @@ from threads.qtcamera_widget import QtCameraWidget
 from threads.serial_thread import SerialThread
 from recording import TrialRecorder, RecordingWorker
 from utils import list_serial_ports
+from threads.sdk_camera_thread import SDKCameraThread
 
 from control_panels.top_control_panel import TopControlPanel
 from canvas.pressure_plot_widget import PressurePlotWidget
@@ -87,11 +88,14 @@ log = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.sdk_thread = SDKCameraThread()
+        self.sdk_thread.camera_configured.connect(self._on_camera_ready)
+        self.sdk_thread.camera_error.connect(self._handle_camera_error)
+        self.sdk_thread.start()
         self._serial_thread = None
         self._recording_worker = None
         self._is_recording = False
         self.last_trial_basepath = ""
-        self.sdk_thread.camera_configured.connect(self._on_camera_ready)
 
         self.current_camera_frame_width = DEFAULT_FRAME_SIZE[0]
         self.current_camera_frame_height = DEFAULT_FRAME_SIZE[1]
@@ -936,17 +940,62 @@ class MainWindow(QMainWindow):
             self.device = device
             self.sink = sink
             self.grabber = device.grabber(sink)
+            self.camera_poll_timer = QTimer(self)
+            self.camera_poll_timer.timeout.connect(self._poll_sink_for_frame)
+            self.camera_poll_timer.start(
+                1000 // int(DEFAULT_FPS)
+            )  # e.g., 50ms for 20 FPS
 
             self.grabber.stream_setup(setup_option=StreamSetupOption.ACQUISITION_START)
             print("✅ Camera stream started from main thread.")
 
-            # You can now set up a QTimer or method to periodically grab frames from self.sink
-            # Or emit a signal to your viewfinder to update
-
+            # Here’s where you could add a QTimer to fetch frames and send to your UI
         except Exception as e:
             print(f"❌ Failed to start stream in main thread: {e}")
             if device:
                 device.close()
+
+    @pyqtSlot()
+    def _poll_sink_for_frame(self):
+        if not hasattr(self, "sink") or self.sink is None:
+            return
+
+        try:
+            buf = self.sink.pop_output_buffer()
+            if not buf:
+                return  # No frame available this cycle
+
+            from PyQt5.QtGui import QImage
+            import ctypes
+
+            w, h = buf.image_type.width, buf.image_type.height
+            pf_name = buf.image_type.pixel_format.name
+
+            # Convert buffer to QImage
+            if pf_name == "Mono8":
+                qformat = QImage.Format_Grayscale8
+            elif pf_name in ("RGB8", "RGB8Packed", "BGR8", "BGR8Packed"):
+                qformat = QImage.Format_RGB888
+            else:
+                log.warning(f"Unsupported pixel format: {pf_name}")
+                return
+
+            # Extract image data
+            if hasattr(buf, "numpy_wrap"):
+                arr = buf.numpy_wrap()
+                img_bytes = arr.tobytes()
+                stride = arr.strides[0]
+            else:
+                pitch = getattr(buf, "pitch", w * buf.image_type.bytes_per_pixel)
+                stride = pitch
+                img_bytes = ctypes.string_at(buf.pointer, pitch * h)
+
+            img = QImage(img_bytes, w, h, stride, qformat)
+            if not img.isNull():
+                self._handle_new_camera_frame(img.copy(), img_bytes)
+
+        except Exception as e:
+            log.exception(f"Error polling sink for frame: {e}")
 
     def _test_ic4_main_thread(self):
         """Runs a simplified IC4 test entirely in the main thread."""
@@ -999,17 +1048,6 @@ class MainWindow(QMainWindow):
             except Exception as cleanup_exception:
                 print(f"❌ Cleanup issue: {cleanup_exception}")
 
-    def _on_camera_ready(self, device, sink):
-        try:
-            from imagingcontrol4 import StreamSetupOption
-
-            self.device = device
-            self.sink = sink
-            self.grabber = device.grabber(sink)
-
-            self.grabber.stream_setup(setup_option=StreamSetupOption.ACQUISITION_START)
-            print("✅ Camera stream started from main thread.")
-        except Exception as e:
-            print(f"❌ Failed to start stream in main thread: {e}")
-            if device:
-                device.close()
+    def closeEvent(self, event):
+        if hasattr(self, "camera_poll_timer"):
+            self.camera_poll_timer.stop()
