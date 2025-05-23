@@ -14,10 +14,7 @@ from PyQt5.QtCore import QTimer, Qt, pyqtSlot
 from PyQt5.QtGui import QImage, QPixmap
 
 # ─── EDIT THIS to match your system’s CTI path ────────────────────────────────
-CTI_PATH = (
-    r"C:\Program Files\The Imaging Source Europe GmbH"
-    r"\IC4 GenTL Driver for USB3Vision Devices 1.4\bin\ic4-gentl-u3v_x64.cti"
-)
+CTI_PATH = r"C:\Program Files\The Imaging Source Europe GmbH\IC4 GenTL Driver for USB3Vision Devices 1.4\bin\ic4-gentl-u3v_x64.cti"
 
 
 class PreviewWidget(QWidget):
@@ -39,7 +36,7 @@ class PreviewWidget(QWidget):
         if not devices:
             logging.error("No cameras found via Harvester!")
             sys.exit(1)
-        logging.info(f"Found cameras: {[d.model_name for d in devices]}")
+        logging.info(f"Found cameras: {devices}")
         self.ia = self.harv.create_image_acquirer(device_index)
         self.ia.start_acquisition()
 
