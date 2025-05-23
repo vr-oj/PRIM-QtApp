@@ -32,7 +32,7 @@ class DummySinkListener:
 class SDKCameraThread(QThread):
     # Signals
     camera_configured = pyqtSignal(object)  # Emits device_info
-    frame_ready = pyqtSignal(QImage)  # Emits processed frame
+    frame_ready = pyqtSignal(QImage, object)  # Emits processed frame
     camera_properties_updated = pyqtSignal(dict)  # Emits {name: value}
     camera_error = pyqtSignal(str, str)  # Emits (message, code)
 
@@ -182,7 +182,7 @@ class SDKCameraThread(QThread):
                     stride = pitch
 
                 img = QImage(data, w, h, stride, fmt).copy()
-                self.frame_ready.emit(img)
+                self.frame_ready.emit(img, arr)
 
                 buf.queue()
 
