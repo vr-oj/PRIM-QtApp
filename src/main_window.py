@@ -270,7 +270,6 @@ class MainWindow(QMainWindow):
     def _set_initial_control_states(self):
         self.top_ctrl.update_connection_status("Disconnected", False)
         # now use the TopControlPanel API rather than diving into camera_controls
-        self.top_ctrl.disable_all_camera_controls()
         self.start_recording_action.setEnabled(False)
         self.stop_recording_action.setEnabled(False)
 
