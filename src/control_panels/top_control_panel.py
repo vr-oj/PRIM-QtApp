@@ -19,13 +19,6 @@ class TopControlPanel(QWidget):
     Composite panel combining camera controls, device status, and plot controls.
     """
 
-    # camera signals (re-add these)
-    camera_selected = pyqtSignal(object)
-    resolution_selected = pyqtSignal(str)
-    exposure_changed = pyqtSignal(int)
-    gain_changed = pyqtSignal(float)
-    auto_exposure_toggled = pyqtSignal(bool)
-
     # generic passthrough
     parameter_changed = pyqtSignal(str, object)
 
