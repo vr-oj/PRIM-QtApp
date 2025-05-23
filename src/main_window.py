@@ -1,4 +1,4 @@
-# main_app.py
+# main_window.py
 import logging
 import os
 import sys
@@ -33,7 +33,7 @@ from PyQt5.QtGui import QIcon, QKeySequence, QImage
 from control_panels.top_control_panel import TopControlPanel
 from canvas.pressure_plot_widget import PressurePlotWidget
 from threads.serial_thread import SerialThread
-from recording import RecordingWorker, TrialRecorder
+from recording import TrialRecorder
 from utils import list_serial_ports
 from config import (
     DEFAULT_FPS,
@@ -225,17 +225,6 @@ class MainWindow(QMainWindow):
             self.serial_port_combobox.addItem("No Serial Ports Found", QVariant())
             self.serial_port_combobox.setEnabled(False)
         tb.addWidget(self.serial_port_combobox)
-
-        self.video_format_combobox = QComboBox()
-        self.video_format_combobox.setToolTip("Select Video Recording Format")
-        for fmt in SUPPORTED_FORMATS:
-            self.video_format_combobox.addItem(fmt.upper(), QVariant(fmt))
-        default_idx = self.video_format_combobox.findData(
-            QVariant(DEFAULT_VIDEO_EXTENSION.lower())
-        )
-        if default_idx != -1:
-            self.video_format_combobox.setCurrentIndex(default_idx)
-        tb.addWidget(self.video_format_combobox)
 
         tb.addSeparator()
         tb.addAction(self.start_recording_action)
@@ -466,6 +455,10 @@ class MainWindow(QMainWindow):
             video_ext = DEFAULT_VIDEO_EXTENSION.lower()
         codec = DEFAULT_VIDEO_CODEC
 
+        # Ensure fallback frame size is defined
+        from config import DEFAULT_FRAME_SIZE
+
+        w, h = DEFAULT_FRAME_SIZE
         log.info(
             f"Attempting to start recording: {base}, {DEFAULT_FPS} FPS, {w}×{h}, format: {video_ext}, codec: {codec}"
         )
@@ -478,23 +471,21 @@ class MainWindow(QMainWindow):
                 self._recording_worker.deleteLater()
                 self._recording_worker = None
 
-            self._recording_worker = RecordingWorker(
-                basepath=base,
-                fps=DEFAULT_FPS,
-                # no camera, so use default frame size
-                frame_size=(w, h),
-                video_ext=video_ext,
-                video_codec=codec,
-                parent=self,
-            )
+            # --- CSV‐only recording worker ---
+            # We no longer record video, so we just queue CSV data via TrialRecorder directly.
 
-            # CRITICAL: Start the thread so its run() method executes
-            self._recording_worker.start()
-
-            # The sleep is a temporary, imperfect way to wait for initialization.
-            # A signal from RecordingWorker would be much better.
-            # Increase sleep slightly to give more time for file I/O in TrialRecorder init.
-            time.sleep(0.5)  # Increased from 0.2, still not ideal.
+            # Create and start only the CSV recorder
+            csv_path = os.path.join(self.last_trial_basepath, f"{safe}.csv")
+            try:
+                csv_rec = TrialRecorder(
+                    basepath=self.last_trial_basepath, csv_only=True
+                )  # assume this flag skips video
+                csv_rec.start()  # if it’s a thread; or just open file if not threaded
+                self._csv_recorder = csv_rec
+            except Exception as e:
+                log.exception("Failed to start CSV recorder")
+                QMessageBox.critical(self, "Recording Error", str(e))
+                return
 
             if not (
                 self._recording_worker
