@@ -30,11 +30,11 @@ from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize, QThre
 from PyQt5.QtGui import QIcon, QKeySequence, QImage
 
 
-from control_panels.top_control_panel import TopControlPanel
-from canvas.pressure_plot_widget import PressurePlotWidget
+from ui.control_panels.top_control_panel import TopControlPanel
+from ui.canvas.pressure_plot_widget import PressurePlotWidget
 from threads.serial_thread import SerialThread
 from recording import TrialRecorder, RecordingWorker
-from utils import list_serial_ports
+from utils.utils import list_serial_ports
 from config import (
     DEFAULT_FPS,
     DEFAULT_FRAME_SIZE,

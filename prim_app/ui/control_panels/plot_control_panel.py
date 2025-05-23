@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import pyqtSignal
 
-from config import PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX
+from utils.config import PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX
 
 log = __import__("logging").getLogger(__name__)
 

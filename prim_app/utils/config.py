@@ -34,7 +34,7 @@ LOG_LEVEL = "DEBUG"  # DEBUG, INFO, WARNING, ERROR
 
 # ─── Plotting ──────────────────────────────────────────────────────────────────
 PLOT_MAX_POINTS = 1000  # Max points to keep in live plot
-PLOT_DEFAULT_Y_MIN = 0
+PLOT_DEFAULT_Y_MIN = -5
 PLOT_DEFAULT_Y_MAX = 30  # Typical pressure range in mmHg
 
 # ─── Camera profiles/resolutions ───────────────────────────────────────────────
