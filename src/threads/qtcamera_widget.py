@@ -212,6 +212,13 @@ class QtCameraWidget(QWidget):
     def _on_camera_thread_finished(self):
         log.info("Camera thread finished.")
 
+    @pyqtSlot(QImage, object)
+    def update_frame(self, qimg, arr=None):
+        # forward the new image to the GLViewfinder
+        self.viewfinder.update_frame(qimg)
+        # (optionally) re-emit on this widget’s own frame_ready signal
+        self.frame_ready.emit(qimg, arr)
+
     def current_camera_is_active(self) -> bool:
         """Return True if the SDK camera thread is alive and running."""
         return bool(self._camera_thread and self._camera_thread.isRunning())
