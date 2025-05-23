@@ -29,10 +29,8 @@ from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize
 from PyQt5.QtGui import QIcon, QKeySequence, QImage
 
 
-from threads.sdk_camera_thread import SDKCameraThread
 from control_panels.top_control_panel import TopControlPanel
 from canvas.pressure_plot_widget import PressurePlotWidget
-from threads.qtcamera_widget import QtCameraWidget
 from threads.serial_thread import SerialThread
 from recording import RecordingWorker, TrialRecorder
 from utils import list_serial_ports
@@ -143,10 +141,8 @@ class MainWindow(QMainWindow):
         self.main_splitter = QSplitter(Qt.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
 
-        self.qt_cam_widget = QtCameraWidget(self)
         self.pressure_plot_widget = PressurePlotWidget(self)
 
-        self.main_splitter.addWidget(self.qt_cam_widget)
         self.main_splitter.addWidget(self.pressure_plot_widget)
         self.main_splitter.setStretchFactor(0, 1)
         self.main_splitter.setStretchFactor(1, 0)
@@ -279,80 +275,6 @@ class MainWindow(QMainWindow):
         self.top_ctrl.disable_all_camera_controls()
         self.start_recording_action.setEnabled(False)
         self.stop_recording_action.setEnabled(False)
-
-    def _connect_camera_widget_signals(self):
-        # Safely only hook up if that slot actually exists
-        if (
-            hasattr(self.top_ctrl, "camera_controls")
-            and self.top_ctrl.camera_controls
-            and hasattr(self.top_ctrl.camera_controls, "update_camera_resolutions_list")
-        ):
-            self.qt_cam_widget.camera_resolutions_updated.connect(
-                self.top_ctrl.camera_controls.update_camera_resolutions_list
-            )
-
-        if (
-            hasattr(self.top_ctrl, "camera_controls")
-            and self.top_ctrl.camera_controls
-            and hasattr(self.top_ctrl.camera_controls, "update_camera_properties_ui")
-        ):
-            self.qt_cam_widget.camera_properties_updated.connect(
-                self.top_ctrl.camera_controls.update_camera_properties_ui
-            )
-
-        self.qt_cam_widget.camera_error.connect(self._handle_camera_error)
-        self.qt_cam_widget.frame_ready.connect(self._handle_new_camera_frame)
-
-    @pyqtSlot(object)
-    def _handle_camera_selection(self, device_info):
-        """
-        Called when the user picks a new camera. Delegate ownership to the QtCameraWidget.
-        """
-        log.info(f"[DEBUG] _handle_camera_selection received: {device_info}")
-        # First, stop whatever camera we had before
-        if self.qt_cam_widget.current_camera_is_active():
-            self.qt_cam_widget.stop_camera()
-
-        # If the user cleared the selection, just wipe the preview and controls
-        if device_info is None:
-            self.top_ctrl.update_connection_status("Disconnected", False)
-            self.qt_cam_widget.viewfinder.clear()
-            self.top_ctrl.disable_all_camera_controls()
-            return
-
-        # Otherwise, start the new camera
-        self.qt_cam_widget.set_active_camera_device(device_info)
-        self.top_ctrl.update_connection_status("Connected", True)
-        self._update_recording_actions_enable_state()
-
-    @pyqtSlot(str)
-    def _handle_resolution_selection(self, resolution_str: str):
-        log.debug(f"MainWindow: Resolution selection changed to: {resolution_str}")
-        self.qt_cam_widget.set_active_resolution_str(resolution_str)
-        try:
-            if "x" in resolution_str:
-                w_str, h_rest = resolution_str.split("x", 1)
-                h_str = h_rest.split(" ")[0]
-                self.current_camera_frame_width = int(w_str)
-                self.current_camera_frame_height = int(h_str)
-                log.info(
-                    f"Recording frame size hint updated to {self.current_camera_frame_width}x{self.current_camera_frame_height}"
-                )
-        except Exception as e:
-            log.warning(f"Could not parse resolution '{resolution_str}': {e}")
-
-    @pyqtSlot(str, str)
-    def _handle_camera_error(self, msg: str, code: str):
-        log.error(f"Camera Error: {code} – {msg}")
-        self.statusBar().showMessage(f"Camera Error: {msg}", 7000)
-        if self._is_recording:
-            QMessageBox.warning(
-                self,
-                "Recording Problem",
-                f"A camera error occurred: {msg}\nRecording will stop.",
-            )
-            self._trigger_stop_recording()
-        self._update_recording_actions_enable_state()
 
     def _toggle_serial_connection(self):
         if self._serial_thread and self._serial_thread.isRunning():
@@ -504,60 +426,6 @@ class MainWindow(QMainWindow):
 
         self.start_recording_action.setEnabled(bool(can_start_recording))
         self.stop_recording_action.setEnabled(bool(self._is_recording))
-
-    @pyqtSlot(QImage)
-    def _handle_new_camera_frame(self, qimage: QImage):
-        if (
-            qimage.width() != self.current_camera_frame_width
-            or qimage.height() != self.current_camera_frame_height
-        ):
-            self.current_camera_frame_width = qimage.width()
-            self.current_camera_frame_height = qimage.height()
-            log.info(f"Actual camera frame size: {qimage.width()}x{qimage.height()}")
-
-        # ────────── NEW: update the on-panel “Current:” label ──────────
-        cc = self.top_ctrl.camera_controls
-        # only if the label exists (you added it in CameraControlPanel)
-        if hasattr(cc, "current_res_label"):
-            w, h = qimage.width(), qimage.height()
-            cc.current_res_label.setText(f"{w}×{h}")
-
-        if self._is_recording and self._recording_worker and not qimage.isNull():
-            try:
-                numpy_frame = None
-                if qimage.format() == QImage.Format_Grayscale8:
-                    ptr = qimage.constBits()
-                    ptr.setsize(qimage.sizeInBytes())  # Important for PySide/PyQt5
-                    numpy_frame = np.array(ptr, dtype=np.uint8).reshape(
-                        qimage.height(), qimage.width()
-                    )
-                elif (
-                    qimage.format() == QImage.Format_RGB888
-                ):  # Assuming RGB888 is 3 channels
-                    ptr = qimage.constBits()
-                    ptr.setsize(qimage.sizeInBytes())
-                    numpy_frame = np.array(ptr, dtype=np.uint8).reshape(
-                        qimage.height(), qimage.width(), 3
-                    )
-
-                if numpy_frame is not None:
-                    self._recording_worker.add_video_frame(
-                        numpy_frame.copy()
-                    )  # Send copy
-                else:
-                    # Corrected: Log warning if numpy_frame is None (format not handled)
-                    log.warning(
-                        f"Unsupported QImage format ({qimage.format()}) for video frame, not sending to recorder."
-                    )
-
-            except Exception as e:  # Catch specific errors if possible
-                log.exception(
-                    f"Error converting QImage to numpy or queueing video frame: {e}"
-                )
-                self.statusBar().showMessage(
-                    "Video frame error. Stopping recording.", 5000
-                )
-                self._trigger_stop_recording()
 
     def _trigger_start_recording_dialog(self):
         if not (self._serial_thread and self._serial_thread.isRunning()):
@@ -800,29 +668,6 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _show_about_dialog(self):
         QMessageBox.about(self, f"About {APP_NAME}", ABOUT_TEXT)
-
-    @pyqtSlot(str, object)
-    def _on_camera_param(self, name: str, val: object):
-        """
-        Dispatch all camera-control changes coming from CameraControlPanel.
-        """
-        log.info(f"[DEBUG] MainWindow._on_camera_param called: {name} -> {val}")
-        if name == "CameraSelection":
-            self._handle_camera_selection(val)
-        elif name == "Resolution":
-            self._handle_resolution_selection(val)
-        elif name in ("ExposureTime", "Gain", "AutoExposure"):
-            # forward to both widget and camera thread
-            if name == "ExposureTime":
-                self.qt_cam_widget.set_exposure(val)
-            elif name == "Gain":
-                self.qt_cam_widget.set_gain(val)
-            else:  # AutoExposure
-                self.qt_cam_widget.set_auto_exposure(val)
-            if self.camera_thread:
-                self.camera_thread.set_parameter(name, val)
-        else:
-            log.debug(f"Ignored camera parameter: {name} -> {val}")
 
     def _update_app_session_time(self):
         self._app_session_seconds += 1
