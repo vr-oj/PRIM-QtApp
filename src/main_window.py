@@ -1,3 +1,4 @@
+# main_app.py
 import logging
 import os
 import sys
@@ -600,6 +601,28 @@ class MainWindow(QMainWindow):
             self.start_recording_action.setIcon(self.icon_record_start)
             self._update_recording_actions_enable_state()
             log.info("Recording fully stopped and UI updated.")
+
+            # ─── Export complete plot data to CSV ────────────────────────────
+            try:
+                import csv, os
+
+                csv_path = os.path.join(self.last_trial_basepath, "plot_data.csv")
+                with open(csv_path, "w", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["time_s", "pressure_mmHg"])
+                    for t, p in zip(
+                        self.pressure_plot_widget.times,
+                        self.pressure_plot_widget.pressures,
+                    ):
+                        writer.writerow([f"{t:.6f}", f"{p:.6f}"])
+                self.statusBar().showMessage(
+                    f"Plot CSV saved to {os.path.basename(csv_path)}", 5000
+                )
+            except Exception as e:
+                log.exception(f"Failed to save plot CSV: {e}")
+                QMessageBox.warning(
+                    self, "CSV Export Error", f"Could not save plot CSV: {e}"
+                )
 
     @pyqtSlot()
     def _clear_pressure_plot(self):
