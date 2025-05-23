@@ -66,13 +66,8 @@ class MainWindow(QMainWindow):
         self._init_paths_and_icons()
         self._build_console_log_dock()
         self._build_central_widget_layout()
-        # Connect camera widget → control panel
-        self.qt_cam_widget.camera_resolutions_updated.connect(
-            self.top_ctrl.camera_controls.update_camera_resolutions_list
-        )
-        self.qt_cam_widget.camera_properties_updated.connect(
-            self.top_ctrl.camera_controls.update_camera_properties_ui
-        )
+        # Wire up all camera-widget signals and controls
+        self._connect_camera_widget_signals()
         self._build_menus()
         self._build_main_toolbar()
         self._build_status_bar()
@@ -313,25 +308,21 @@ class MainWindow(QMainWindow):
         """
         Called when the user picks a new camera. Delegate ownership to the QtCameraWidget.
         """
-        # Stop any existing recording or thread if needed (optional clean-up)
-        log.info(f"[DEBUG] _handle_camera_selection received: {device_info_obj}")
-        # Stop any previously running camera thread
-        if self.camera_thread and self.camera_thread.isRunning():
-            self.camera_thread._stop = True
-            self.camera_thread.wait()
+        log.info(f"[DEBUG] _handle_camera_selection received: {device_info}")
+        # First, stop whatever camera we had before
+        if self.qt_cam_widget.current_camera_is_active():
+            self.qt_cam_widget.stop_camera()
 
-        # If no camera selected, clean up and return
-        if device_info_obj is None:
+        # If the user cleared the selection, just wipe the preview and controls
+        if device_info is None:
             self.top_ctrl.update_connection_status("Disconnected", False)
-            self.qt_cam_widget.clear()
-            # also grey‐out the source/resolution controls
+            self.qt_cam_widget.viewfinder.clear()
             self.top_ctrl.disable_all_camera_controls()
             return
 
-        # Delegate thread ownership and setup to the camera widget
-        self.qt_camera_widget.set_active_camera_device(device_info)
-
-        # Refresh UI state that depends on camera availability
+        # Otherwise, start the new camera
+        self.qt_cam_widget.set_active_camera_device(device_info)
+        self.top_ctrl.update_connection_status("Connected", True)
         self._update_recording_actions_enable_state()
 
     @pyqtSlot(str)

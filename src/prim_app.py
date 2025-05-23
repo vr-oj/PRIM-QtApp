@@ -1,3 +1,4 @@
+# main_window.py
 import sys
 import os
 import re
@@ -119,6 +120,7 @@ _initialize_ic4_globally()
 
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication, QLoggingCategory
+
 
 try:
     from config import APP_NAME, LOG_LEVEL, APP_VERSION as CONFIG_APP_VERSION
