@@ -5,7 +5,118 @@ import re
 import traceback
 import logging
 
-"""\nCamera SDK initialization stripped out for CSV-only mode.\n"""
+# --- Module-level IC4 Initialization Block ---
+IC4_AVAILABLE = False
+IC4_INITIALIZED = False
+ic4_library_module = None
+_ic4_init_has_run_successfully_this_session = (
+    False  # Tracks if init() has ever succeeded
+)
+
+module_log = logging.getLogger("prim_app.setup")
+if not module_log.handlers:
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s [%(name)s:%(lineno)d] - %(message)s"
+    )
+    handler.setFormatter(formatter)
+    module_log.addHandler(handler)
+    module_log.setLevel(logging.INFO)
+
+
+def _initialize_ic4_globally():
+    global IC4_AVAILABLE, IC4_INITIALIZED, ic4_library_module, _ic4_init_has_run_successfully_this_session
+
+    # If we know it succeeded at any point in this Python session, ensure flags reflect that.
+    # This handles the case where this function is called again after __main__ already succeeded.
+    if _ic4_init_has_run_successfully_this_session:
+        IC4_AVAILABLE = True  # It must have been available if init succeeded
+        IC4_INITIALIZED = True
+        if (
+            ic4_library_module is None and IC4_AVAILABLE
+        ):  # Re-import ic4 if not set (e.g. in new module scope)
+            try:
+                import imagingcontrol4 as ic4
+
+                ic4_library_module = ic4
+            except ImportError:
+                IC4_AVAILABLE = False  # Should not happen if it was available before
+                IC4_INITIALIZED = False
+        module_log.info(
+            "IC4 library previously initialized successfully in this session."
+        )
+        return
+
+    module_log.info("Attempting IC4 library initialization sequence...")
+
+    try:
+        import imagingcontrol4 as ic4
+
+        ic4_library_module = ic4
+        IC4_AVAILABLE = True
+        module_log.info("imagingcontrol4 library module imported.")
+        try:
+            ic4.Library.init()
+            IC4_INITIALIZED = True
+            _ic4_init_has_run_successfully_this_session = (
+                True  # Mark success for this session
+            )
+            module_log.info("ic4.Library.init() called successfully.")
+
+            # ───── Monkey-patch DeviceInfo.__del__ to suppress finalizer RuntimeError ─────
+            try:
+                import imagingcontrol4.devenum as _dev
+
+                _orig_del = _dev.DeviceInfo.__del__
+
+                def __safe_del(self):
+                    try:
+                        _orig_del(self)
+                    except RuntimeError:
+                        # Suppress “Library.init was not called” errors
+                        pass
+
+                _dev.DeviceInfo.__del__ = __safe_del
+                module_log.info(
+                    "Patched DeviceInfo.__del__ to ignore finalizer errors."
+                )
+            except Exception as _e:
+                module_log.warning(f"Could not patch DeviceInfo.__del__: {_e}")
+        except Exception as e_init:  # Catch any exception from init()
+            err_msg_lower = str(e_init).lower()
+            # Check for common phrases indicating already initialized
+            if (
+                "already called" in err_msg_lower
+                or "already been initialized" in err_msg_lower
+                or "library is already initialized" in err_msg_lower
+            ):
+                module_log.warning(
+                    f"ic4.Library.init() failed but indicates already initialized: {e_init}. Considering this a success."
+                )
+                IC4_INITIALIZED = True
+                _ic4_init_has_run_successfully_this_session = True  # Mark success
+            else:
+                module_log.error(
+                    f"Failed to initialize imagingcontrol4 library during init(): {e_init}"
+                )
+                IC4_INITIALIZED = False
+    except ImportError:
+        module_log.warning("imagingcontrol4 library (ic4) not found on import.")
+        IC4_AVAILABLE = False
+        IC4_INITIALIZED = False
+    except Exception as e_import:
+        module_log.error(f"Unexpected error importing imagingcontrol4: {e_import}")
+        IC4_AVAILABLE = False
+        IC4_INITIALIZED = False
+
+    module_log.info(
+        f"IC4 initialization sequence complete. AVAILABLE: {IC4_AVAILABLE}, INITIALIZED: {IC4_INITIALIZED}"
+    )
+
+
+_initialize_ic4_globally()
+# --- End of module-level IC4 initialization ---
+
 
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication, QLoggingCategory
