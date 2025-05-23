@@ -120,6 +120,7 @@ _initialize_ic4_globally()
 
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication, QLoggingCategory
+from PyQt5.QtGui import QIcon
 
 
 try:
@@ -206,6 +207,14 @@ def main_app_entry():
         QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
     app = QApplication(sys.argv)
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    icon_path = os.path.join(script_dir, "ui", "icons", "PRIM.ico")
+    if not os.path.exists(icon_path):
+        # fallback to PNG if someone hasn’t generated the .ico yet
+        icon_path = os.path.join(script_dir, "ui", "icons", "PRIM.png")
+
+    app.setWindowIcon(QIcon(icon_path))
 
     if not IC4_INITIALIZED:
         if IC4_AVAILABLE:
