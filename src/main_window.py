@@ -328,7 +328,7 @@ class MainWindow(QMainWindow):
             self.top_ctrl.disable_all_camera_controls()
             return
 
-         Delegate thread ownership and setup to the camera widget
+        # Delegate thread ownership and setup to the camera widget
         self.qt_camera_widget.set_active_camera_device(device_info)
 
         # Refresh UI state that depends on camera availability
