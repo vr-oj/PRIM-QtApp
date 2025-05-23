@@ -64,8 +64,6 @@ class MainWindow(QMainWindow):
         self._init_paths_and_icons()
         self._build_console_log_dock()
         self._build_central_widget_layout()
-        # Wire up all camera-widget signals and controls
-        self._connect_camera_widget_signals()
         self._build_menus()
         self._build_main_toolbar()
         self._build_status_bar()
