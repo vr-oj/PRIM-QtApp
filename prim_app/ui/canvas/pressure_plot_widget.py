@@ -17,7 +17,7 @@ from PyQt5.QtCore import Qt, pyqtSlot
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
-from utils.configconfig import PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX
+from utils.config import PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX
 
 log = logging.getLogger(__name__)
 
