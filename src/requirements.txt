@@ -8,3 +8,5 @@ opencv-python>=4.5
 pyserial>=3.4
 imagingcontrol4>=1.0
 PyOpenGL>=3.1.9
+genicam2>=2.0
+harvesters>=1.4.3

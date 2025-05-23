@@ -95,7 +95,12 @@ class QtCameraWidget(QWidget):
 
         self._active_device_info = device_info
         # Create and start new thread
-        self._camera_thread = SDKCameraThread(device_info=device_info, parent=self)
+        # Supply your CTI path and pick device_index 0 (or derive from device_info.id_)
+        self._camera_thread = HarvesterCameraThread(
+            cti_path=r"C:\Program Files\The Imaging Source Europe GmbH\IC4 GenTL Driver for USB3Vision Devices 1.4\bin\ic4-gentl-u3v_x64.cti",
+            device_index=0,
+            parent=self,
+        )
         # Connect frame updates
         self._camera_thread.frame_ready.connect(self.update_frame)
         # Connect other signals
