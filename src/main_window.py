@@ -1,7 +1,7 @@
 # main_window.py
-import logging
 import os
 import sys
+import logging
 import numpy as np
 import csv
 from PyQt5.QtWidgets import (
@@ -33,7 +33,7 @@ from PyQt5.QtGui import QIcon, QKeySequence, QImage
 from control_panels.top_control_panel import TopControlPanel
 from canvas.pressure_plot_widget import PressurePlotWidget
 from threads.serial_thread import SerialThread
-from recording import TrialRecorder
+from recording import TrialRecorder, RecordingWorker
 from utils import list_serial_ports
 from config import (
     DEFAULT_FPS,
@@ -413,9 +413,13 @@ class MainWindow(QMainWindow):
             f"Session_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')}"
         )
         layout.addRow("Session Name:", name_edit)
-        operator_edit = QLineEdit()
+        operator_edit = (
+            QLineEdit()
+        )  # This data is collected but not used in current snippet
         layout.addRow("Operator:", operator_edit)
-        notes_edit = QTextEdit()
+        notes_edit = (
+            QTextEdit()
+        )  # This data is collected but not used in current snippet
         notes_edit.setFixedHeight(80)
         layout.addRow("Notes:", notes_edit)
 
@@ -427,110 +431,113 @@ class MainWindow(QMainWindow):
         if dialog.exec_() != QDialog.Accepted:
             return
 
-        session = name_edit.text().strip() or name_edit.placeholderText()
-        safe = "".join(
-            c if c.isalnum() or c in (" ", "_", "-") else "_" for c in session
-        ).rstrip()
-        safe = safe.replace(" ", "_")
+        session_name_raw = name_edit.text().strip() or name_edit.placeholderText()
+        session_name_safe = (
+            "".join(
+                c if c.isalnum() or c in (" ", "_", "-") else "_"
+                for c in session_name_raw
+            )
+            .rstrip()
+            .replace(" ", "_")
+        )
 
-        folder = os.path.join(PRIM_RESULTS_DIR, safe)
+        session_folder = os.path.join(PRIM_RESULTS_DIR, session_name_safe)
         try:
-            os.makedirs(folder, exist_ok=True)
+            os.makedirs(session_folder, exist_ok=True)
         except Exception as e:
-            log.error(f"Couldn’t create folder {folder}: {e}")
+            log.error(f"Couldn’t create folder {session_folder}: {e}")
             QMessageBox.critical(self, "File Error", str(e))
             return
 
-        base = os.path.join(PRIM_RESULTS_DIR, safe)
-        self.last_trial_basepath = base
+        # This is the base path for TrialRecorder (e.g., "PRIM_RESULTS_DIR/Session_XYZ/Session_XYZ")
+        # TrialRecorder will append its own timestamp and extensions like "_20230101-120000.csv"
+        recording_base_prefix = os.path.join(session_folder, session_name_safe)
 
-        # Use fallback frame size since we have no live camera feed
-        from config import DEFAULT_FRAME_SIZE
+        # self.last_trial_basepath is used to open the folder later in _trigger_stop_recording
+        self.last_trial_basepath = session_folder
 
+        # Use fallback frame size and default video parameters from config.py
         w, h = DEFAULT_FRAME_SIZE
-
-        ext_data = self.video_format_combobox.currentData()
-        video_ext = ext_data.value() if isinstance(ext_data, QVariant) else ext_data
-        if not video_ext:
-            video_ext = DEFAULT_VIDEO_EXTENSION.lower()
+        video_ext = DEFAULT_VIDEO_EXTENSION.lower()
         codec = DEFAULT_VIDEO_CODEC
 
-        # Ensure fallback frame size is defined
-        from config import DEFAULT_FRAME_SIZE
-
-        w, h = DEFAULT_FRAME_SIZE
         log.info(
-            f"Attempting to start recording: {base}, {DEFAULT_FPS} FPS, {w}×{h}, format: {video_ext}, codec: {codec}"
+            f"Attempting to start recording session: '{session_name_safe}' in folder '{session_folder}'"
         )
+        log.info(
+            f"Parameters for RecordingWorker/TrialRecorder: "
+            f"FPS: {DEFAULT_FPS}, FrameSize: {w}x{h}, VideoFormat: {video_ext}, Codec: {codec}"
+        )
+
         try:
             if self._recording_worker and self._recording_worker.isRunning():
                 log.warning("A recording worker is already running. Stopping it first.")
                 self._recording_worker.stop_worker()
                 if not self._recording_worker.wait(3000):
+                    log.warning(
+                        "Recording worker did not stop gracefully, terminating."
+                    )
                     self._recording_worker.terminate()
                 self._recording_worker.deleteLater()
                 self._recording_worker = None
 
-            # --- CSV‐only recording worker ---
-            # We no longer record video, so we just queue CSV data via TrialRecorder directly.
+            # Initialize the RecordingWorker correctly
+            self._recording_worker = RecordingWorker(
+                basepath=recording_base_prefix,
+                fps=DEFAULT_FPS,
+                frame_size=(w, h),
+                video_ext=video_ext,
+                video_codec=codec,
+                parent=self,  # Pass parent for QObject hierarchy if RecordingWorker is a QObject
+            )
 
-            # Create and start only the CSV recorder
-            csv_path = os.path.join(self.last_trial_basepath, f"{safe}.csv")
-            try:
-                csv_rec = TrialRecorder(
-                    basepath=self.last_trial_basepath, csv_only=True
-                )  # assume this flag skips video
-                csv_rec.start()  # if it’s a thread; or just open file if not threaded
-                self._csv_recorder = csv_rec
-            except Exception as e:
-                log.exception("Failed to start CSV recorder")
-                QMessageBox.critical(self, "Recording Error", str(e))
-                return
+            self._recording_worker.start()  # Start the worker thread
+
+            # Wait briefly for the worker's internal TrialRecorder to initialize.
+            # A signal from RecordingWorker upon successful TrialRecorder init would be more robust.
+            QThread.msleep(200)  # milliseconds
 
             if not (
                 self._recording_worker
                 and self._recording_worker.isRunning()
-                and self._recording_worker.is_ready_to_record
+                and self._recording_worker.is_ready_to_record  # Crucial check
             ):
-                # If worker is not running or not ready, it means init failed.
-                # The RecordingWorker's run() method should have logged the specific error.
                 log.error(
-                    "Recording worker did not become ready. Check RecordingWorker logs for initialization errors in TrialRecorder."
+                    "Recording worker did not become ready. Check RecordingWorker logs for "
+                    "initialization errors in TrialRecorder (e.g., file access, codec issues)."
                 )
-                # Attempt to clean up the worker if it was created but isn't ready
-                if self._recording_worker:
+                if self._recording_worker:  # If instance exists but not ready
                     if self._recording_worker.isRunning():
-                        self._recording_worker.stop_worker()  # Signal it to stop if it's in its loop
-                        if not self._recording_worker.wait(1000):  # Brief wait
+                        self._recording_worker.stop_worker()
+                        if not self._recording_worker.wait(1000):
                             self._recording_worker.terminate()
                     self._recording_worker.deleteLater()
                     self._recording_worker = None
-                raise RuntimeError(  # This error will be caught by the outer try-except
+                raise RuntimeError(
                     "Recording worker failed to initialize TrialRecorder or did not start."
                 )
 
         except Exception as e:
-            log.exception(
-                f"Failed to initialize or start RecordingWorker: {e}"
-            )  # This catches the RuntimeError above too
+            log.exception(f"Failed to initialize or start RecordingWorker: {e}")
             QMessageBox.critical(
                 self, "Recording Error", f"Could not start recording worker: {e}"
             )
-            if self._recording_worker:  # Ensure cleanup if instance was created
+            # Ensure cleanup if instance was created but an error occurred
+            if self._recording_worker:
                 if self._recording_worker.isRunning():
                     self._recording_worker.stop_worker()
-                    if not self._recording_worker.wait(1000):
+                    if not self._recording_worker.wait(1000):  # Brief wait
                         self._recording_worker.terminate()
                 self._recording_worker.deleteLater()
-            self._recording_worker = None
-            return  # Do not proceed to set _is_recording = True
+                self._recording_worker = None
+            return
 
         # If we reach here, worker started and is ready
         self._is_recording = True
-        self.start_recording_action.setIcon(self.icon_recording_active)
+        self.start_recording_action.setIcon(self.icon_recording_active)  # Update UI
         self._update_recording_actions_enable_state()
-        self.pressure_plot_widget.clear_plot()
-        self.statusBar().showMessage(f"Recording Started: {safe}", 0)
+        self.pressure_plot_widget.clear_plot()  # Clear plot for new recording
+        self.statusBar().showMessage(f"Recording Started: {session_name_safe}", 0)
 
     def _trigger_stop_recording(self):
         if not self._is_recording or not self._recording_worker:
