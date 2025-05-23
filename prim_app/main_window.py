@@ -32,7 +32,9 @@ from PyQt5.QtGui import QIcon, QKeySequence, QImage
 
 from ui.control_panels.top_control_panel import TopControlPanel
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
+from ui.canvas.gl_viewfinder import GLViewfinder
 from threads.serial_thread import SerialThread
+from threads.sdk_camera_thread import SDKCameraThread
 from recording import TrialRecorder, RecordingWorker
 from utils.utils import list_serial_ports
 from utils.config import (
@@ -86,6 +88,17 @@ class MainWindow(QMainWindow):
             log.error(
                 "Could not connect plot control signals: top_ctrl or pressure_plot_widget not found."
             )
+
+        # ─── Camera integration ────────────────────────────────────────
+        self.camera_view = GLViewfinder(self)
+        # put it in the right-hand pane of your splitter
+        self.main_splitter.insertWidget(1, self.camera_view)
+
+        self.camera_thread = SDKCameraThread(device_name=None, fps=DEFAULT_FPS)
+        self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
+        self.camera_thread.camera_error.connect(self._on_camera_error)
+        self.camera_thread.start()
+        # ───────────────────────────────────────────────────────────────
 
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION or '1.0'}")
         self.showMaximized()
@@ -695,6 +708,10 @@ class MainWindow(QMainWindow):
         s = self._app_session_seconds % 60
         self.app_session_time_label.setText(f"Session: {h:02}:{m:02}:{s:02}")
 
+    @pyqtSlot(str, str)
+    def _on_camera_error(self, msg, code):
+        QMessageBox.critical(self, "Camera Error", f"{msg}\n(Code: {code})")
+
     def closeEvent(self, event):
 
         log.info(f"Close event received. Recording active: {self._is_recording}")
@@ -740,6 +757,11 @@ class MainWindow(QMainWindow):
                     log.error("Serial thread failed to terminate.")
             self._serial_thread.deleteLater()
             self._serial_thread = None
+
+        # ─── Tear down camera thread ────────────────────────────────────
+        if hasattr(self, "camera_thread"):
+            self.camera_thread.stop()
+        # ───────────────────────────────────────────────────────────────
 
         log.info("Exiting application.")
         super().closeEvent(event)
