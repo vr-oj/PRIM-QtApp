@@ -328,11 +328,10 @@ class MainWindow(QMainWindow):
             self.top_ctrl.disable_all_camera_controls()
             return
 
-        # Hand off to the camera widget
+         Delegate thread ownership and setup to the camera widget
         self.qt_camera_widget.set_active_camera_device(device_info)
 
-        # Update any UI state that depends on the widget:
-        # e.g. enable/disable record buttons, clear old resolutions, etc.
+        # Refresh UI state that depends on camera availability
         self._update_recording_actions_enable_state()
 
     @pyqtSlot(str)
