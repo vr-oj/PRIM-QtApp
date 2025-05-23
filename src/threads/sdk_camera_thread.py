@@ -182,6 +182,7 @@ class SDKCameraThread(QThread):
                     stride = pitch
 
                 img = QImage(data, w, h, stride, fmt).copy()
+                log.debug("[SDKCameraThread] emitting frame")
                 self.frame_ready.emit(img, arr)
 
                 buf.queue()

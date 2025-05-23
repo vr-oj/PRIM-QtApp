@@ -140,12 +140,10 @@ class GLViewfinder(QOpenGLWidget):
 
     def update_frame(self, qimg: QImage):
         if qimg.isNull():
-            # If camera disconnects, we might get null images.
-            # In this case, we could clear the pending image or set a placeholder.
-            # For now, just don't update if null.
-            # self._pending_qimg = None # Optionally clear
-            # self.update() # Trigger a repaint to potentially clear the view
             return
+        self._pending_qimg = qimg.convertToFormat(QImage.Format_RGBA8888)
+        self._img_size = self._pending_qimg.size()
+        self.update()
 
         self._pending_qimg = qimg.convertToFormat(QImage.Format_RGBA8888)
         self._img_size = self._pending_qimg.size()

@@ -117,15 +117,15 @@ class QtCameraWidget(QWidget):
         self._camera_thread.start()
 
     @pyqtSlot(QImage, object)
-    def update_frame(self, qimg: QImage, frame_data: object = None):
+    def update_frame(self, qimg, frame_data=None):
         """
         Receive frames from SDKCameraThread, update viewfinder, and re-emit for recording.
         """
-        if qimg and not qimg.isNull():
-            self.viewfinder.update_frame(qimg)
-            self.frame_ready.emit(qimg, frame_data)
-        else:
-            log.warning("Received invalid image in update_frame")
+        log.debug(
+            f"[QtCameraWidget] update_frame called – valid? {bool(qimg) and not qimg.isNull()}"
+        )
+        self.viewfinder.update_frame(qimg)
+        self.frame_ready.emit(qimg, frame_data)
 
     def _start_new_camera_thread(self):
         if not self._active_device_info:
