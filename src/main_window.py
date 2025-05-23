@@ -52,14 +52,9 @@ log = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.camera_thread = None
         self._serial_thread = None
         self._recording_worker = None
         self._is_recording = False
-
-        self.current_camera_frame_width, self.current_camera_frame_height = (
-            DEFAULT_FRAME_SIZE
-        )
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
@@ -74,17 +69,6 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(0, self._set_initial_splitter_sizes)
         self._set_initial_control_states()
-
-        # DEBUG: see every parameter_changed come through
-        self.top_ctrl.camera_controls.parameter_changed.connect(
-            lambda name, val: log.info(
-                f"[DEBUG] parameter_changed signal: {name} -> {val}"
-            )
-        )
-        # and our real handler
-        self.top_ctrl.camera_controls.parameter_changed.connect(self._on_camera_param)
-
-        QTimer.singleShot(250, self.top_ctrl.camera_controls.populate_camera_list)
 
     def _set_initial_splitter_sizes(self):
         # Get the total width of the splitter
@@ -269,7 +253,6 @@ class MainWindow(QMainWindow):
 
     def _set_initial_control_states(self):
         self.top_ctrl.update_connection_status("Disconnected", False)
-        # now use the TopControlPanel API rather than diving into camera_controls
         self.start_recording_action.setEnabled(False)
         self.stop_recording_action.setEnabled(False)
 
@@ -418,8 +401,7 @@ class MainWindow(QMainWindow):
         serial_ready = (
             self._serial_thread is not None and self._serial_thread.isRunning()
         )
-        camera_ready = self.qt_cam_widget.current_camera_is_active()
-        can_start_recording = serial_ready and camera_ready and not self._is_recording
+        can_start_recording = serial_ready and not self._is_recording
 
         self.start_recording_action.setEnabled(bool(can_start_recording))
         self.stop_recording_action.setEnabled(bool(self._is_recording))
@@ -429,9 +411,6 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self, "Cannot Start Recording", "PRIM device not connected."
             )
-            return
-        if not self.qt_cam_widget.current_camera_is_active():
-            QMessageBox.warning(self, "Cannot Start Recording", "Camera is not active.")
             return
         if self._is_recording:
             QMessageBox.information(self, "Recording Active", "Already recording.")
@@ -474,13 +453,6 @@ class MainWindow(QMainWindow):
 
         base = os.path.join(folder, safe)
         self.last_trial_basepath = folder
-
-        w, h = self.current_camera_frame_width, self.current_camera_frame_height
-        if w <= 0 or h <= 0:
-            log.warning(
-                f"Invalid frame size ({w}x{h}), using default {DEFAULT_FRAME_SIZE}."
-            )
-            w, h = DEFAULT_FRAME_SIZE
 
         ext_data = self.video_format_combobox.currentData()
         video_ext = ext_data.value() if isinstance(ext_data, QVariant) else ext_data
@@ -674,10 +646,6 @@ class MainWindow(QMainWindow):
         self.app_session_time_label.setText(f"Session: {h:02}:{m:02}:{s:02}")
 
     def closeEvent(self, event):
-        # 1) Stop camera thread if running
-        if self.camera_thread and self.camera_thread.isRunning():
-            self.camera_thread._stop = True
-            self.camera_thread.wait()
 
         log.info(f"Close event received. Recording active: {self._is_recording}")
         # 2) Handle in-flight recording
@@ -722,11 +690,6 @@ class MainWindow(QMainWindow):
                     log.error("Serial thread failed to terminate.")
             self._serial_thread.deleteLater()
             self._serial_thread = None
-
-        # 5) Close camera widget
-        log.info("Closing camera widget.")
-        if self.qt_cam_widget:  # Check if it exists
-            self.qt_cam_widget.close()  # This should trigger its own cleanup
 
         log.info("Exiting application.")
         super().closeEvent(event)
