@@ -59,14 +59,33 @@ class MainWindow(QMainWindow):
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
+        # _build_central_widget_layout creates self.top_ctrl and self.pressure_plot_widget
         self._build_central_widget_layout()
         self._build_menus()
         self._build_main_toolbar()
         self._build_status_bar()
 
-        # Connect the new signal from TopControlPanel
-        if hasattr(self, "top_ctrl"):  # Ensure top_ctrl is initialized
+        # --- Connect signals for plot controls ---
+        if hasattr(self, "top_ctrl") and hasattr(self, "pressure_plot_widget"):
+            # Connect manual X and Y axis limit changes
+            self.top_ctrl.x_axis_limits_changed.connect(
+                self.pressure_plot_widget.set_manual_x_limits
+            )
+            self.top_ctrl.y_axis_limits_changed.connect(
+                self.pressure_plot_widget.set_manual_y_limits
+            )
+
+            # Connect export plot image request (already present in your TopControlPanel)
+            self.top_ctrl.export_plot_image_requested.connect(
+                self.pressure_plot_widget.export_as_image
+            )
+
+            # Connect clear plot request (added in the previous step)
             self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
+        else:
+            log.error(
+                "Could not connect plot control signals: top_ctrl or pressure_plot_widget not found."
+            )
 
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION or '1.0'}")
         self.showMaximized()
