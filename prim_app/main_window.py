@@ -35,7 +35,7 @@ from ui.canvas.pressure_plot_widget import PressurePlotWidget
 from threads.serial_thread import SerialThread
 from recording import TrialRecorder, RecordingWorker
 from utils.utils import list_serial_ports
-from config import (
+from utils.config import (
     DEFAULT_FPS,
     DEFAULT_FRAME_SIZE,
     APP_NAME,
