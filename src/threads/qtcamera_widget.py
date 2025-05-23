@@ -84,17 +84,36 @@ class QtCameraWidget(QWidget):
             old.deleteLater()
 
     @pyqtSlot(ic4.DeviceInfo)
-    def set_active_camera_device(self, device_info: ic4.DeviceInfo = None):
-        log.info(
-            f"Setting active camera: {device_info.model_name if device_info else 'None'}"
-        )
-        self._cleanup_camera_thread()
+    def set_active_camera_device(self, device_info):
+        """
+        Start a camera thread for the given device and wire up all signals.
+        """
+        # Keep track of the selected device
         self._active_device_info = device_info
-        self.camera_resolutions_updated.emit([])
-        self.camera_properties_updated.emit({})
-        if not device_info:
-            return
-        self._start_new_camera_thread()
+
+        # Tear down any previous thread
+        if hasattr(self, "_camera_thread") and self._camera_thread.isRunning():
+            self._camera_thread.stop()
+            self._camera_thread.wait()
+
+        # Create and configure the new SDKCameraThread
+        self._camera_thread = SDKCameraThread(device_info=device_info)
+
+        # Connect thread signals into this widget's public signals or directly to the viewfinder
+        self._camera_thread.frame_ready.connect(self.viewfinder.update_frame)
+        self._camera_thread.frame_ready.connect(
+            lambda qimg, arr=None: self.frame_ready.emit(qimg, arr)
+        )
+        self._camera_thread.camera_resolutions_available.connect(
+            self.camera_resolutions_updated
+        )
+        self._camera_thread.camera_properties_updated.connect(
+            self.camera_properties_updated
+        )
+        self._camera_thread.error.connect(self.camera_error)
+
+        # Launch the thread
+        self._camera_thread.start()
 
     def _start_new_camera_thread(self):
         if not self._active_device_info:

@@ -309,7 +309,11 @@ class MainWindow(QMainWindow):
         self.qt_cam_widget.frame_ready.connect(self._handle_new_camera_frame)
 
     @pyqtSlot(object)
-    def _handle_camera_selection(self, device_info_obj):
+    def _handle_camera_selection(self, device_info):
+        """
+        Called when the user picks a new camera. Delegate ownership to the QtCameraWidget.
+        """
+        # Stop any existing recording or thread if needed (optional clean-up)
         log.info(f"[DEBUG] _handle_camera_selection received: {device_info_obj}")
         # Stop any previously running camera thread
         if self.camera_thread and self.camera_thread.isRunning():
@@ -324,45 +328,12 @@ class MainWindow(QMainWindow):
             self.top_ctrl.disable_all_camera_controls()
             return
 
-        # Start a fresh SDKCameraThread for this device
-        self.camera_thread = SDKCameraThread(
-            device_info=device_info_obj,
-            target_fps=DEFAULT_FPS,
-            desired_width=self.current_camera_frame_width,
-            desired_height=self.current_camera_frame_height,
-            parent=self,
-        )
+        # Hand off to the camera widget
+        self.qt_camera_widget.set_active_camera_device(device_info)
 
-        # Wire thread → UI signals
-        self.camera_thread.camera_configured.connect(
-            lambda dev: self.top_ctrl.update_connection_status(
-                f"Connected: {dev.model_name}", True
-            )
-        )
-        # After connecting, re-enable camera controls and forward parameter changes into thread
-        self.camera_thread.camera_configured.connect(
-            lambda dev: (
-                self.top_ctrl.camera_controls.tabs.setTabEnabled(1, True),
-                self.top_ctrl.camera_controls.res_selector.setEnabled(True),
-                self.top_ctrl.parameter_changed.connect(
-                    self.camera_thread.set_parameter
-                ),
-            )
-        )
-        self.camera_thread.frame_ready.connect(self.qt_cam_widget.update_frame)
-        self.camera_thread.camera_properties_updated.connect(
-            self.top_ctrl.update_camera_ui_from_properties
-        )
-        self.camera_thread.camera_error.connect(self._handle_camera_error)
-
-        # Launch the camera thread
-        self.camera_thread.start()
-        # now wire the UI → thread setter for actual camera parameters
-        self.top_ctrl.camera_controls.parameter_changed.connect(
-            self.camera_thread.set_parameter
-        )
-        # hook up camera_widget signals (resolutions, properties, frame_ready, etc.)
-        self._connect_camera_widget_signals()
+        # Update any UI state that depends on the widget:
+        # e.g. enable/disable record buttons, clear old resolutions, etc.
+        self._update_recording_actions_enable_state()
 
     @pyqtSlot(str)
     def _handle_resolution_selection(self, resolution_str: str):
