@@ -2,7 +2,7 @@ import os
 
 # Base folders
 DOCUMENTS_DIR = os.path.join(os.path.expanduser("~"), "Documents")
-PRIM_RESULTS_DIR = os.path.join(DOCUMENTS_DIR, "PRIMalyze Results")
+PRIM_RESULTS_DIR = os.path.join(DOCUMENTS_DIR, "PRIMAcquisition Results")
 
 # ─── Recording settings ─────────────────────────────────────────────────────────
 DEFAULT_VIDEO_EXTENSION = "avi"  # Default format for µManager recorder
@@ -19,7 +19,7 @@ DEFAULT_SERIAL_BAUD_RATE = 115200
 SERIAL_COMMAND_TERMINATOR = b"\n"  # Arduino uses Serial.println()
 
 # ─── Application info ───────────────────────────────────────────────────────────
-APP_NAME = "PRIMalyzer"
+APP_NAME = "PRIMAcquisition"
 APP_VERSION = "1.0"
 ABOUT_TEXT = f"""
 <strong>{APP_NAME} v{APP_VERSION}</strong>

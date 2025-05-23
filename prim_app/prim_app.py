@@ -123,7 +123,7 @@ from PyQt5.QtCore import Qt, QCoreApplication, QLoggingCategory
 
 
 try:
-    from config import APP_NAME, LOG_LEVEL, APP_VERSION as CONFIG_APP_VERSION
+    from utils.config import APP_NAME, LOG_LEVEL, APP_VERSION as CONFIG_APP_VERSION
 
     root_logger = logging.getLogger()
     for handler_item in root_logger.handlers[:]:  # Use different var name
