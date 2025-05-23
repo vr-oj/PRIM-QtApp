@@ -3,6 +3,7 @@ import os
 import time
 import bisect
 import logging
+import math
 
 from PyQt5.QtWidgets import (
     QWidget,
@@ -369,12 +370,16 @@ class PressurePlotWidget(QWidget):
             log.warning("X min must be less than X max")
 
     def set_manual_y_limits(self, ymin, ymax):
-        if ymin < ymax:
+        if (
+            ymin < ymax and math.isfinite(ymin) and math.isfinite(ymax)
+        ):  # Ensure finite values
             self.manual_ylim = (ymin, ymax)
             self.ax.set_ylim(self.manual_ylim)
             self.canvas.draw_idle()
         else:
-            log.warning("Y min must be less than Y max")
+            log.warning(
+                f"Y limits must be finite and min < max. Received: {ymin}, {ymax}"
+            )
 
     def reset_zoom(self, auto_x, auto_y):
         self.manual_xlim = None  # Reset manual x-limits
@@ -404,26 +409,31 @@ class PressurePlotWidget(QWidget):
             self.canvas.draw_idle()
 
     def clear_plot(self):
-        self.times.clear()  #
-        self.pressures.clear()  #
-        self.manual_xlim = None
-        self.line.set_data([], [])  #
-        self.ax.set_xlim(0, 10)  # Reset to a default view
+        self.times.clear()
+        self.pressures.clear()
 
-        # Keep manual_ylim if it's set and auto_y is off, otherwise use defaults
-        # Assuming PlotControlPanel's auto_y_cb reflects current desired auto_y state
-        # This part is a bit tricky as PlotControlPanel is not directly accessed here
-        # For simplicity, let's assume if self.manual_ylim is set, it was intended for manual mode.
-        if self.manual_ylim:
-            self.ax.set_ylim(self.manual_ylim)
-        else:
+        self.line.set_data([], [])
+        self.ax.set_xlim(0, 100)  # Reset to a default X view
+
+        if self.manual_ylim is None:  # Y-axis is meant to be auto-scaled
+            # On clear with auto-y, set to default. update_plot will auto-scale if data comes.
             self.ax.set_ylim(PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX)
+        elif (
+            isinstance(self.manual_ylim, tuple)
+            and len(self.manual_ylim) == 2
+            and all(v is not None and math.isfinite(v) for v in self.manual_ylim)
+        ):  # Check for valid finite tuple
+            self.ax.set_ylim(self.manual_ylim)  # Apply valid stored manual limits
+        else:
+            # Fallback: manual_ylim is invalid (should not happen now) or some other state. Reset to default.
+            self.manual_ylim = (PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX)
+            self.ax.set_ylim(self.manual_ylim)
 
-        if self.hover_annotation.get_visible():  # Hide hover annotation
+        if self.hover_annotation.get_visible():
             self.hover_annotation.set_visible(False)
 
         self._update_placeholder("Plot data cleared.")  # This will also call draw_idle
-        # self.canvas.draw_idle() # _update_placeholder calls it.
+        # self.canvas.draw_idle() # Called by _update_placeholder
 
     def export_as_image(self):
         if not self.times and not (
