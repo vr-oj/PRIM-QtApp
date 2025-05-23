@@ -1,7 +1,8 @@
+# qtcamera_widget.py
 import logging
-import imagingcontrol4 as ic4  # For ic4.DeviceInfo
+import imagingcontrol4 as ic4  # ic4.DeviceInfo
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
-from PyQt5.QtCore import pyqtSignal, pyqtSlot, QTimer
+from PyQt5.QtCore import pyqtSignal, pyqtSlot, QTimer, Qt
 from PyQt5.QtGui import QImage, QPixmap
 
 from .sdk_camera_thread import SDKCameraThread
@@ -12,7 +13,7 @@ log = logging.getLogger(__name__)
 class QtCameraWidget(QWidget):
     """
     Displays live camera feed via SDKCameraThread using a QLabel preview.
-    Manages camera selection, resolution, and basic properties.
+    Manages camera selection, resolution, and safe shutdown.
     """
 
     # Emits a QImage and raw frame data for recording
@@ -27,32 +28,9 @@ class QtCameraWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # Default parameters
-        self.current_target_fps = 20.0
-        self.current_width = 640
-        self.current_height = 480
-        self.current_pixel_format = "Mono 8"
-        self._current_roi = (0, 0, 0, 0)
-
-        self._camera_thread = None
-        self._active_device_info: ic4.DeviceInfo = None
-
-        # Debounce timers for exposure/gain
-        self._exp_pending = None
-        self._gain_pending = None
-
-        self._exp_timer = QTimer(self)
-        self._exp_timer.setSingleShot(True)
-        self._exp_timer.setInterval(100)
-        self._exp_timer.timeout.connect(self._apply_pending_exposure)
-
-        self._gain_timer = QTimer(self)
-        self._gain_timer.setSingleShot(True)
-        self._gain_timer.setInterval(100)
-        self._gain_timer.timeout.connect(self._apply_pending_gain)
-
-        # Simple QLabel-based viewfinder for now
+        # Preview label
         self.viewfinder = QLabel(self)
+        self.viewfinder.setAlignment(Qt.AlignCenter)
         self.viewfinder.setScaledContents(True)
 
         layout = QVBoxLayout(self)
@@ -60,50 +38,67 @@ class QtCameraWidget(QWidget):
         layout.addWidget(self.viewfinder)
         self.setLayout(layout)
 
-    def _cleanup_camera_thread(self):
-        log.debug("Cleaning up existing camera thread...")
+        self._camera_thread = None
+        self._active_device_info: ic4.DeviceInfo = None
+
+    def closeEvent(self, event):
+        """
+        Ensure camera is cleanly shutdown when widget is closed.
+        """
+        self.stop_camera()
+        super().closeEvent(event)
+
+    @pyqtSlot()
+    def stop_camera(self):
+        """
+        Stops and cleans up the camera thread, releasing the device safely.
+        """
         if self._camera_thread:
-            old = self._camera_thread
-            self._camera_thread = None
-            if old.isRunning():
-                log.info("Stopping camera thread...")
-                old.request_stop()
-                if not old.wait(3000):
-                    log.warning("Camera thread did not stop gracefully; terminating.")
-                    old.terminate()
+            log.info("Stopping camera for safe shutdown...")
+            # Request thread stop
+            self._camera_thread.request_stop()
+            # Wait for thread to finish
+            if not self._camera_thread.wait(3000):
+                log.warning("Camera thread did not stop, terminating forcefully.")
+                self._camera_thread.terminate()
+            # Optionally close device if supported
             try:
-                old.frame_ready.disconnect(self.update_frame)
-                old.camera_error.disconnect(self._on_camera_thread_error_received)
-                old.camera_resolutions_available.disconnect(
+                if hasattr(self._camera_thread, "close_device"):
+                    self._camera_thread.close_device()
+            except Exception as e:
+                log.warning(f"Error closing device: {e}")
+
+            # Disconnect signals
+            try:
+                self._camera_thread.frame_ready.disconnect(self.update_frame)
+                self._camera_thread.camera_resolutions_available.disconnect(
                     self.camera_resolutions_updated
                 )
-                old.camera_properties_updated.disconnect(self.camera_properties_updated)
+                self._camera_thread.camera_properties_updated.disconnect(
+                    self.camera_properties_updated
+                )
+                self._camera_thread.error.disconnect(self.camera_error)
             except Exception:
                 pass
-            old.deleteLater()
+
+            # Delete and clear reference
+            self._camera_thread.deleteLater()
+            self._camera_thread = None
 
     @pyqtSlot(ic4.DeviceInfo)
     def set_active_camera_device(self, device_info: ic4.DeviceInfo):
         """
-        Start or restart a camera thread for the given device and wire up signals.
+        Start or restart the SDKCameraThread and connect signals.
         """
-        # Store the active device
+        # Stop existing camera if any
+        self.stop_camera()
+
         self._active_device_info = device_info
-
-        # Tear down any previous thread cleanly
-        if self._camera_thread and self._camera_thread.isRunning():
-            self._camera_thread.request_stop()
-            self._camera_thread.wait(timeout=3000)
-
-        # Instantiate new thread
-        self._camera_thread = SDKCameraThread(
-            device_info=device_info, target_fps=self.current_target_fps, parent=self
-        )
-
-        # Route frame_ready into our update_frame slot
+        # Create and start new thread
+        self._camera_thread = SDKCameraThread(device_info=device_info, parent=self)
+        # Connect frame updates
         self._camera_thread.frame_ready.connect(self.update_frame)
-
-        # Other thread signals
+        # Connect other signals
         self._camera_thread.camera_resolutions_available.connect(
             self.camera_resolutions_updated
         )
@@ -112,82 +107,21 @@ class QtCameraWidget(QWidget):
         )
         self._camera_thread.error.connect(self.camera_error)
 
-        # Start the camera thread
+        log.info(f"Starting camera thread for {device_info.model_name}")
         self._camera_thread.start()
 
     @pyqtSlot(QImage, object)
     def update_frame(self, qimg: QImage, frame_data=None):
         """
-        Receive frames from SDKCameraThread, update QLabel preview, and re-emit for recording.
+        Display incoming frames in QLabel and emit for recording.
         """
         if qimg and not qimg.isNull():
             pix = QPixmap.fromImage(qimg)
             self.viewfinder.setPixmap(pix)
             self.frame_ready.emit(qimg, frame_data)
         else:
-            log.warning("Received null or invalid frame in update_frame")
-
-    @pyqtSlot(str)
-    def set_active_resolution_str(self, resolution_str: str):
-        if not resolution_str or "x" not in resolution_str:
-            log.warning(f"Invalid resolution string: {resolution_str}")
-            return
-        try:
-            w_str, h_rest = resolution_str.split("x", 1)
-            h_str = h_rest.split(" ")[0]
-            w, h = int(w_str), int(h_str)
-            log.info(f"Setting resolution to {w}x{h}")
-            if (w, h) != (self.current_width, self.current_height):
-                self.current_width, self.current_height = w, h
-                if self._active_device_info:
-                    self._cleanup_camera_thread()
-                    self._start_new_camera_thread()
-        except ValueError:
-            log.error(f"Could not parse resolution string: {resolution_str}")
-
-    @pyqtSlot(int)
-    def set_exposure(self, exposure_us: int):
-        log.debug(f"Queued exposure: {exposure_us}")
-        self._exp_pending = exposure_us
-        self._exp_timer.start()
-
-    @pyqtSlot(float)
-    def set_gain(self, gain_db: float):
-        log.debug(f"Queued gain: {gain_db}")
-        self._gain_pending = gain_db
-        self._gain_timer.start()
-
-    @pyqtSlot(bool)
-    def set_auto_exposure(self, enable_auto: bool):
-        log.debug(f"Auto-exposure: {enable_auto}")
-        if self._camera_thread and self._camera_thread.isRunning():
-            self._camera_thread.update_auto_exposure(enable_auto)
-
-    @pyqtSlot()
-    def _apply_pending_exposure(self):
-        if self._camera_thread and self._exp_pending is not None:
-            self._camera_thread.update_auto_exposure(False)
-            self._camera_thread.update_exposure(self._exp_pending)
-        self._exp_pending = None
-
-    @pyqtSlot()
-    def _apply_pending_gain(self):
-        if self._camera_thread and self._gain_pending is not None:
-            self._camera_thread.update_gain(self._gain_pending)
-        self._gain_pending = None
-
-    @pyqtSlot(int, int, int, int)
-    def set_software_roi(self, x: int, y: int, w: int, h: int):
-        log.debug(f"ROI: {x},{y},{w},{h}")
-        self._current_roi = (x, y, w, h)
-        if self._camera_thread and self._camera_thread.isRunning():
-            self._camera_thread.update_roi(x, y, w, h)
-
-    @pyqtSlot(str, str)
-    def _on_camera_thread_error_received(self, message: str, code: str):
-        log.error(f"Camera error: {message} (Code {code})")
-        self.camera_error.emit(message, code)
+            log.warning("Received invalid frame in update_frame")
 
     def current_camera_is_active(self) -> bool:
-        """Return True if the SDK camera thread is alive and running."""
+        """Check if camera thread is running."""
         return bool(self._camera_thread and self._camera_thread.isRunning())
