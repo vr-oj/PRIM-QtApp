@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QMessageBox,
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize, QThread
 from PyQt5.QtGui import QIcon, QKeySequence, QImage
 
 
