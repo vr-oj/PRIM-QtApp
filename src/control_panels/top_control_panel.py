@@ -9,7 +9,6 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 
-from .camera_control_panel import CameraControlPanel
 from .plot_control_panel import PlotControlPanel
 
 log = logging.getLogger(__name__)
@@ -43,14 +42,6 @@ class TopControlPanel(QWidget):
         layout.setContentsMargins(5, 2, 5, 2)
         layout.setSpacing(10)
 
-        # Camera control panel
-        self.camera_controls = CameraControlPanel(self)
-        self.camera_controls.parameter_changed.connect(self._on_camera_param)
-        layout.addWidget(self.camera_controls, 1)
-
-        # Re-emit low-level camera control changes
-        self.camera_controls.parameter_changed.connect(self.parameter_changed)
-
         # PRIM Device status box
         status_box = QGroupBox("PRIM Device Status")
         status_layout = QFormLayout(status_box)
@@ -81,20 +72,6 @@ class TopControlPanel(QWidget):
             self.export_plot_image_requested
         )
 
-    @pyqtSlot(dict)
-    def update_camera_ui_from_properties(self, props: dict):
-        """
-        Update camera controls based on the latest properties dict.
-        """
-        log.debug(f"TopControlPanel received camera properties: {props}")
-        self.camera_controls.update_camera_properties_ui(props)
-
-    def disable_all_camera_controls(self):
-        """
-        Disable camera UI (e.g., when no camera is connected).
-        """
-        self.camera_controls.disable_all_controls()
-
     def update_connection_status(self, text: str, connected: bool):
         """
         Show connection status (with color coding).
@@ -115,19 +92,3 @@ class TopControlPanel(QWidget):
         self.idx_lbl.setText(str(idx))
         self.time_lbl.setText(f"{t_dev:.2f}")
         self.pres_lbl.setText(f"{p_dev:.2f} mmHg")
-
-    @pyqtSlot(str, object)
-    def _on_camera_param(self, name: str, val: object):
-        if name == "CameraSelection":
-            self.camera_selected.emit(val)
-        elif name == "Resolution":
-            self.resolution_selected.emit(val)
-        elif name == "ExposureTime":
-            self.exposure_changed.emit(int(val))
-        elif name == "Gain":
-            self.gain_changed.emit(float(val))
-        elif name == "AutoExposure":
-            self.auto_exposure_toggled.emit(bool(val))
-        else:
-            # any other custom nodes you might want to catch
-            self.parameter_changed.emit(name, val)
