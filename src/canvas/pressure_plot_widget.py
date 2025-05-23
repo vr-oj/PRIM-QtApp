@@ -37,6 +37,9 @@ class PressurePlotWidget(QWidget):
         self.ax.tick_params(labelsize=10)
         for spine in self.ax.spines.values():
             spine.set_color("#D8DEE9")
+        # Add a faint grid to the plot
+        self.ax.grid(True, linestyle="--", alpha=0.7, color="lightgray")
+
         (self.line,) = self.ax.plot([], [], "-", lw=2, color="black")
 
         self.canvas = FigureCanvas(self.fig)
@@ -47,6 +50,35 @@ class PressurePlotWidget(QWidget):
         self.scrollbar.hide()
         layout.addWidget(self.scrollbar)
         self.scrollbar.valueChanged.connect(self._on_scroll)
+
+        # MODIFIED: Apply a simple stylesheet to the scrollbar for better visibility
+        self.scrollbar.setStyleSheet(
+            """
+            QScrollBar:horizontal {
+                border: 1px solid #C0C0C0; /* Light border for the scrollbar itself */
+                background: #F0F0F0;    /* Background of the scrollbar groove */
+                height: 15px;           /* Height of the scrollbar */
+                margin: 0px 20px 0 20px;/* Margins to make space for add/sub-line buttons if they were visible */
+            }
+            QScrollBar::handle:horizontal {
+                background: #A0A0A0;    /* A medium gray for the handle */
+                min-width: 20px;        /* Minimum width of the handle */
+                border-radius: 5px;     /* Rounded corners for the handle */
+                border: 1px solid #808080; /* Border for the handle */
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                /* Style for arrow buttons if you want them, currently not explicitly shown */
+                /* border: 1px solid grey; background: #E0E0E0; width: 18px; */
+                width: 0px; /* Hide standard arrow buttons by making them zero width */
+                height: 0px;
+                background: none;
+                border: none;
+            }
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+                background: none; /* Background of the area where you click to page scroll */
+            }
+        """
+        )
 
         # Data storage
         self.times = []
