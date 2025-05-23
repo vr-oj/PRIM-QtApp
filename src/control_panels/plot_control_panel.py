@@ -1,3 +1,4 @@
+# plot_control_panel.py
 from PyQt5.QtWidgets import (
     QGroupBox,
     QFormLayout,

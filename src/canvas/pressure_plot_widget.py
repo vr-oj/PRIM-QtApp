@@ -1,12 +1,24 @@
+# pressure_plot_widget.py
 import os
 import time
+import bisect
 import logging
 
-from PyQt5.QtWidgets import QWidget, QSizePolicy, QVBoxLayout, QMessageBox, QFileDialog
+from PyQt5.QtWidgets import (
+    QWidget,
+    QSizePolicy,
+    QVBoxLayout,
+    QMessageBox,
+    QFileDialog,
+    QScrollBar,
+)
+from PyQt5.QtCore import Qt, pyqtSlot
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
-from config import PLOT_MAX_POINTS, PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX
+from config import PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX
+
+log = logging.getLogger(__name__)
 
 
 class PressurePlotWidget(QWidget):
@@ -16,6 +28,7 @@ class PressurePlotWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        # Matplotlib canvas
         self.fig = Figure(facecolor="white", tight_layout=True)
         self.ax = self.fig.add_subplot(111)
         self.ax.set_facecolor("white")
@@ -29,13 +42,20 @@ class PressurePlotWidget(QWidget):
         self.canvas = FigureCanvas(self.fig)
         layout.addWidget(self.canvas)
 
+        # Scrollbar for manual X panning
+        self.scrollbar = QScrollBar(Qt.Horizontal, self)
+        self.scrollbar.hide()
+        layout.addWidget(self.scrollbar)
+        self.scrollbar.valueChanged.connect(self._on_scroll)
+
+        # Data storage
         self.times = []
         self.pressures = []
-        self.max_pts = PLOT_MAX_POINTS
         self.manual_xlim = None
         self.manual_ylim = (PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX)
         self.ax.set_ylim(self.manual_ylim)
 
+        # Placeholder text
         self.placeholder = self.ax.text(
             0.5,
             0.5,
@@ -71,19 +91,21 @@ class PressurePlotWidget(QWidget):
                 self.placeholder = None
         self.canvas.draw_idle()
 
+    @pyqtSlot(float, float, bool, bool)
     def update_plot(self, t, p, auto_x, auto_y):
+        # Remove placeholder on first data
         if not self.times:
             self._update_placeholder(None)
 
+        # Append new data
         self.times.append(t)
         self.pressures.append(p)
-        if len(self.times) > self.max_pts:
-            self.times = self.times[-self.max_pts :]
-            self.pressures = self.pressures[-self.max_pts :]
-
         self.line.set_data(self.times, self.pressures)
 
+        # Auto-scale X
         if auto_x:
+            self.manual_xlim = None
+            self.scrollbar.hide()
             if len(self.times) > 1:
                 start, end = self.times[0], self.times[-1]
                 pad = max(1, (end - start) * 0.05)
@@ -91,25 +113,66 @@ class PressurePlotWidget(QWidget):
             else:
                 t0 = self.times[-1]
                 self.ax.set_xlim(t0 - 0.5, t0 + 0.5)
-            self.manual_xlim = None
-        elif self.manual_xlim:
-            self.ax.set_xlim(self.manual_xlim)
-
+        else:
+            # Manual X range
+            if self.manual_xlim:
+                self.ax.set_xlim(self.manual_xlim)
+                # Show and update scrollbar
+                self._update_scrollbar()
+            else:
+                # If no manual set yet, default to full trace
+                if self.times:
+                    self.manual_xlim = (self.times[0], self.times[-1])
+                    self.ax.set_xlim(self.manual_xlim)
+                    self._update_scrollbar()
+        # Y-axis handling
         if auto_y:
+            self.manual_ylim = None
             mn, mx = min(self.pressures), max(self.pressures)
             pad = max(abs(mx - mn) * 0.1, 2.0)
             self.ax.set_ylim(mn - pad, mx + pad)
-            self.manual_ylim = None
-        elif self.manual_ylim:
-            self.ax.set_ylim(self.manual_ylim)
+        else:
+            if self.manual_ylim:
+                self.ax.set_ylim(self.manual_ylim)
 
+        self.canvas.draw_idle()
+
+    def _update_scrollbar(self):
+        # Determine index-based window for manual_xlim
+        xmin, xmax = self.manual_xlim
+        idx0 = bisect.bisect_left(self.times, xmin)
+        idx1 = bisect.bisect_right(self.times, xmax)
+        window_size = max(idx1 - idx0, 1)
+        full_len = len(self.times)
+        # Configure scrollbar
+        self.scrollbar.setMinimum(0)
+        self.scrollbar.setMaximum(max(full_len - window_size, 0))
+        self.scrollbar.setPageStep(window_size)
+        self.scrollbar.setSingleStep(max(window_size // 10, 1))
+        # Position scrollbar thumb
+        self.scrollbar.setValue(idx0)
+        self.scrollbar.show()
+
+    @pyqtSlot(int)
+    def _on_scroll(self, pos):
+        # Pan X-axis window based on scroll position
+        if not self.manual_xlim or not self.times:
+            return
+        # Determine window size from pageStep
+        window_size = self.scrollbar.pageStep()
+        start_idx = pos
+        end_idx = min(start_idx + window_size, len(self.times) - 1)
+        xmin = self.times[start_idx]
+        xmax = self.times[end_idx]
+        self.manual_xlim = (xmin, xmax)
+        self.ax.set_xlim(self.manual_xlim)
         self.canvas.draw_idle()
 
     def set_manual_x_limits(self, xmin, xmax):
         if xmin < xmax:
             self.manual_xlim = (xmin, xmax)
             self.ax.set_xlim(self.manual_xlim)
-            self.canvas.draw_idle()
+            self._update_scrollbar()
         else:
             log.warning("X min must be less than X max")
 
@@ -128,21 +191,20 @@ class PressurePlotWidget(QWidget):
             self.ax.set_ylim(self.manual_ylim)
         else:
             self.manual_ylim = None
-
+        # Reset view
         if self.times:
             self.update_plot(self.times[-1], self.pressures[-1], auto_x, auto_y)
         else:
             self.ax.set_xlim(0, 10)
-            if not auto_y:
+            if not auto_y and self.manual_ylim:
                 self.ax.set_ylim(self.manual_ylim)
-            else:
-                self.ax.autoscale(enable=True, axis="y")
             self._update_placeholder("Plot cleared or waiting for data.")
-        self.canvas.draw_idle()
+            self.canvas.draw_idle()
 
     def clear_plot(self):
         self.times.clear()
         self.pressures.clear()
+        self.manual_xlim = None
         self.line.set_data([], [])
         self.ax.set_xlim(0, 10)
         if self.manual_ylim:
