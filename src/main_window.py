@@ -452,8 +452,13 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "File Error", str(e))
             return
 
-        base = os.path.join(folder, safe)
-        self.last_trial_basepath = folder
+        base = os.path.join(PRIM_RESULTS_DIR, safe)
+        self.last_trial_basepath = base
+
+        # Use fallback frame size since we have no live camera feed
+        from config import DEFAULT_FRAME_SIZE
+
+        w, h = DEFAULT_FRAME_SIZE
 
         ext_data = self.video_format_combobox.currentData()
         video_ext = ext_data.value() if isinstance(ext_data, QVariant) else ext_data
@@ -462,7 +467,7 @@ class MainWindow(QMainWindow):
         codec = DEFAULT_VIDEO_CODEC
 
         log.info(
-            f"Attempting to start recording: {base}, {DEFAULT_FPS} FPS, {w}x{h}, format: {video_ext}, codec: {codec}"
+            f"Attempting to start recording: {base}, {DEFAULT_FPS} FPS, {w}×{h}, format: {video_ext}, codec: {codec}"
         )
         try:
             if self._recording_worker and self._recording_worker.isRunning():
@@ -476,6 +481,7 @@ class MainWindow(QMainWindow):
             self._recording_worker = RecordingWorker(
                 basepath=base,
                 fps=DEFAULT_FPS,
+                # no camera, so use default frame size
                 frame_size=(w, h),
                 video_ext=video_ext,
                 video_codec=codec,
