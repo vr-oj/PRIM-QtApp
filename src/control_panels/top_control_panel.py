@@ -26,6 +26,7 @@ class TopControlPanel(QWidget):
     x_axis_limits_changed = pyqtSignal(float, float)
     y_axis_limits_changed = pyqtSignal(float, float)
     export_plot_image_requested = pyqtSignal()
+    clear_plot_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -64,6 +65,7 @@ class TopControlPanel(QWidget):
         self.plot_controls.export_plot_image_requested.connect(
             self.export_plot_image_requested
         )
+        self.plot_controls.clear_plot_requested.connect(self.clear_plot_requested)
 
     def update_connection_status(self, text: str, connected: bool):
         """

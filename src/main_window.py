@@ -64,6 +64,10 @@ class MainWindow(QMainWindow):
         self._build_main_toolbar()
         self._build_status_bar()
 
+        # Connect the new signal from TopControlPanel
+        if hasattr(self, "top_ctrl"):  # Ensure top_ctrl is initialized
+            self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
+
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION or '1.0'}")
         self.showMaximized()
         self.statusBar().showMessage("Ready. Select camera and serial port.", 5000)
