@@ -1,19 +1,17 @@
-# qtcamera_widget.py
 import logging
 import imagingcontrol4 as ic4  # For ic4.DeviceInfo
-from PyQt5.QtWidgets import QWidget, QVBoxLayout
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, QTimer
-from PyQt5.QtGui import QImage
+from PyQt5.QtGui import QImage, QPixmap
 
 from .sdk_camera_thread import SDKCameraThread
-from .gl_viewfinder import GLViewfinder
 
 log = logging.getLogger(__name__)
 
 
 class QtCameraWidget(QWidget):
     """
-    Displays live camera feed via SDKCameraThread using an OpenGL-based viewfinder.
+    Displays live camera feed via SDKCameraThread using a QLabel preview.
     Manages camera selection, resolution, and basic properties.
     """
 
@@ -53,8 +51,9 @@ class QtCameraWidget(QWidget):
         self._gain_timer.setInterval(100)
         self._gain_timer.timeout.connect(self._apply_pending_gain)
 
-        # OpenGL-based viewfinder widget
-        self.viewfinder = GLViewfinder(self)
+        # Simple QLabel-based viewfinder for now
+        self.viewfinder = QLabel(self)
+        self.viewfinder.setScaledContents(True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -73,7 +72,7 @@ class QtCameraWidget(QWidget):
                     log.warning("Camera thread did not stop gracefully; terminating.")
                     old.terminate()
             try:
-                old.frame_ready.disconnect(self._on_sdk_frame_received)
+                old.frame_ready.disconnect(self.update_frame)
                 old.camera_error.disconnect(self._on_camera_thread_error_received)
                 old.camera_resolutions_available.disconnect(
                     self.camera_resolutions_updated
@@ -117,36 +116,16 @@ class QtCameraWidget(QWidget):
         self._camera_thread.start()
 
     @pyqtSlot(QImage, object)
-    def update_frame(self, qimg, frame_data=None):
+    def update_frame(self, qimg: QImage, frame_data=None):
         """
-        Receive frames from SDKCameraThread, update viewfinder, and re-emit for recording.
+        Receive frames from SDKCameraThread, update QLabel preview, and re-emit for recording.
         """
-        log.debug(
-            f"[QtCameraWidget] update_frame called – valid? {bool(qimg) and not qimg.isNull()}"
-        )
-        self.viewfinder.update_frame(qimg)
-        self.frame_ready.emit(qimg, frame_data)
-
-    def _start_new_camera_thread(self):
-        if not self._active_device_info:
-            return
-        log.info(f"Starting SDKCameraThread for {self._active_device_info.model_name}")
-        self._camera_thread = SDKCameraThread(
-            device_info=self._active_device_info,
-            target_fps=self.current_target_fps,
-            parent=self,
-        )
-        # Wire signals
-        self._camera_thread.frame_ready.connect(self._on_sdk_frame_received)
-        self._camera_thread.camera_error.connect(self._on_camera_thread_error_received)
-        self._camera_thread.camera_resolutions_available.connect(
-            self.camera_resolutions_updated
-        )
-        self._camera_thread.camera_properties_updated.connect(
-            self.camera_properties_updated
-        )
-        self._camera_thread.finished.connect(self._on_camera_thread_finished)
-        self._camera_thread.start()
+        if qimg and not qimg.isNull():
+            pix = QPixmap.fromImage(qimg)
+            self.viewfinder.setPixmap(pix)
+            self.frame_ready.emit(qimg, frame_data)
+        else:
+            log.warning("Received null or invalid frame in update_frame")
 
     @pyqtSlot(str)
     def set_active_resolution_str(self, resolution_str: str):
@@ -186,7 +165,6 @@ class QtCameraWidget(QWidget):
 
     @pyqtSlot()
     def _apply_pending_exposure(self):
-        """Apply debounced exposure setting."""
         if self._camera_thread and self._exp_pending is not None:
             self._camera_thread.update_auto_exposure(False)
             self._camera_thread.update_exposure(self._exp_pending)
@@ -194,7 +172,6 @@ class QtCameraWidget(QWidget):
 
     @pyqtSlot()
     def _apply_pending_gain(self):
-        """Apply debounced gain setting."""
         if self._camera_thread and self._gain_pending is not None:
             self._camera_thread.update_gain(self._gain_pending)
         self._gain_pending = None
@@ -206,23 +183,10 @@ class QtCameraWidget(QWidget):
         if self._camera_thread and self._camera_thread.isRunning():
             self._camera_thread.update_roi(x, y, w, h)
 
-    @pyqtSlot(QImage, object)
-    def _on_sdk_frame_received(self, qimg: QImage, frame_data: object):
-        """Handle new frames: render in GLViewfinder and emit for recording."""
-        if qimg and not qimg.isNull():
-            self.viewfinder.update_frame(qimg)
-            self.frame_ready.emit(qimg, frame_data)
-        else:
-            log.warning("Received null frame from camera thread.")
-
     @pyqtSlot(str, str)
     def _on_camera_thread_error_received(self, message: str, code: str):
         log.error(f"Camera error: {message} (Code {code})")
         self.camera_error.emit(message, code)
-
-    @pyqtSlot()
-    def _on_camera_thread_finished(self):
-        log.info("Camera thread finished.")
 
     def current_camera_is_active(self) -> bool:
         """Return True if the SDK camera thread is alive and running."""
