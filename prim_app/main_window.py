@@ -4,6 +4,7 @@ import sys
 import logging
 import numpy as np
 import csv
+import imagingcontrol4 as ic4
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -33,6 +34,7 @@ from PyQt5.QtGui import QIcon, QKeySequence, QImage
 from ui.control_panels.top_control_panel import TopControlPanel
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
 from ui.canvas.gl_viewfinder import GLViewfinder
+from camera.setup_wizard import CameraSetupWizard
 from threads.serial_thread import SerialThread
 from threads.sdk_camera_thread import SDKCameraThread
 from recording import TrialRecorder, RecordingWorker
@@ -232,6 +234,11 @@ class MainWindow(QMainWindow):
         hm.addAction(about)
         hm.addAction("About &Qt", QApplication.instance().aboutQt)
 
+        # Camera menu
+        cam_menu = mb.addMenu("&Camera")
+        setup_cam_act = QAction("Setup Camera…", self, triggered=self._run_camera_setup)
+        cam_menu.addAction(setup_cam_act)
+
     def _build_main_toolbar(self):
         tb = QToolBar("Main Controls")
         tb.setObjectName("MainControlsToolbar")
@@ -276,6 +283,43 @@ class MainWindow(QMainWindow):
         self._app_session_timer = QTimer(self, interval=1000)
         self._app_session_timer.timeout.connect(self._update_app_session_time)
         self._app_session_timer.start()
+
+    def _run_camera_setup(self):
+        wizard = CameraSetupWizard(self)
+        if wizard.exec_() != QDialog.Accepted:
+            return
+
+        self.camera_settings = wizard.settings
+        cti = self.camera_settings.get("ctiPath")
+        # Initialize IC4 after CTI selection
+        try:
+            initialize_ic4_with_cti(cti)
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Camera Setup Error", f"Failed to initialize camera SDK:\n{e}"
+            )
+            return
+
+        # Teardown existing camera thread
+        if self.camera_thread:
+            self.camera_thread.stop()
+            self.camera_thread = None
+
+        # Launch new camera thread
+        pattern = self.camera_settings.get("cameraSerialPattern")
+        self.camera_thread = SDKCameraThread(device_name=pattern, fps=DEFAULT_FPS)
+        # Apply node settings if available
+        defaults = self.camera_settings.get("defaults", {})
+        advanced = self.camera_settings.get("advanced", {})
+        self.camera_thread.apply_node_settings(defaults)
+        self.camera_thread.apply_node_settings(advanced)
+        self.camera_thread.camera_error.connect(self._on_camera_error)
+        self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
+        self.camera_thread.start()
+
+        self.statusBar().showMessage(
+            f"Camera '{self.camera_settings.get('cameraModel')}' initialized", 5000
+        )
 
     def _set_initial_control_states(self):
         self.top_ctrl.update_connection_status("Disconnected", False)
@@ -713,9 +757,7 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Camera Error", f"{msg}\n(Code: {code})")
 
     def closeEvent(self, event):
-
-        log.info(f"Close event received. Recording active: {self._is_recording}")
-        # 2) Handle in-flight recording
+        # Prompt if recording
         if self._is_recording:
             reply = QMessageBox.question(
                 self,
@@ -731,37 +773,23 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
 
-        # 3) Clean up recording worker if still around
+        # Cleanup recording worker
         if self._recording_worker:
-            log.info("Cleaning up recording worker on application exit...")
-            if self._recording_worker.isRunning():
-                self._recording_worker.stop_worker()
-                if not self._recording_worker.wait(3000):
-                    log.warning(
-                        "Recording worker did not stop gracefully on exit, terminating."
-                    )
-                    self._recording_worker.terminate()
+            self._recording_worker.stop_worker()
+            self._recording_worker.wait(3000)
             self._recording_worker.deleteLater()
             self._recording_worker = None
 
-        # 4) Stop serial thread
+        # Cleanup serial thread
         if self._serial_thread and self._serial_thread.isRunning():
-            log.info("Stopping serial thread on application exit...")
             self._serial_thread.stop()
-            if not self._serial_thread.wait(2000):
-                log.warning(
-                    "Serial thread did not stop gracefully on exit, terminating."
-                )
-                self._serial_thread.terminate()
-                if not self._serial_thread.wait(500):  # Wait after terminate
-                    log.error("Serial thread failed to terminate.")
+            self._serial_thread.wait(2000)
             self._serial_thread.deleteLater()
             self._serial_thread = None
 
-        # ─── Tear down camera thread ────────────────────────────────────
-        if hasattr(self, "camera_thread"):
+        # Cleanup camera thread
+        if self.camera_thread:
             self.camera_thread.stop()
-        # ───────────────────────────────────────────────────────────────
+            self.camera_thread = None
 
-        log.info("Exiting application.")
         super().closeEvent(event)

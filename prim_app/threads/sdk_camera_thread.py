@@ -1,5 +1,3 @@
-# sdk_thread.py
-import imagingcontrol4 as ic4
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 
@@ -7,6 +5,7 @@ from PyQt5.QtGui import QImage
 class SDKCameraThread(QThread):
     """
     Thread to grab live frames from a DMK camera using IC Imaging Control 4.
+    Expects the GenTL producer to be loaded and ic4.Library initialized externally.
     Emits high-quality QImage frames and raw numpy arrays.
     """
 
@@ -24,12 +23,32 @@ class SDKCameraThread(QThread):
         self.device_name = device_name
         self.fps = fps
         self._stop_requested = False
+        self.grabber = None
+        self.ic4 = None
+
+    def apply_node_settings(self, settings: dict):
+        """
+        Apply camera node settings (defaults or advanced) to the open device.
+        """
+        if not self.grabber or not self.ic4:
+            return
+        for name, val in settings.items():
+            try:
+                prop_id = getattr(self.ic4.PropId, name)
+                self.grabber.device_property_map.set_value(prop_id, val)
+            except Exception as e:
+                self.camera_error.emit(f"Failed to set {name} → {val}: {e}", "")
 
     def run(self):
         try:
-            # Initialize the IC4 library
-            ic4.Library.init()
+            # Import IC4 after CTI and init have been done outside
+            import imagingcontrol4 as ic4
+
+            self.ic4 = ic4
+
+            # Create grabber
             grabber = ic4.Grabber()
+            self.grabber = grabber
 
             # Enumerate and open device
             devices = ic4.DeviceEnum.devices()
@@ -47,34 +66,34 @@ class SDKCameraThread(QThread):
 
             grabber.device_open(dev_info)
 
-            # Configure resolution and frame rate
+            # Configure frame rate
             prop_map = grabber.device_property_map
-            width = prop_map.get_value(ic4.PropId.WIDTH)
-            height = prop_map.get_value(ic4.PropId.HEIGHT)
-            prop_map.set_value(ic4.PropId.ACQUISITION_FRAME_RATE, self.fps)
+            try:
+                prop_map.set_value(ic4.PropId.ACQUISITION_FRAME_RATE, self.fps)
+            except Exception:
+                pass
 
             # Notify UI of current resolution
+            width = prop_map.get_value(ic4.PropId.WIDTH)
+            height = prop_map.get_value(ic4.PropId.HEIGHT)
             self.resolutions_updated.emit([f"{width}x{height}"])
 
-            # Set up a queue sink for continuous high-throughput streaming
+            # Setup high-throughput queue sink
             sink = ic4.QueueSink()
             grabber.stream_setup(
                 sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
             grabber.acquisition_start()
 
-            # Main loop: retrieve buffers and emit frames
+            # Streaming loop
             while not self._stop_requested:
                 try:
-                    buffer = sink.pop_output_buffer(1000)  # timeout in ms
-                except ic4.IC4Exception:
+                    buffer = sink.pop_output_buffer(1000)
+                except Exception:
                     continue
-
                 if buffer:
-                    # Create numpy view (no copy) of image data
                     arr = buffer.numpy_wrap()
-
-                    # Convert BGR to RGB if needed
+                    # Convert to QImage
                     if arr.ndim == 3 and arr.shape[2] == 3:
                         rgb = arr[..., ::-1]
                         qimg = QImage(
@@ -85,7 +104,6 @@ class SDKCameraThread(QThread):
                             QImage.Format_RGB888,
                         )
                     else:
-                        # Mono8 or single channel
                         mono = arr[..., 0] if arr.ndim == 3 else arr
                         qimg = QImage(
                             mono.data,
@@ -94,12 +112,10 @@ class SDKCameraThread(QThread):
                             mono.strides[0],
                             QImage.Format_Indexed8,
                         )
-
-                    # Emit a copy to decouple the buffer
                     self.frame_ready.emit(qimg.copy(), arr)
                     buffer.release()
 
-            # Tear down stream
+            # Teardown
             grabber.acquisition_stop()
             grabber.stream_stop()
             grabber.device_close()

@@ -1,3 +1,4 @@
+# setup_wizard.py
 import os
 import json
 from PyQt5.QtWidgets import (
