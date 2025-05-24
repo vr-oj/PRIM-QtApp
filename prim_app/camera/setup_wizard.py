@@ -26,7 +26,7 @@ from PyQt5.QtCore import Qt
 from utils.config import CAMERA_PROFILES_DIR
 
 # Import the camera profiling utilities (camera_profiler.py should be on sys.path)
-from camera_profiler import profile_camera, get_camera_node_map, test_capture
+from camera.camera_profiler import profile_camera, get_camera_node_map, test_capture
 
 
 class CTIPage(QWizardPage):
