@@ -6,11 +6,11 @@ class SDKCameraThread(QThread):
     """
     Thread to grab live frames from a DMK camera using IC Imaging Control 4.
     Expects the GenTL producer to be loaded and ic4.Library initialized externally.
-    Emits high-quality QImage frames.
+    Emits high-quality QImage frames and raw numpy arrays.
     """
 
-    # Emitted with the current QImage only
-    frame_ready = pyqtSignal(QImage)
+    # Emitted with the current QImage and raw numpy array
+    frame_ready = pyqtSignal(QImage, object)
     # Emitted when supported resolutions update
     resolutions_updated = pyqtSignal(list)
     # Emitted when camera properties (e.g. exposure, gain) update
@@ -93,7 +93,8 @@ class SDKCameraThread(QThread):
                             mono.strides[0],
                             QImage.Format_Indexed8,
                         )
-                    self.frame_ready.emit(qimg.copy())
+                    # Emit both image and array for downstream slots
+                    self.frame_ready.emit(qimg.copy(), arr)
                     buffer.release()
 
             grabber.acquisition_stop()
