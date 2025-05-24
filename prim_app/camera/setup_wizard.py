@@ -25,7 +25,7 @@ from PyQt5.QtCore import Qt
 # Camera profiles directory from config
 from utils.config import CAMERA_PROFILES_DIR
 
-# Import the camera profiling utilities (camera_profiler.py should be on sys.path)
+# Camera profiling utilities
 from camera.camera_profiler import profile_camera, get_camera_node_map, test_capture
 
 
@@ -198,4 +198,126 @@ class AdvancedSettingsPage(QWizardPage):
                 widget = QCheckBox()
                 widget.setChecked(info.get("current", False))
             if widget is not None:
-                label = QLab
+                label = QLabel(name)
+                self.layout.addWidget(label)
+                self.layout.addWidget(widget)
+                self.nodeWidgets[name] = widget
+
+    def validatePage(self):
+        adv = {}
+        for name, widget in self.nodeWidgets.items():
+            if isinstance(widget, QComboBox):
+                adv[name] = widget.currentText()
+            elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+                adv[name] = widget.value()
+            elif isinstance(widget, QCheckBox):
+                adv[name] = widget.isChecked()
+        self.wizard().settings["advanced"] = adv
+        return True
+
+
+class TestCapturePage(QWizardPage):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setTitle("Test Capture")
+        layout = QVBoxLayout()
+        self.infoLabel = QLabel(
+            "Click 'Test Capture' to apply settings and grab a test frame."
+        )
+        self.testBtn = QPushButton("Test Capture")
+        self.testBtn.clicked.connect(self.run_test)
+        layout.addWidget(self.infoLabel)
+        layout.addWidget(self.testBtn)
+        self.setLayout(layout)
+        self.tested = False
+
+    def run_test(self):
+        self.testBtn.setEnabled(False)
+        settings = {
+            **self.wizard().settings.get("defaults", {}),
+            **self.wizard().settings.get("advanced", {}),
+        }
+        try:
+            test_success = test_capture(
+                self.wizard().settings["ctiPath"],
+                self.wizard().settings["cameraModel"],
+                self.wizard().settings["cameraSerialPattern"],
+                settings,
+            )
+            if test_success:
+                self.infoLabel.setText(
+                    "Test capture succeeded! Settings applied correctly."
+                )
+                self.tested = True
+            else:
+                self.infoLabel.setText("Test capture failed. Please review settings.")
+        except Exception as e:
+            QMessageBox.critical(self, "Capture Error", str(e))
+        self.testBtn.setEnabled(True)
+
+    def validatePage(self):
+        if not getattr(self, "tested", False):
+            QMessageBox.warning(
+                self, "Not Tested", "Please perform a test capture before proceeding."
+            )
+            return False
+        return True
+
+
+class SummaryPage(QWizardPage):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setTitle("Save Camera Profile")
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("Profile Name:"))
+        self.nameEdit = QLineEdit()
+        layout.addWidget(self.nameEdit)
+        self.setLayout(layout)
+
+    def validatePage(self):
+        name = self.nameEdit.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Profile Name", "Please enter a profile name.")
+            return False
+        settings = self.wizard().settings
+        settings["profileName"] = name
+        profile = {
+            "profileName": name,
+            "ctiPath": settings["ctiPath"],
+            "model": settings["cameraModel"],
+            "serialPattern": settings["cameraSerialPattern"],
+            "defaults": settings.get("defaults", {}),
+            "advanced": settings.get("advanced", {}),
+        }
+        os.makedirs(CAMERA_PROFILES_DIR, exist_ok=True)
+        filename = f"{name.replace(' ', '_')}.json"
+        path = os.path.join(CAMERA_PROFILES_DIR, filename)
+        with open(path, "w") as f:
+            json.dump(profile, f, indent=4)
+        QMessageBox.information(
+            self, "Saved", f"Camera profile '{name}' saved to {path}."
+        )
+        return True
+
+
+class CameraSetupWizard(QWizard):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Camera Setup Wizard")
+        self.settings = {}
+        self.setWizardStyle(QWizard.ModernStyle)
+        self.addPage(CTIPage())
+        self.addPage(CameraScanPage())
+        self.addPage(DefaultsPage())
+        self.addPage(AdvancedSettingsPage())
+        self.addPage(TestCapturePage())
+        self.addPage(SummaryPage())
+
+
+if __name__ == "__main__":
+    import sys
+
+    app = QApplication(sys.argv)
+    wizard = CameraSetupWizard()
+    wizard.show()
+    sys.exit(app.exec_())
