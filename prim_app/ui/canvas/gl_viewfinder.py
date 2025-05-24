@@ -2,7 +2,7 @@
 import numpy as np
 from PyQt5.QtWidgets import QOpenGLWidget
 from PyQt5.QtCore import pyqtSlot, Qt
-from PyQt5.QtGui import QOpenGLShader, QOpenGLShaderProgram, QOpenGLTexture
+from PyQt5.QtGui import QOpenGLShader, QOpenGLShaderProgram, QOpenGLTexture, QImage
 from OpenGL import GL
 
 
