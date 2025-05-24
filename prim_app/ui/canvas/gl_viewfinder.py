@@ -61,7 +61,7 @@ class GLViewfinder(QOpenGLWidget):
     def resizeGL(self, w: int, h: int):
         GL.glViewport(0, 0, w, h)
 
-    @pyqtSlot(object)
+    @pyqtSlot(QImage, object)
     def update_frame(self, frame: np.ndarray):
         """
         Slot to receive raw numpy frame (H x W x C or H x W) from SDKCameraThread.
