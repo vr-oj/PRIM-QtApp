@@ -1,8 +1,14 @@
+# PRIM-QTAPP/prim_app/utils/config.py
 import os
+from pathlib import Path
+from PyQt5.QtCore import QStandardPaths, QDir
 
 # Base folders
 DOCUMENTS_DIR = os.path.join(os.path.expanduser("~"), "Documents")
 PRIM_RESULTS_DIR = os.path.join(DOCUMENTS_DIR, "PRIMAcquisition Results")
+
+# Ensure results directory exists
+Path(PRIM_RESULTS_DIR).mkdir(parents=True, exist_ok=True)
 
 # ─── Recording settings ─────────────────────────────────────────────────────────
 DEFAULT_VIDEO_EXTENSION = "avi"  # Default format for µManager recorder
@@ -37,8 +43,15 @@ PLOT_MAX_POINTS = 1000  # Max points to keep in live plot
 PLOT_DEFAULT_Y_MIN = -5
 PLOT_DEFAULT_Y_MAX = 30  # Typical pressure range in mmHg
 
-# ─── Camera profiles/resolutions ───────────────────────────────────────────────
-# These are example placeholders; actual resolutions are populated dynamically
+# ─── Camera profiles / Application config directory ─────────────────────────────
+# User-writable directory for storing camera profiles
+APP_CONFIG_DIR = QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)
+CAMERA_PROFILES_DIR = os.path.join(APP_CONFIG_DIR, "camera_profiles")
+
+# Ensure camera profiles directory exists
+QDir().mkpath(CAMERA_PROFILES_DIR)
+
+# ─── Camera resolutions placeholder (populated at runtime) ─────────────────────
 AVAILABLE_RESOLUTIONS = [
     "640x480",
     "800x600",

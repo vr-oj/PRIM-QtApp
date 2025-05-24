@@ -1,4 +1,4 @@
-# setup_wizard.py
+# PRIM-QTAPP/prim_app/camera/setup_wizard.py
 import os
 import json
 from PyQt5.QtWidgets import (
@@ -21,6 +21,9 @@ from PyQt5.QtWidgets import (
     QTextEdit,
 )
 from PyQt5.QtCore import Qt
+
+# Camera profiles directory from config
+from utils.config import CAMERA_PROFILES_DIR
 
 # Attempt relative import for camera_profiler, fallback to top-level
 try:
@@ -76,7 +79,7 @@ class CameraScanPage(QWizardPage):
     def scan_cameras(self):
         cti = self.wizard().settings.get("ctiPath")
         try:
-            cams = profile_camera(cti)  # returns list of dicts
+            cams = profile_camera(cti)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Camera scan failed:\n{e}")
             return
@@ -105,7 +108,6 @@ class DefaultsPage(QWizardPage):
         self.setLayout(self.layout)
 
     def initializePage(self):
-        # dynamic defaults based on common nodes
         self.layout.addWidget(QLabel("Exposure Auto:"))
         self.expAutoCombo = QComboBox()
         self.expAutoCombo.addItems(["Off", "Continuous"])
@@ -121,7 +123,6 @@ class DefaultsPage(QWizardPage):
         self.pixFmtCombo = QComboBox()
         self.layout.addWidget(self.pixFmtCombo)
 
-        # Populate PixelFormat options from camera
         nodes = get_camera_node_map(
             self.wizard().settings["ctiPath"],
             self.wizard().settings["cameraModel"],
@@ -130,7 +131,6 @@ class DefaultsPage(QWizardPage):
         for opt in nodes.get("PixelFormat", {}).get("options", []):
             self.pixFmtCombo.addItem(opt)
 
-        # ROI Width & Height
         self.layout.addWidget(QLabel("Width:"))
         self.widthSpin = QSpinBox()
         wmax = nodes.get("Width", {}).get("max", 10000)
@@ -292,10 +292,10 @@ class SummaryPage(QWizardPage):
             "defaults": settings.get("defaults", {}),
             "advanced": settings.get("advanced", {}),
         }
-        folder = os.path.join(os.getcwd(), "camera_profiles")
-        os.makedirs(folder, exist_ok=True)
+        # Save into user-writable config directory
+        os.makedirs(CAMERA_PROFILES_DIR, exist_ok=True)
         filename = f"{name.replace(' ', '_')}.json"
-        path = os.path.join(folder, filename)
+        path = os.path.join(CAMERA_PROFILES_DIR, filename)
         with open(path, "w") as f:
             json.dump(profile, f, indent=4)
         QMessageBox.information(
