@@ -22,8 +22,11 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 
-# Import your existing introspection logic here
-from camera_profiler import profile_camera, get_camera_node_map, test_capture
+# Attempt relative import for camera_profiler, fallback to top-level
+try:
+    from ..camera_profiler import profile_camera, get_camera_node_map, test_capture
+except ImportError:
+    from camera_profiler import profile_camera, get_camera_node_map, test_capture
 
 
 class CTIPage(QWizardPage):
@@ -124,21 +127,22 @@ class DefaultsPage(QWizardPage):
             self.wizard().settings["cameraModel"],
             self.wizard().settings["cameraSerialPattern"],
         )
-        pf_node = nodes.get("PixelFormat", {})
-        for opt in pf_node.get("options", []):
+        for opt in nodes.get("PixelFormat", {}).get("options", []):
             self.pixFmtCombo.addItem(opt)
 
         # ROI Width & Height
         self.layout.addWidget(QLabel("Width:"))
         self.widthSpin = QSpinBox()
-        self.widthSpin.setRange(1, nodes.get("Width", {}).get("max", 10000))
-        self.widthSpin.setValue(nodes.get("Width", {}).get("current", 0))
+        wmax = nodes.get("Width", {}).get("max", 10000)
+        self.widthSpin.setRange(1, wmax)
+        self.widthSpin.setValue(nodes.get("Width", {}).get("current", wmax))
         self.layout.addWidget(self.widthSpin)
 
         self.layout.addWidget(QLabel("Height:"))
         self.heightSpin = QSpinBox()
-        self.heightSpin.setRange(1, nodes.get("Height", {}).get("max", 10000))
-        self.heightSpin.setValue(nodes.get("Height", {}).get("current", 0))
+        hmax = nodes.get("Height", {}).get("max", 10000)
+        self.heightSpin.setRange(1, hmax)
+        self.heightSpin.setValue(nodes.get("Height", {}).get("current", hmax))
         self.layout.addWidget(self.heightSpin)
 
     def validatePage(self):
