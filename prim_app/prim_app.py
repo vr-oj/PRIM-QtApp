@@ -4,6 +4,9 @@ import os
 import re
 import traceback
 import logging
+from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
+from PyQt5.QtCore import Qt, QCoreApplication, QLoggingCategory
+from PyQt5.QtGui import QIcon
 
 # === IC4 Initialization Flags and Module Reference ===
 IC4_AVAILABLE = False
@@ -193,10 +196,6 @@ def initialize_ic4_with_cti(cti_path: str):
         # Optionally re-raise to propagate the error
         # raise
 
-
-from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
-from PyQt5.QtCore import Qt, QCoreApplication, QLoggingCategory
-from PyQt5.QtGui import QIcon
 
 # Configure logging from config.py if available
 try:
