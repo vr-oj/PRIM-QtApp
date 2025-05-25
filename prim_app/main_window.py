@@ -4,7 +4,6 @@ import sys
 import logging
 import numpy as np
 import csv
-import imagingcontrol4 as ic4
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -30,7 +29,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize, QThread
 from PyQt5.QtGui import QIcon, QKeySequence, QImage
 
-
+from prim_app import initialize_ic4_with_cti
 from ui.control_panels.top_control_panel import TopControlPanel
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
 from ui.canvas.gl_viewfinder import GLViewfinder
@@ -63,44 +62,30 @@ class MainWindow(QMainWindow):
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
-        # _build_central_widget_layout creates self.top_ctrl and self.pressure_plot_widget
         self._build_central_widget_layout()
         self._build_menus()
         self._build_main_toolbar()
         self._build_status_bar()
 
-        # --- Connect signals for plot controls ---
+        # Connect plot controls
         if hasattr(self, "top_ctrl") and hasattr(self, "pressure_plot_widget"):
-            # Connect manual X and Y axis limit changes
             self.top_ctrl.x_axis_limits_changed.connect(
                 self.pressure_plot_widget.set_manual_x_limits
             )
             self.top_ctrl.y_axis_limits_changed.connect(
                 self.pressure_plot_widget.set_manual_y_limits
             )
-
-            # Connect export plot image request (already present in your TopControlPanel)
             self.top_ctrl.export_plot_image_requested.connect(
                 self.pressure_plot_widget.export_as_image
             )
-
-            # Connect clear plot request (added in the previous step)
             self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
         else:
-            log.error(
-                "Could not connect plot control signals: top_ctrl or pressure_plot_widget not found."
-            )
+            log.error("Plot controls not found for signal connections.")
 
-        # ─── Camera integration ────────────────────────────────────────
+        # Camera view setup (start thread after CTI via setup wizard)
         self.camera_view = GLViewfinder(self)
-        # put it in the right-hand pane of your splitter
         self.main_splitter.insertWidget(1, self.camera_view)
-
-        self.camera_thread = SDKCameraThread(device_name=None, fps=DEFAULT_FPS)
-        self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
-        self.camera_thread.camera_error.connect(self._on_camera_error)
-        self.camera_thread.start()
-        # ───────────────────────────────────────────────────────────────
+        self.camera_thread = None  # Initialized in _run_camera_setup
 
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION or '1.0'}")
         self.showMaximized()
@@ -291,7 +276,6 @@ class MainWindow(QMainWindow):
 
         self.camera_settings = wizard.settings
         cti = self.camera_settings.get("ctiPath")
-        # Initialize IC4 after CTI selection
         try:
             initialize_ic4_with_cti(cti)
         except Exception as e:
@@ -308,13 +292,15 @@ class MainWindow(QMainWindow):
         # Launch new camera thread
         pattern = self.camera_settings.get("cameraSerialPattern")
         self.camera_thread = SDKCameraThread(device_name=pattern, fps=DEFAULT_FPS)
-        # Apply node settings if available
-        defaults = self.camera_settings.get("defaults", {})
-        advanced = self.camera_settings.get("advanced", {})
-        self.camera_thread.apply_node_settings(defaults)
-        self.camera_thread.apply_node_settings(advanced)
-        self.camera_thread.camera_error.connect(self._on_camera_error)
         self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
+        self.camera_thread.camera_error.connect(self._on_camera_error)
+        # Optionally log mode/property updates
+        self.camera_thread.resolutions_updated.connect(
+            lambda lst: log.info(f"Camera resolutions: {lst}")
+        )
+        self.camera_thread.properties_updated.connect(
+            lambda props: log.info(f"Camera properties: {props}")
+        )
         self.camera_thread.start()
 
         self.statusBar().showMessage(
