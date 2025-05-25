@@ -8,11 +8,10 @@ from PyQt5.QtGui import (
     QOpenGLTexture,
     QImage,
 )
-from PyQt5.QtOpenGL import QOpenGLFunctions
 from OpenGL import GL
 
 
-class GLViewfinder(QOpenGLWidget, QOpenGLFunctions):
+class GLViewfinder(QOpenGLWidget):
     """
     High-performance OpenGL viewfinder widget.
     Receives raw numpy frames and renders them via GPU texture.
@@ -27,7 +26,6 @@ class GLViewfinder(QOpenGLWidget, QOpenGLFunctions):
         self.setMinimumSize(320, 240)
 
     def initializeGL(self):
-        self.initializeOpenGLFunctions()  # Initialize QOpenGLFunctions
         # GL.glEnable(GL.GL_TEXTURE_2D) # Not strictly needed with modern shaders using samplers
 
         vert_src = b"""
