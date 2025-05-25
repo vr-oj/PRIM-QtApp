@@ -1,5 +1,8 @@
 # PRIM-QTAPP/prim_app/camera/camera_profiler.py
 import imagingcontrol4 as ic4
+import logging  # Add this
+
+module_log = logging.getLogger(__name__)  # Use a logger for debug messages
 
 
 def profile_camera(cti_path: str) -> list:
@@ -7,15 +10,21 @@ def profile_camera(cti_path: str) -> list:
     Discover available cameras via the given GenTL producer (.cti).
     Returns a list of dicts: [{'model': str, 'serial': str}, ...]
     """
-    # Load the CTI and initialize if not already done
+    module_log.info(f"Attempting to profile camera with CTI: {cti_path}")
+    module_log.info(f"Type of 'ic4' in camera_profiler: {type(ic4)}")
+    module_log.info(f"Type of 'ic4.Library' in camera_profiler: {type(ic4.Library)}")
+    module_log.info(
+        f"Attributes of 'ic4.Library' in camera_profiler: {dir(ic4.Library)}"
+    )
+
+    # The line below is where the error occurs
     ic4.Library.loadGenTLProducer(cti_path)
-    ic4.Library.init()
+    ic4.Library.init()  # This should be safe to call even if already initialized
 
     # Enumerate devices
     devices = ic4.DeviceEnum.devices()
     result = []
     for dev in devices:
-        # Many devices expose .model_name and .serial_number
         model = getattr(dev, "model_name", "") or getattr(dev, "display_name", "")
         serial = getattr(dev, "serial_number", "")
         result.append({"model": model, "serial": serial})
