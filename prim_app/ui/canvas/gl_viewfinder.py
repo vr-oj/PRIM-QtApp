@@ -7,8 +7,8 @@ from PyQt5.QtGui import (
     QOpenGLShaderProgram,
     QOpenGLTexture,
     QImage,
-    QOpenGLFunctions,
 )
+from PyQt5.QtOpenGL import QOpenGLFunctions
 from OpenGL import GL
 
 
