@@ -9,7 +9,6 @@ from PyQt5.QtCore import Qt, QCoreApplication, QLoggingCategory
 from PyQt5.QtGui import QIcon
 
 # === App Settings Import ===
-# Ensure utils.app_settings is created or integrated into utils.config
 try:
     from utils.app_settings import load_app_setting, SETTING_CTI_PATH
 
@@ -17,21 +16,25 @@ try:
 except ImportError:
     APP_SETTINGS_AVAILABLE = False
 
-    # Fallback if app_settings isn't available, though it's crucial for the new logic
     def load_app_setting(key, default=None):
         return default
 
     SETTING_CTI_PATH = "cti_path"
+    logging.getLogger("prim_app.setup").warning(
+        "utils.app_settings not found. CTI persistence will not work."
+    )
 
 
 # === IC4 Initialization Flags and Module Reference ===
-IC4_AVAILABLE = False
-IC4_INITIALIZED = False
-ic4_library_module = None
-_ic4_init_has_run_successfully_this_session = False  # Tracks if init() ever succeeded
+IC4_AVAILABLE = False  # Is the imagingcontrol4 module importable?
+IC4_LIBRARY_INITIALIZED = False  # Has ic4.Library.init() been successfully called?
+IC4_GENTL_SYSTEM_CONFIGURED = (
+    False  # Has a CTI path been successfully processed by GenTL?
+)
+ic4_library_module = None  # Holds the imported imagingcontrol4 module
 
 module_log = logging.getLogger("prim_app.setup")
-if not module_log.handlers:
+if not module_log.handlers:  # Ensure basic handler if not configured by main logger yet
     handler = logging.StreamHandler(sys.stdout)
     formatter = logging.Formatter(
         "%(asctime)s - %(levelname)s [%(name)s:%(lineno)d] - %(message)s"
@@ -41,51 +44,17 @@ if not module_log.handlers:
     module_log.setLevel(logging.INFO)
 
 
-def _initialize_ic4_globally():
-    """
-    Internal: initialize the IC Imaging Control library without specifying a CTI.
-    Generally, prefer using initialize_ic4_with_cti().
-    """
-    global IC4_AVAILABLE, IC4_INITIALIZED, ic4_library_module, _ic4_init_has_run_successfully_this_session
-
-    if _ic4_init_has_run_successfully_this_session and IC4_INITIALIZED:
-        module_log.debug("IC4 already initialized globally.")
-        return
-
-    module_log.info("Attempting generic IC4 global initialization...")
-    try:
-        if ic4_library_module is None:
-            import imagingcontrol4 as ic4
-
-            ic4_library_module = ic4
-        IC4_AVAILABLE = True
-        ic4_library_module.Library.init()
-        IC4_INITIALIZED = True
-        _ic4_init_has_run_successfully_this_session = True
-        module_log.info("ic4.Library.init() succeeded globally.")
-    except ImportError:
-        IC4_AVAILABLE = False
-        IC4_INITIALIZED = False
-        module_log.warning("imagingcontrol4 module not found during generic init.")
-    except Exception as e:
-        IC4_INITIALIZED = False
-        module_log.error(f"ic4.Library.init() failed globally: {e}")
-    finally:
-        module_log.info(
-            f"Global IC4 flags: AVAILABLE={IC4_AVAILABLE}, INITIALIZED={IC4_INITIALIZED}"
-        )
-
-
 def initialize_ic4_with_cti(cti_path: str):
     """
-    Load a GenTL producer (.cti) and initialize the IC4 library.
-    Call this once the user has selected or the app has discovered a CTI file.
+    Initializes the IC4 library and configures the GenTL system with the specified CTI file's path.
     """
-    global IC4_AVAILABLE, IC4_INITIALIZED, ic4_library_module, _ic4_init_has_run_successfully_this_session
-    module_log.info(f"Loading GenTL producer from CTI: {cti_path}")
+    global IC4_AVAILABLE, IC4_LIBRARY_INITIALIZED, IC4_GENTL_SYSTEM_CONFIGURED, ic4_library_module
+
+    module_log.info(f"Attempting to initialize IC4 with CTI: {cti_path}")
     if not os.path.exists(cti_path):
         module_log.error(f"CTI file not found at path: {cti_path}")
-        IC4_INITIALIZED = False  # Ensure it's false
+        IC4_LIBRARY_INITIALIZED = False  # Ensure flags reflect failure
+        IC4_GENTL_SYSTEM_CONFIGURED = False
         raise FileNotFoundError(f"CTI file not found: {cti_path}")
 
     try:
@@ -93,60 +62,126 @@ def initialize_ic4_with_cti(cti_path: str):
             import imagingcontrol4 as ic4
 
             ic4_library_module = ic4
-        # Load the CTI
-        ic4_library_module.Library.loadGenTLProducer(cti_path)
-        IC4_AVAILABLE = (
-            True  # If loadGenTLProducer succeeds, the module is definitely available
+        IC4_AVAILABLE = True  # Module is definitely available if import succeeds
+
+        # If Library.init() hasn't been called or was reset (e.g., after Library.exit()), call it.
+        if not IC4_LIBRARY_INITIALIZED:
+            module_log.info(
+                "Calling ic4.Library.init() as IC4_LIBRARY_INITIALIZED is False."
+            )
+            ic4_library_module.Library.init()
+            IC4_LIBRARY_INITIALIZED = (
+                True  # Mark that Library.init() is done for this "session"
+            )
+            module_log.info("ic4.Library.init() successful.")
+
+        # Configure the GenTL system with the CTI path's directory
+        cti_directory = os.path.dirname(cti_path)
+
+        # Ensure ic4.genicam.gentl module and System class exist
+        if (
+            not hasattr(ic4_library_module, "genicam")
+            or not hasattr(ic4_library_module.genicam, "gentl")
+            or not hasattr(ic4_library_module.genicam.gentl, "System")
+            or not hasattr(ic4_library_module.genicam.gentl.System, "instance")
+            or not hasattr(
+                ic4_library_module.genicam.gentl.System.instance(), "add_producer_path"
+            )
+        ):
+            module_log.error(
+                "ic4.genicam.gentl.System or add_producer_path not found. SDK structure might be different or incomplete."
+            )
+            IC4_GENTL_SYSTEM_CONFIGURED = False
+            # Even if Library.init() worked, CTI configuration failed, so effective camera init failed.
+            raise AttributeError(
+                "Required ic4.genicam.gentl.System.instance().add_producer_path API not found."
+            )
+
+        ic4_library_module.genicam.gentl.System.instance().add_producer_path(
+            cti_directory
         )
-        module_log.info(f"Loaded CTI: {cti_path}")
-        # Initialize the library
-        ic4_library_module.Library.init()
-        IC4_INITIALIZED = True
-        _ic4_init_has_run_successfully_this_session = True
-        module_log.info("IC4 Library.init() succeeded after CTI load.")
+        IC4_GENTL_SYSTEM_CONFIGURED = True  # Mark CTI path has been processed by GenTL
+        module_log.info(
+            f"Added GenTL producer path: {cti_directory}. IC4 system configured for CTI."
+        )
+        # Both flags (IC4_LIBRARY_INITIALIZED and IC4_GENTL_SYSTEM_CONFIGURED) must be true for camera operations.
+
     except ImportError:
+        module_log.error("imagingcontrol4 module could not be imported.")
         IC4_AVAILABLE = False
-        IC4_INITIALIZED = False
-        module_log.error("imagingcontrol4 module not found when trying to load CTI.")
-        raise  # Re-raise import error
+        IC4_LIBRARY_INITIALIZED = False
+        IC4_GENTL_SYSTEM_CONFIGURED = False
+        raise
+    except AttributeError as ae:
+        module_log.error(
+            f"AttributeError during IC4 CTI configuration for {cti_path}: {ae}. This indicates an API mismatch with the installed imagingcontrol4 version."
+        )
+        IC4_LIBRARY_INITIALIZED = True  # Library.init() might have succeeded
+        IC4_GENTL_SYSTEM_CONFIGURED = False  # But CTI configuration failed
+        raise
     except Exception as e:
-        IC4_INITIALIZED = False  # Explicitly set to False on failure
-        module_log.error(f"Failed to initialize IC4 with CTI {cti_path}: {e}")
-        raise  # Re-raise other exceptions
+        module_log.error(
+            f"Generic exception during IC4 CTI configuration for {cti_path}: {e}"
+        )
+        # State of flags might be uncertain, but CTI config likely failed.
+        IC4_GENTL_SYSTEM_CONFIGURED = False
+        # Re-set library initialized to false too, as full sequence failed.
+        # IC4_LIBRARY_INITIALIZED = False # Decide if Library.init() itself should be considered failed
+        raise
+
+
+# --- Combined Check ---
+def is_ic4_fully_initialized():
+    """Checks if both the IC4 library is init'd AND GenTL is configured with a CTI."""
+    return IC4_LIBRARY_INITIALIZED and IC4_GENTL_SYSTEM_CONFIGURED
 
 
 # Configure logging from utils.config if available
 try:
-    from utils.config import APP_NAME, LOG_LEVEL, APP_VERSION as CONFIG_APP_VERSION
-
-    root_logger = logging.getLogger()
-    for h in root_logger.handlers[:]:
-        root_logger.removeHandler(h)
-        h.close()
-
-    log_level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s - %(levelname)s [%(name)s:%(lineno)d] %(threadName)s - %(message)s",
-        force=True,
+    from utils.config import (
+        APP_NAME as CONFIG_APP_NAME,
+        LOG_LEVEL,
+        APP_VERSION as CONFIG_APP_VERSION,
     )
-    log = logging.getLogger(__name__)
-    log.info(f"Logging configured: {LOG_LEVEL.upper()}")
+
+    # Use a different name to avoid conflict with module-level APP_NAME if this file is also an entry point
+    # However, this prim_app.py is mostly a module now.
+    APP_NAME = CONFIG_APP_NAME  # Assign from config
+
+    root_logger = logging.getLogger()  # Get root logger
+    # Clear existing handlers from root logger only if necessary, be cautious
+    # for h in root_logger.handlers[:]:
+    #     root_logger.removeHandler(h)
+    #     h.close()
+
+    log_level_from_config = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
+    # Set basicConfig for the whole application if this is the first point of configuration
+    # The force=True might be problematic if other modules configure logging earlier.
+    # It's generally better to get the root logger and add handlers/set level.
+    logging.basicConfig(
+        level=log_level_from_config,
+        format="%(asctime)s - %(levelname)s [%(name)s:%(lineno)d] %(threadName)s - %(message)s",
+        force=True,  # This will remove and re-add handlers. Use with caution.
+    )
+    log = logging.getLogger(__name__)  # Logger for this module
+    log.info(f"Logging configured from utils.config: Level {LOG_LEVEL.upper()}")
 except ImportError:
-    APP_NAME = "PRIM Application"
-    CONFIG_APP_VERSION = "1.0"
-    log = logging.getLogger(__name__)
-    if not log.handlers:
+    APP_NAME = "PRIM Application (Default)"  # Default if config not found
+    CONFIG_APP_VERSION = "1.0d"
+    log = logging.getLogger(__name__)  # Logger for this module
+    if not log.handlers:  # Configure only if no handlers are set up yet
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s - %(levelname)s [%(name)s:%(lineno)d] %(threadName)s - %(message)s",
-            force=True,
         )
-    log.warning("utils.config not found: using defaults.")
+    log.warning(
+        "utils.config not found or APP_NAME not in it: using default logging and app name."
+    )
 
-# Suppress verbose logs
+
+# Suppress verbose logs from other libraries
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
-QLoggingCategory.setFilterRules("qt.qss.styleSheet=false")
+QLoggingCategory.setFilterRules("qt.qss.styleSheet=false")  # For Qt
 
 
 def load_processed_qss(path):
@@ -175,76 +210,75 @@ def load_processed_qss(path):
 
 def _cleanup_ic4():
     """Gracefully exit the IC4 library on application quit."""
-    global IC4_INITIALIZED, ic4_library_module
-    if IC4_INITIALIZED and ic4_library_module:
+    global IC4_LIBRARY_INITIALIZED, IC4_GENTL_SYSTEM_CONFIGURED, ic4_library_module
+    # Only attempt exit if Library.init() was called.
+    if IC4_LIBRARY_INITIALIZED and ic4_library_module:
         try:
             log.info("Exiting IC4 library...")
             ic4_library_module.Library.exit()
-            IC4_INITIALIZED = False
+            IC4_LIBRARY_INITIALIZED = False
+            IC4_GENTL_SYSTEM_CONFIGURED = False  # Reset this as well
             log.info("IC4 library exited.")
-        except RuntimeError as e:
-            log.warning(f"IC4 exit runtime error: {e}")
+        except RuntimeError as e:  # Catch specific IC4 runtime errors on exit
+            log.warning(f"IC4 library exit runtime error: {e}")
         except Exception as e:
-            log.error(f"Error during IC4 exit: {e}")
+            log.error(f"Error during IC4 library exit: {e}")
     else:
-        log.info("IC4 not initialized or module not available: skipping cleanup.")
+        log.info(
+            "IC4 library not initialized or module not available: skipping cleanup."
+        )
 
 
 def attempt_saved_ic4_init():
-    """Attempts to initialize IC4 with a saved CTI path."""
-    global IC4_INITIALIZED  # We will modify this global flag
+    """Attempts to initialize IC4 with a saved CTI path from app_settings."""
+    # Flags will be set by initialize_ic4_with_cti
     if not APP_SETTINGS_AVAILABLE:
         log.warning("App settings module not available. Cannot attempt saved IC4 init.")
-        IC4_INITIALIZED = False
         return
 
     saved_cti_path = load_app_setting(SETTING_CTI_PATH)
     if saved_cti_path and os.path.exists(saved_cti_path):
-        module_log.info(f"Attempting initialization with saved CTI: {saved_cti_path}")
+        module_log.info(
+            f"Found saved CTI path: {saved_cti_path}. Attempting initialization."
+        )
         try:
-            initialize_ic4_with_cti(
-                saved_cti_path
-            )  # This function will set IC4_INITIALIZED
-            if IC4_INITIALIZED:
+            initialize_ic4_with_cti(saved_cti_path)
+            if is_ic4_fully_initialized():
                 module_log.info(
                     f"Successfully initialized IC4 with saved CTI: {saved_cti_path}"
                 )
             else:
-                # This case means initialize_ic4_with_cti was called but failed internally
                 module_log.warning(
-                    f"Failed to initialize with saved CTI: {saved_cti_path}. User will be prompted if app continues."
+                    f"Failed to fully initialize with saved CTI: {saved_cti_path}. User may be prompted."
                 )
-        except (
-            Exception
-        ) as e:  # Catch exceptions from initialize_ic4_with_cti (e.g. FileNotFoundError or IC4 internal errors)
+        except Exception as e:
             module_log.error(
-                f"Error during saved CTI initialization for {saved_cti_path}: {e}. User will be prompted."
+                f"Error during saved CTI initialization for {saved_cti_path}: {e}. User may be prompted."
             )
-            IC4_INITIALIZED = False  # Ensure it's false
     else:
-        if saved_cti_path:  # Path was saved but doesn't exist
+        if saved_cti_path:
             module_log.warning(
-                f"Saved CTI path '{saved_cti_path}' not found. User will be prompted."
+                f"Saved CTI path '{saved_cti_path}' not found. User will be prompted by MainWindow."
             )
-        else:  # No CTI path saved at all
+        else:
             module_log.info(
                 "No saved CTI path found. User will be prompted by MainWindow."
             )
-        IC4_INITIALIZED = False
 
 
 def main_app_entry():
+    # Logging should be configured by now (either from config or defaults)
     log.info(
-        f"Starting main_app_entry: IC4_AVAILABLE={IC4_AVAILABLE}, IC4_INITIALIZED={IC4_INITIALIZED}"
+        f"Starting main_app_entry. Initial flags: IC4_AVAILABLE={IC4_AVAILABLE}, "
+        f"IC4_LIBRARY_INITIALIZED={IC4_LIBRARY_INITIALIZED}, IC4_GENTL_SYSTEM_CONFIGURED={IC4_GENTL_SYSTEM_CONFIGURED}"
     )
 
-    # Attempt to initialize IC4 with saved settings BEFORE creating QApplication and MainWindow
     attempt_saved_ic4_init()
     log.info(
-        f"After attempt_saved_ic4_init: IC4_AVAILABLE={IC4_AVAILABLE}, IC4_INITIALIZED={IC4_INITIALIZED}"
+        f"After attempt_saved_ic4_init: IC4_AVAILABLE={IC4_AVAILABLE}, "
+        f"IC4_LIBRARY_INITIALIZED={IC4_LIBRARY_INITIALIZED}, IC4_GENTL_SYSTEM_CONFIGURED={IC4_GENTL_SYSTEM_CONFIGURED}"
     )
 
-    # High-DPI support
     if hasattr(Qt, "AA_EnableHighDpiScaling"):
         QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     if hasattr(Qt, "AA_UseHighDpiPixmaps"):
@@ -252,56 +286,40 @@ def main_app_entry():
 
     app = QApplication(sys.argv)
 
-    # Application icon
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    ico = os.path.join(base_dir, "ui", "icons", "PRIM.ico")
-    png = os.path.join(base_dir, "ui", "icons", "PRIM.png")
+    # Correct icon path assuming 'ui/icons' is relative to this file's parent if prim_app.py is top-level,
+    # or relative to this file if it's in a subdirectory.
+    # If prim_app.py is in 'prim_app' directory, and icons in 'prim_app/ui/icons':
+    icon_path_base = os.path.join(base_dir, "ui", "icons")
+    ico = os.path.join(icon_path_base, "PRIM.ico")
+    png = os.path.join(icon_path_base, "PRIM.png")
+
     icon = QIcon()
     if os.path.exists(ico):
         icon.addFile(ico)
     elif os.path.exists(png):
         icon.addFile(png)
     else:
-        log.warning(f"Icon not found: {ico} or {png}")
+        log.warning(f"Application icon not found at {ico} or {png}")
     if not icon.isNull():
         app.setWindowIcon(icon)
 
-    # Note: MainWindow will handle prompting for CTI if IC4_INITIALIZED is still False.
-    # The generic warnings here are less critical now if MainWindow has specific handling.
-    if not IC4_INITIALIZED:  # This check is after attempt_saved_ic4_init
-        title = APP_NAME if "APP_NAME" in globals() else "Application"
-        if (
-            IC4_AVAILABLE
-        ):  # IC4 module is there, but not initialized (e.g. saved CTI failed)
-            log.warning(
-                "IC Imaging Control SDK is available but not initialized (e.g. saved CTI failed or no CTI saved). "
-                "MainWindow will attempt to guide the user."
-            )
-            # QMessageBox.warning( # This can be deferred to MainWindow logic
-            #     None,
-            #     f"{title} - Camera SDK Issue",
-            #     "IC Imaging Control SDK available but not initialized. "
-            #     "The application will guide you or use Setup Wizard to load a CTI.",
-            # )
-        elif not IC4_AVAILABLE and not os.environ.get(
-            "PRIM_APP_TESTING_NO_IC4"
-        ):  # Only show if not testing without IC4
-            QMessageBox.critical(
-                None,
-                f"{title} - Camera SDK Missing",
-                "imagingcontrol4 Python module not found. Camera functionality will be disabled. "
-                "Please install it (e.g., 'pip install imagingcontrol4').",
-            )
+    # MainWindow will handle specific CTI prompts.
+    # This generic warning is if the imagingcontrol4 module itself is missing.
+    if not IC4_AVAILABLE and not os.environ.get("PRIM_APP_TESTING_NO_IC4"):
+        QMessageBox.critical(
+            None,
+            f"{APP_NAME} - Camera SDK Missing",
+            "The 'imagingcontrol4' Python module was not found. Camera functionality will be disabled.\n"
+            "Please install it (e.g., 'pip install imagingcontrol4') and ensure it matches your camera's SDK version.",
+        )
 
-    # Global exception hook
     def custom_exception_handler(exc_type, value, tb):
         msg = "".join(traceback.format_exception(exc_type, value, tb))
         log.critical(f"UNCAUGHT EXCEPTION:\n{msg}")
-        # Ensure APP_NAME is available
-        app_title = APP_NAME if "APP_NAME" in globals() else "Application"
         dlg = QMessageBox(
             QMessageBox.Critical,
-            f"{app_title} - Critical Error",
+            f"{APP_NAME} - Critical Error",
             "An unhandled error occurred. Please check the logs for more details.",
             QMessageBox.Ok,
         )
@@ -310,8 +328,9 @@ def main_app_entry():
 
     sys.excepthook = custom_exception_handler
 
-    # Load stylesheet
-    style_path = os.path.join(base_dir, "style.qss")
+    style_path = os.path.join(
+        base_dir, "style.qss"
+    )  # Assuming style.qss is in the same dir as prim_app.py
     if os.path.exists(style_path):
         qss = load_processed_qss(style_path)
         if qss:
@@ -324,24 +343,24 @@ def main_app_entry():
         app.setStyle(QStyleFactory.create("Fusion"))
         log.info("No style.qss found: using Fusion.")
 
-    # Import and launch main window
-    # Moved import here to ensure prim_app.IC4_INITIALIZED is set before MainWindow init
-    from main_window import MainWindow
+    from main_window import MainWindow  # Import here after initializations
 
     main_win = MainWindow()
-    version = CONFIG_APP_VERSION if "CONFIG_APP_VERSION" in globals() else "Unknown"
-    main_win.setWindowTitle(f"{APP_NAME} v{version}")
+    # Use CONFIG_APP_VERSION which is expected to be from utils.config
+    version_to_display = (
+        CONFIG_APP_VERSION if "CONFIG_APP_VERSION" in globals() else "1.0"
+    )
+    main_win.setWindowTitle(f"{APP_NAME} v{version_to_display}")
     main_win.showMaximized()
     log.info("Main window shown.")
 
-    # Connect cleanup
-    # This check should reflect whether IC4 library was ever successfully used.
-    if _ic4_init_has_run_successfully_this_session:
+    # Connect cleanup only if Library.init() was ever successfully called.
+    if IC4_LIBRARY_INITIALIZED:  # Check if Library.init() was ever successful
         app.aboutToQuit.connect(_cleanup_ic4)
         log.info("IC4 cleanup function connected to app.aboutToQuit.")
     else:
         log.info(
-            "IC4 was not successfully initialized this session: skipping cleanup connect."
+            "IC4 library was not successfully initialized this session: skipping cleanup connect."
         )
 
     code = app.exec_()
@@ -350,14 +369,14 @@ def main_app_entry():
 
 
 if __name__ == "__main__":
+    # Basic logging for the launcher itself, before the main config kicks in
     launcher_log = logging.getLogger("prim_app_launcher")
     if not launcher_log.handlers:
         logging.basicConfig(
-            level=logging.INFO,  # Or DEBUG for more verbose launch
+            level=logging.INFO,
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         )
-    # This log is before any IC4 init attempt, so IC4_INITIALIZED will be its default False
     launcher_log.info(
-        f"Launching prim_app.py. Initial IC4_INITIALIZED={IC4_INITIALIZED}"
+        f"Launching prim_app.py. Initial global flags: IC4_LIBRARY_INITIALIZED={IC4_LIBRARY_INITIALIZED}, IC4_GENTL_SYSTEM_CONFIGURED={IC4_GENTL_SYSTEM_CONFIGURED}"
     )
     main_app_entry()
