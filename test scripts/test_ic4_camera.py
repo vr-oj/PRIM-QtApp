@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
-"""
-Simple test of IC4 camera live feed using the PySide6 DisplayWindow.
-"""
-
 import sys
-
 import imagingcontrol4 as ic4
-from imagingcontrol4.pyside6.display import DisplayWindow
 from PySide6.QtWidgets import QApplication
+from imagingcontrol4.pyside6.display import DisplayWindow
 
 
 def main():
     # 1) Initialize the IC4 library
-    ic4.Library.init()  # Raises on failure :contentReference[oaicite:0]{index=0}
+    ic4.Library.init()  # :contentReference[oaicite:0]{index=0}
 
-    # 2) Enumerate devices and pick the first one
+    # 2) Enumerate devices
     devices = ic4.DeviceEnum.devices()
     if not devices:
         print("No IC4-compatible cameras found.")
+        ic4.Library.exit()
         return
     dev = devices[0]
     print(
@@ -28,25 +24,27 @@ def main():
     grabber = ic4.Grabber()
     grabber.device_open(dev)
 
-    # 4) Start Qt and display window
+    # 4) Set up Qt application and OpenGL viewfinder
     app = QApplication(sys.argv)
     view = DisplayWindow()
     view.setWindowTitle("IC4 Live OpenGL Viewfinder")
     view.show()
 
-    # 5) Connect the stream to the window’s OpenGL display
-    disp = (
-        view.as_display()
-    )  # Returns an IC4 Display to pass to stream_setup :contentReference[oaicite:2]{index=2}
-    grabber.stream_setup(display=disp)
+    # 5) Hook the grabber’s stream to the OpenGL display and start acquisition
+    disp = view.as_display()
+    grabber.stream_setup(display=disp)  # :contentReference[oaicite:2]{index=2}
 
-    # 6) Run the Qt event loop
-    app.exec()
+    # 6) Enter the Qt event loop
+    exit_code = app.exec()
 
     # 7) Clean up
-    grabber.stream_stop()
-    grabber.device_close()
+    if grabber.is_streaming:
+        grabber.stream_stop()
+    if grabber.is_device_open:
+        grabber.device_close()
     ic4.Library.exit()
+
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
