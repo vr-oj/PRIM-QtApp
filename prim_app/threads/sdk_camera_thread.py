@@ -13,7 +13,8 @@ log = logging.getLogger(__name__)
 
 
 # Minimal Sink Listener
-class MinimalSinkListener(ic4.SinkListener):
+# CORRECTED BASE CLASS: ic4.QueueSinkListener
+class MinimalSinkListener(ic4.QueueSinkListener):
     def __init__(self, owner_name="DefaultListener"):
         super().__init__()
         self.owner_name = owner_name
@@ -34,20 +35,14 @@ def read_current(pm: ic4.PropertyMap, prop_identifier):
     Try each typed getter until one succeeds, return the first value or None.
     `prop_identifier` can be a PropId object or its string name (CamelCase/PascalCase).
     """
-    # If prop_identifier is already a Property object from pm.find(), it might have a .value
     if hasattr(prop_identifier, "value") and not isinstance(
         prop_identifier, (str, ic4.PropId)
-    ):  # Check if it's a Property object
+    ):
         try:
-            # Check type and return appropriately, or just try .value
-            # For simplicity, if it has .value, assume it's the correct type or a good representation
-            # log.debug(f"Reading current from Property object's .value for: {getattr(prop_identifier, 'name', prop_identifier)}")
             return prop_identifier.value
         except Exception as e_prop_val:
             log.debug(f"Could not read .value from Property object: {e_prop_val}")
-            # Fallback to pm.get_value_xxx
 
-    # If it's a PropId object or string name, use pm.get_value_xxx
     target_for_get = prop_identifier
 
     try:
@@ -80,21 +75,17 @@ class SDKCameraThread(QThread):
     fps_range_updated = pyqtSignal(float, float)
     exposure_range_updated = pyqtSignal(float, float)
     gain_range_updated = pyqtSignal(float, float)
-    auto_exposure_updated = pyqtSignal(bool)  # True if auto is ON, False if OFF
-    properties_updated = pyqtSignal(dict)  # Emits dict with UPPER_SNAKE_CASE keys
+    auto_exposure_updated = pyqtSignal(bool)
+    properties_updated = pyqtSignal(dict)
     camera_error = pyqtSignal(str, str)
 
-    _propid_map = {  # Maps UPPER_SNAKE_CASE string to actual ic4.PropId.XXX object
+    _propid_map = {
         name_upper_snake: getattr(ic4.PropId, name_upper_snake)
         for name_upper_snake in dir(ic4.PropId)
         if not name_upper_snake.startswith("_")
         and not callable(getattr(ic4.PropId, name_upper_snake))
-        and isinstance(
-            getattr(ic4.PropId, name_upper_snake), ic4.PropId
-        )  # Ensure it's a PropId instance
+        and isinstance(getattr(ic4.PropId, name_upper_snake), ic4.PropId)
     }
-    # Add a check for common PropId attributes if the above is too broad
-    # For example, known_prop_ids = ["ExposureTime", "Gain", ...]; map = {p: getattr(ic4.PropId, p) ...}
 
     def __init__(self, device_name=None, fps=10, parent=None):
         super().__init__(parent)
@@ -110,9 +101,7 @@ class SDKCameraThread(QThread):
             f"SDKCameraThread initialized for device_identifier: '{self.device_identifier}', target_fps: {self.target_fps}"
         )
 
-    def apply_node_settings(
-        self, settings: dict
-    ):  # Expects CamelCase keys from UI/config
+    def apply_node_settings(self, settings: dict):
         if not self.grabber or not self.pm:
             log.warning("Apply_node_settings called but grabber or pm not initialized.")
             return
@@ -132,8 +121,7 @@ class SDKCameraThread(QThread):
                 )
                 continue
 
-            # Get the correct GenICam feature name string from the PropId object
-            actual_feature_name = prop_id_obj.name  # e.g., "ExposureTime"
+            actual_feature_name = prop_id_obj.name
             if not actual_feature_name:
                 log.error(
                     f"PropId object for {pid_name_upper_snake} does not have a .name attribute."
@@ -145,9 +133,6 @@ class SDKCameraThread(QThread):
                     f"Attempting to set GenICam Feature '{actual_feature_name}' (from {pid_name_upper_snake}) to {val} (type: {type(val)})"
                 )
 
-                # For set_value, it's often best to pass the PropId object directly if the API supports it,
-                # or the correct string name if it expects that.
-                # Let's assume set_value takes the PropId object.
                 target_for_set_value = prop_id_obj
 
                 if pid_name_upper_snake == "PIXEL_FORMAT" and isinstance(val, str):
@@ -155,15 +140,12 @@ class SDKCameraThread(QThread):
                     if pixel_format_member is not None:
                         self.pm.set_value(target_for_set_value, pixel_format_member)
                     else:
-                        self.pm.set_value(
-                            target_for_set_value, val
-                        )  # Try string if enum member not found
+                        self.pm.set_value(target_for_set_value, val)
                 elif pid_name_upper_snake == "EXPOSURE_AUTO" and isinstance(val, str):
                     self.pm.set_value(target_for_set_value, val)
                 else:
                     self.pm.set_value(target_for_set_value, val)
 
-                # Read back using the PropId object
                 current_val_after_set = read_current(self.pm, prop_id_obj)
                 log.info(
                     f"Successfully set '{actual_feature_name}' to {val}, read back: {current_val_after_set}"
@@ -196,7 +178,6 @@ class SDKCameraThread(QThread):
                 raise RuntimeError("No camera devices found")
 
             target_device_info = None
-            # Device matching logic (seems okay from previous logs)
             if self.device_identifier:
                 for dev_info in all_devices:
                     current_serial = (
@@ -205,7 +186,7 @@ class SDKCameraThread(QThread):
                     current_unique_name = (
                         dev_info.unique_name if hasattr(dev_info, "unique_name") else ""
                     )
-                    current_model_name = dev_info.model_name  # Assumed to exist
+                    current_model_name = dev_info.model_name
                     if (
                         self.device_identifier == current_serial
                         or self.device_identifier == current_unique_name
@@ -236,7 +217,6 @@ class SDKCameraThread(QThread):
                 f"Device {target_device_info.model_name} opened. PropertyMap acquired."
             )
 
-            # Helper to query property details
             def query_property_details(
                 prop_key_upper_snake,
                 range_signal_emitter=None,
@@ -250,9 +230,7 @@ class SDKCameraThread(QThread):
                     )
                     return None
 
-                actual_feature_name = (
-                    prop_id_obj.name
-                )  # Get GenICam name (e.g. "ExposureTime")
+                actual_feature_name = prop_id_obj.name
                 if not actual_feature_name:
                     log.warning(
                         f"PropId object {prop_id_obj} for {prop_key_upper_snake} has no .name attribute."
@@ -261,14 +239,11 @@ class SDKCameraThread(QThread):
 
                 current_value = None
                 try:
-                    prop_item = self.pm.find(
-                        actual_feature_name
-                    )  # Find by correct GenICam string name
+                    prop_item = self.pm.find(actual_feature_name)
                     if prop_item is None:
                         log.warning(
                             f"GenICam Feature '{actual_feature_name}' (from {prop_key_upper_snake}) not found in PropertyMap via find()."
                         )
-                        # Try reading directly with PropId object as a fallback
                         current_value = read_current(self.pm, prop_id_obj)
                         if current_value is None:
                             log.warning(
@@ -278,10 +253,8 @@ class SDKCameraThread(QThread):
                         log.debug(
                             f"Read current value for {prop_key_upper_snake} using PropId object directly: {current_value}"
                         )
-                    else:  # Property item found
-                        current_value = (
-                            prop_item.value
-                        )  # Assuming .value gives the typed value
+                    else:
+                        current_value = prop_item.value
                         log.debug(
                             f"Property '{actual_feature_name}': Type={prop_item.type}, Value={current_value}"
                         )
@@ -305,17 +278,13 @@ class SDKCameraThread(QThread):
                                     list(prop_item.available_enumeration_names)
                                 )
 
-                    # Emit current value
-                    if (
-                        current_val_direct_emitter
-                    ):  # For single value signals like auto_exposure_updated
+                    if current_val_direct_emitter:
                         if prop_key_upper_snake == "EXPOSURE_AUTO" and isinstance(
                             current_value, str
                         ):
                             current_val_direct_emitter.emit(
                                 current_value.lower() != "off"
                             )
-                        # else: current_val_direct_emitter.emit(current_value) # If it takes various types
                     if properties_update_dict_emitter and current_value is not None:
                         properties_update_dict_emitter.emit(
                             {prop_key_upper_snake: current_value}
@@ -335,7 +304,6 @@ class SDKCameraThread(QThread):
                     )
                 return current_value
 
-            # Query initial property states and ranges
             query_property_details(
                 "ACQUISITION_FRAME_RATE",
                 self.fps_range_updated,
@@ -356,7 +324,7 @@ class SDKCameraThread(QThread):
                 None,
                 self.auto_exposure_updated,
                 self.properties_updated,
-            )  # auto_exposure_updated takes bool
+            )
             query_property_details(
                 "PIXEL_FORMAT",
                 self.pixel_formats_updated,
@@ -366,40 +334,32 @@ class SDKCameraThread(QThread):
             query_property_details("WIDTH", None, None, self.properties_updated)
             query_property_details("HEIGHT", None, None, self.properties_updated)
 
-            # Set initial FPS
             try:
                 prop_id_fps_obj = self._propid_map.get("ACQUISITION_FRAME_RATE")
                 if prop_id_fps_obj:
-                    prop_fps_item = self.pm.find(
-                        prop_id_fps_obj.name
-                    )  # Find by actual name
+                    prop_fps_item = self.pm.find(prop_id_fps_obj.name)
                     if prop_fps_item and prop_fps_item.is_writable:
-                        self.pm.set_value(
-                            prop_id_fps_obj, self.target_fps
-                        )  # Set using PropId obj
+                        self.pm.set_value(prop_id_fps_obj, self.target_fps)
                         log.info(
                             f"SDKCameraThread: Set initial FPS to {self.target_fps}"
                         )
                         self.properties_updated.emit(
                             {"ACQUISITION_FRAME_RATE": self.target_fps}
                         )
-            except Exception as e_fps_set:  # Catch broadly
+            except Exception as e_fps_set:
                 log.warning(
                     f"SDKCameraThread: Could not set initial FPS to {self.target_fps}: {e_fps_set}"
                 )
 
-            # --- CORRECTED QueueSink INITIALIZATION ---
             try:
-                self.sink = ic4.QueueSink(
-                    listener=self.sink_listener
-                )  # Provide the listener instance
+                self.sink = ic4.QueueSink(listener=self.sink_listener)
                 log.info("SDKCameraThread: QueueSink initialized with listener.")
             except Exception as e_sink:
                 log.error(f"Failed to initialize QueueSink: {e_sink}")
                 self.camera_error.emit(
                     f"QueueSink init error: {e_sink}", "SINK_INIT_ERROR"
                 )
-                raise  # Re-raise to stop the thread run method
+                raise
 
             log.debug("SDKCameraThread: Setting up stream...")
             self.grabber.stream_setup(
@@ -475,24 +435,20 @@ class SDKCameraThread(QThread):
             log.debug("SDKCameraThread.run() entering finally block for cleanup.")
             if self.grabber:
                 try:
-                    # --- CORRECTED BOOLEAN PROPERTY ACCESS ---
-                    if self.grabber.is_acquisition_active:  # Property, not method
+                    if self.grabber.is_acquisition_active:
                         log.debug("SDKCameraThread: Stopping acquisition...")
                         self.grabber.acquisition_stop()
                 except Exception as e_acq_stop:
                     log.error(f"Exception during acquisition_stop: {e_acq_stop}")
                 try:
-                    if self.grabber.is_device_open:  # Property, not method
+                    if self.grabber.is_device_open:
                         log.debug("SDKCameraThread: Closing device...")
                         self.grabber.device_close()
                 except Exception as e_dev_close:
                     log.error(f"Exception during device_close: {e_dev_close}")
             self.grabber = None
             self.pm = None
-            if hasattr(self, "sink") and self.sink:  # Clean up sink if it was created
-                # Sink unreferencing is usually handled by its __del__ if it has one,
-                # or by grabber.stream_stop() if that's used.
-                # For QueueSink, explicit cleanup might not be needed if grabber handles it.
+            if hasattr(self, "sink") and self.sink:
                 pass
             log.info("SDKCameraThread finished and cleaned up.")
 
