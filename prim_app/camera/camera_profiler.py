@@ -2,21 +2,20 @@
 import logging
 import imagingcontrol4 as ic4
 
-module_log = logging.getLogger(__name__)  # Use __name__ for logger
-_initialized_profiler = False  # Use a different flag name to avoid conflict if prim_app.py also has _initialized
+# from threads.sdk_camera_thread import to_prop_name # Not strictly needed if wizard provides CamelCase keys
+
+module_log = logging.getLogger(__name__)
+_initialized_profiler = False
+
+# It's better if SDKCameraThread's to_prop_name is in a utils file if shared
+# For now, if wizard gives CamelCase keys, test_capture will use them.
+# get_camera_node_map will use UPPER_SNAKE_CASE strings for querying.
 
 
-def _ensure_profiler_initialized():
+def _ensure_profiler_initialized():  # Keep this as is
     global _initialized_profiler
     if not _initialized_profiler:
         try:
-            # Library.init() should ideally be called only once per application run.
-            # Rely on prim_app.py to have initialized it.
-            # If this module is run standalone or if init status is uncertain,
-            # it might be needed here, but can cause "already called" issues.
-            # For now, assume it's initialized by the main app.
-            # ic4.Library.init()
-            # module_log.info("IC4 library initialized by camera_profiler (if not already by main app)")
             pass
         except RuntimeError as e:
             msg = str(e).lower()
@@ -26,17 +25,12 @@ def _ensure_profiler_initialized():
                 )
             else:
                 module_log.error(f"Error initializing IC4 library in profiler: {e}")
-                raise  # Re-raise if it's a different init error
-        _initialized_profiler = True  # Mark as checked/attempted by profiler
+                raise
+        _initialized_profiler = True
 
 
-def profile_camera() -> (
-    list
-):  # Renamed from profile_camera to avoid confusion if you have another one
-    """
-    Discover all IC4 cameras, returning [{'model': str, 'serial': str, 'unique_name': str}, ...].
-    """
-    _ensure_profiler_initialized()  # Ensures library is thought to be init by this module
+def profile_camera_devices() -> list:  # Renamed to avoid conflict
+    _ensure_profiler_initialized()
     devices_info_list = ic4.DeviceEnum.devices() or []
     cameras_found = []
     for dev_info in devices_info_list:
@@ -59,18 +53,11 @@ def profile_camera() -> (
 def get_camera_node_map(
     model_name_filter: str, serial_or_unique_name_filter: str
 ) -> dict:
-    """
-    Open the matching camera and return basic node "current" values and ranges/options.
-    Uses serial_or_unique_name_filter primarily, then model_name_filter as a weaker match.
-    """
     _ensure_profiler_initialized()
-
-    grabber = None  # Define grabber outside try to ensure it's in scope for finally
+    grabber = None
     try:
         all_devices = ic4.DeviceEnum.devices() or []
         target_device_info = None
-
-        # Try to find by serial or unique name first
         if serial_or_unique_name_filter:
             for dev_info in all_devices:
                 dev_serial = dev_info.serial if hasattr(dev_info, "serial") else ""
@@ -83,30 +70,23 @@ def get_camera_node_map(
                 ):
                     target_device_info = dev_info
                     break
-
-        # If not found by serial/unique, try by model name (less precise if multiple of same model)
         if not target_device_info and model_name_filter:
             for dev_info in all_devices:
                 if model_name_filter == dev_info.model_name:
                     target_device_info = dev_info
-                    module_log.warning(
-                        f"Found by model name '{model_name_filter}' as serial/unique ID did not match or was not provided."
-                    )
+                    module_log.warning(f"Found by model name '{model_name_filter}'.")
                     break
-
         if not target_device_info:
             raise RuntimeError(
-                f"Camera matching model '{model_name_filter}' and/or identifier '{serial_or_unique_name_filter}' not found."
+                f"Camera matching '{serial_or_unique_name_filter or model_name_filter}' not found."
             )
 
         grabber = ic4.Grabber()
         grabber.device_open(target_device_info)
         prop_map = grabber.device_property_map
-
         nodemap_details = {}
 
-        # Define properties of interest as strings (UPPER_SNAKE_CASE, matching ic4.PropId attribute names)
-        properties_to_query = [
+        properties_to_query = [  # UPPER_SNAKE_CASE string names
             "WIDTH",
             "HEIGHT",
             "PIXEL_FORMAT",
@@ -114,109 +94,101 @@ def get_camera_node_map(
             "EXPOSURE_AUTO",
             "GAIN",
             "ACQUISITION_FRAME_RATE",
-            # Add other common properties the wizard might need to display/configure
         ]
 
         for prop_string_name in properties_to_query:
-            prop_id_obj = getattr(
-                ic4.PropId, prop_string_name, None
-            )  # Get the actual PropId object
-            if not prop_id_obj:
-                module_log.warning(
-                    f"PropId constant '{prop_string_name}' not found in ic4.PropId."
-                )
-                continue
-
             entry = {}
             try:
+                prop_item = prop_map.find(prop_string_name)  # Find by string name
+                if prop_item is None:
+                    module_log.warning(
+                        f"Property '{prop_string_name}' not found in profiler via pm.find()."
+                    )
+                    continue
+
                 # Get current value
-                # Using a generic read_current like in SDKCameraThread might be better here
-                current_val = None
+                # Some properties might not have .value directly, or it might not be the best way
+                # A robust read_current function would be better here too.
                 try:
-                    current_val = prop_map.get_value_int(prop_id_obj)
-                except ic4.IC4Exception:
-                    try:
-                        current_val = prop_map.get_value_float(prop_id_obj)
-                    except ic4.IC4Exception:
-                        try:
-                            current_val = prop_map.get_value_str(prop_id_obj)
-                        except ic4.IC4Exception:
-                            try:
-                                current_val = prop_map.get_value_bool(prop_id_obj)
-                            except ic4.IC4Exception:
-                                module_log.debug(
-                                    f"Could not read current value for {prop_string_name}"
-                                )
-                if current_val is not None:
-                    entry["current"] = current_val
+                    if prop_item.type == ic4.PropertyType.INTEGER:
+                        entry["current"] = prop_item.value  # Assuming .value gives int
+                    elif prop_item.type == ic4.PropertyType.FLOAT:
+                        entry["current"] = (
+                            prop_item.value
+                        )  # Assuming .value gives float
+                    elif prop_item.type == ic4.PropertyType.BOOLEAN:
+                        entry["current"] = prop_item.value  # Assuming .value gives bool
+                    elif prop_item.type == ic4.PropertyType.ENUMERATION:
+                        entry["current"] = (
+                            prop_item.value
+                        )  # This is often the string value for enums
+                    elif prop_item.type == ic4.PropertyType.STRING:
+                        entry["current"] = prop_item.value
+                    else:
+                        entry["current"] = str(
+                            prop_item.value
+                        )  # Fallback to string representation
+                except Exception as e_val:
+                    module_log.debug(
+                        f"Could not read current value for {prop_string_name} via prop_item.value: {e_val}"
+                    )
 
-                # Get Min/Max for Integer/Float types
-                # Conceptual: Check property type first if API allows, e.g. prop_map.get_type(prop_id_obj)
-                try:
-                    entry["min"] = prop_map.get_min(prop_id_obj)
-                except ic4.IC4Exception:
-                    pass
-                try:
-                    entry["max"] = prop_map.get_max(prop_id_obj)
-                except ic4.IC4Exception:
-                    pass
-                try:
-                    entry["inc"] = prop_map.get_increment(prop_id_obj)  # If available
-                except ic4.IC4Exception:
-                    pass
+                if (
+                    prop_item.type == ic4.PropertyType.INTEGER
+                    or prop_item.type == ic4.PropertyType.FLOAT
+                ):
+                    if hasattr(prop_item, "min"):
+                        entry["min"] = prop_item.min
+                    if hasattr(prop_item, "max"):
+                        entry["max"] = prop_item.max
+                    if hasattr(prop_item, "increment"):
+                        entry["inc"] = prop_item.increment
 
-                # Get Options for Enumeration types (like PixelFormat, ExposureAuto)
-                # This requires knowing if it's an enum. The ic4 API might have a way to check property type.
-                # For now, we can hardcode checks for known enum properties.
-                if prop_string_name in [
-                    "PIXEL_FORMAT",
-                    "EXPOSURE_AUTO",
-                ]:  # Example known enums
-                    try:
-                        enum_entries = prop_map.get_available_enumeration_entry_names(
-                            prop_id_obj
-                        )
-                        entry["options"] = list(enum_entries)  # Convert tuple to list
-                    except ic4.IC4Exception as e_enum:
-                        module_log.debug(
-                            f"Could not get enum options for {prop_string_name}: {e_enum}"
-                        )
+                if prop_item.type == ic4.PropertyType.ENUMERATION:
+                    if hasattr(prop_item, "available_enumeration_names"):
+                        entry["options"] = list(prop_item.available_enumeration_names)
 
-                # Add type information if possible (conceptual, depends on PyIC4 API)
-                # try:
-                #     prop_instance = prop_map.find_property(prop_string_name) # Or find by PropId object
-                #     entry["type"] = str(prop_instance.type) # e.g. "IInteger", "IEnumeration"
-                # except: pass
+                # Storing the GenICam type string (e.g. "IInteger", "IEnumeration")
+                # The wizard's AdvancedSettingsPage uses this 'type' key.
+                # The actual PropertyType enum member might be more like ic4.PropertyType.INTEGER.
+                # We need to map ic4.PropertyType to the strings wizard expects, or change wizard.
+                # For simplicity, let's map some common ones.
+                type_mapping = {
+                    ic4.PropertyType.INTEGER: "IInteger",
+                    ic4.PropertyType.FLOAT: "IFloat",
+                    ic4.PropertyType.ENUMERATION: "IEnumeration",
+                    ic4.PropertyType.BOOLEAN: "IBoolean",
+                    ic4.PropertyType.COMMAND: "ICommand",  # Wizard doesn't handle command, but for completeness
+                    ic4.PropertyType.STRING: "IString",  # Wizard doesn't handle string, but for completeness
+                }
+                entry["type"] = type_mapping.get(prop_item.type, str(prop_item.type))
 
-                if entry:  # If we got any info for this property
-                    nodemap_details[prop_string_name] = entry  # Use string name as key
-
-            except (
-                Exception
-            ) as exc_prop_read:  # Catch all for safety during individual property query
+                if entry:
+                    nodemap_details[prop_string_name] = entry
+            except Exception as exc_prop_read:
                 module_log.warning(
-                    f"Failed reading details for property '{prop_string_name}': {exc_prop_read}"
+                    f"Failed reading details for property '{prop_string_name}' in profiler: {exc_prop_read}"
                 )
 
         return nodemap_details
     finally:
-        if grabber and grabber.is_device_open():
+        if grabber and grabber.is_device_open:  # Check property, not method
             grabber.device_close()
-        module_log.debug("get_camera_node_map finished and cleaned up grabber.")
+        module_log.debug(
+            "get_camera_node_map (profiler) finished and cleaned up grabber."
+        )
 
 
 def test_capture(
     model_name_filter: str, serial_or_unique_name_filter: str, settings_to_apply: dict
 ) -> bool:
-    """
-    Apply settings to the camera, grab one frame, return True on success.
-    """
     _ensure_profiler_initialized()
     grabber = None
     try:
         all_devices = ic4.DeviceEnum.devices() or []
         target_device_info = None
-        if serial_or_unique_name_filter:  # Prioritize serial/unique name
+        # Device matching logic (same as in get_camera_node_map)
+        if serial_or_unique_name_filter:
             for dev_info in all_devices:
                 dev_serial = dev_info.serial if hasattr(dev_info, "serial") else ""
                 dev_unique_name = (
@@ -228,7 +200,7 @@ def test_capture(
                 ):
                     target_device_info = dev_info
                     break
-        if not target_device_info and model_name_filter:  # Fallback to model name
+        if not target_device_info and model_name_filter:
             for dev_info in all_devices:
                 if model_name_filter == dev_info.model_name:
                     target_device_info = dev_info
@@ -244,50 +216,41 @@ def test_capture(
 
         # Apply settings: settings_to_apply keys are CamelCase from wizard
         for key_camel_case, val in settings_to_apply.items():
-            # Convert CamelCase key to UPPER_SNAKE_CASE to find PropId object
-            # This assumes wizard uses CamelCase keys matching what to_prop_name in SDKCameraThread expects
-            prop_name_upper_snake = SDKCameraThread.to_prop_name(
+            # Convert CamelCase key to UPPER_SNAKE_CASE to find PropId object or use as string name
+            prop_name_upper_snake = to_prop_name(
                 key_camel_case
-            )  # Use to_prop_name from SDK thread
-            prop_id_obj = getattr(ic4.PropId, prop_name_upper_snake, None)
+            )  # Using to_prop_name from SDKCameraThread (needs import or move)
 
-            if prop_id_obj:
-                try:
-                    module_log.debug(
-                        f"TestCapture: Setting {prop_name_upper_snake} to {val}"
-                    )
-                    if prop_name_upper_snake == "PIXEL_FORMAT" and isinstance(val, str):
-                        pixel_format_member = getattr(ic4.PixelFormat, val, None)
-                        if pixel_format_member:
-                            prop_map.set_value(prop_id_obj, pixel_format_member)
-                        else:
-                            prop_map.set_value(prop_id_obj, val)  # Try string
-                    elif prop_name_upper_snake == "EXPOSURE_AUTO" and isinstance(
-                        val, str
-                    ):
-                        prop_map.set_value(prop_id_obj, val)
+            # Use the string name for set_value, assuming it's accepted or PropId object from map if available
+            # For simplicity, let's assume set_value can take string names if PropId obj isn't easily available here.
+            # A more robust way would be to use the same _propid_map logic as SDKCameraThread.
+            target_for_set_value = prop_name_upper_snake
+
+            try:
+                module_log.debug(
+                    f"TestCapture: Setting {target_for_set_value} to {val}"
+                )
+                if prop_name_upper_snake == "PIXEL_FORMAT" and isinstance(val, str):
+                    pixel_format_member = getattr(ic4.PixelFormat, val, None)
+                    if pixel_format_member:
+                        prop_map.set_value(target_for_set_value, pixel_format_member)
                     else:
-                        prop_map.set_value(prop_id_obj, val)
-                except Exception as se:
-                    module_log.warning(
-                        f"TestCapture: Could not set {prop_name_upper_snake} to {val}: {se}"
-                    )
-            else:
+                        prop_map.set_value(target_for_set_value, val)
+                elif prop_name_upper_snake == "EXPOSURE_AUTO" and isinstance(val, str):
+                    prop_map.set_value(target_for_set_value, val)
+                else:
+                    prop_map.set_value(target_for_set_value, val)
+            except Exception as se:
                 module_log.warning(
-                    f"TestCapture: PropId for '{prop_name_upper_snake}' (from '{key_camel_case}') not found."
+                    f"TestCapture: Could not set {target_for_set_value} to {val}: {se}"
                 )
 
-        sink = ic4.SnapSink()  # For a single frame
-        grabber.stream_setup(
-            sink
-        )  # Default ACQUISITION_START often implied or not needed for SnapSink
-
+        sink = ic4.SnapSink()
+        grabber.stream_setup(sink)
         ok = False
         try:
-            # SnapSink typically does not need acquisition_start explicitly
-            # grabber.acquisition_start()
-            buf = sink.snap_single(timeout_ms=2000)  # Snap single image with timeout
-            if buf and buf.is_valid:  # Check if buffer is valid
+            buf = sink.snap_single(timeout_ms=2000)
+            if buf and buf.is_valid:
                 ok = True
                 buf.release()
                 module_log.info("TestCapture: Frame acquired successfully.")
@@ -302,12 +265,12 @@ def test_capture(
         if grabber:
             if (
                 hasattr(grabber, "is_acquisition_active")
-                and grabber.is_acquisition_active()
-            ):  # Check if attribute exists
+                and grabber.is_acquisition_active
+            ):  # property
                 try:
                     grabber.acquisition_stop()
                 except:
-                    pass  # Best effort
-            if grabber.is_device_open():
+                    pass
+            if grabber.is_device_open:  # property
                 grabber.device_close()
         module_log.debug("test_capture finished and cleaned up grabber.")
