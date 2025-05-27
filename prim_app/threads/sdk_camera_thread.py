@@ -230,8 +230,8 @@ class SDKCameraThread(QThread):
                 try:
                     # Pop buffer with a timeout to allow checking _stop_requested flag
                     buf = self.sink.pop_output_buffer(
-                        timeout_ms=20
-                    )  # Timeout in milliseconds
+                        20
+                    )  # Pass timeout as a positional argument (milliseconds)
                     if (
                         not buf
                     ):  # Timeout occurred, or other non-error reason for no buffer
