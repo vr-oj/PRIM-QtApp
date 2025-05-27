@@ -8,6 +8,17 @@ from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication, QLoggingCategory
 from PyQt5.QtGui import QIcon
 
+# Move module_log initialization earlier
+module_log = logging.getLogger("prim_app.setup")
+if not module_log.handlers:  # Ensure basic handler if not configured by main logger yet
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s [%(name)s:%(lineno)d] - %(message)s"
+    )
+    handler.setFormatter(formatter)
+    module_log.addHandler(handler)
+    module_log.setLevel(logging.INFO)
+
 # === App Settings Import ===
 try:
     from utils.app_settings import load_app_setting, save_app_setting, SETTING_CTI_PATH
@@ -20,9 +31,8 @@ except ImportError:
         return default
 
     SETTING_CTI_PATH = "cti_path"
-    logging.getLogger("prim_app.setup").warning(
-        "utils.app_settings not found. CTI persistence will not work."
-    )
+    # Use the now defined module_log
+    module_log.warning("utils.app_settings not found. CTI persistence will not work.")
 
 # === IC4 library import & availability flag ===
 try:
@@ -30,22 +40,24 @@ try:
 
     IC4_AVAILABLE = True
     ic4_library_module = ic4
-    module_log.info("imagingcontrol4 module imported successfully")
+    # Use the now defined module_log
+    module_log.info(
+        "imagingcontrol4 module imported successfully"
+    )  # This is the original line 33
 except ImportError:
     IC4_AVAILABLE = False
     ic4_library_module = None
+    # Use the now defined module_log
     module_log.error(
         "Could not import imagingcontrol4 — camera functionality will be disabled."
     )
 
 
 # === IC4 Initialization Flags and Module Reference ===
-IC4_AVAILABLE = False  # Is the imagingcontrol4 module importable?
-IC4_LIBRARY_INITIALIZED = False  # Has ic4.Library.init() been successfully called?
-IC4_GENTL_SYSTEM_CONFIGURED = (
-    False  # Has a CTI path been successfully processed by GenTL?
-)
-ic4_library_module = None  # Holds the imported imagingcontrol4 module
+IC4_AVAILABLE = False  # This line seems redundant given the try/except block above setting it. Consider reviewing.
+IC4_LIBRARY_INITIALIZED = False
+IC4_GENTL_SYSTEM_CONFIGURED = False
+ic4_library_module = None  # This line also seems redundant.
 
 module_log = logging.getLogger("prim_app.setup")
 if not module_log.handlers:  # Ensure basic handler if not configured by main logger yet
