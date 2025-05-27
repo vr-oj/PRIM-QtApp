@@ -22,8 +22,12 @@ class MinimalSinkListener(ic4.QueueSinkListener):
     def frame_ready(self, sink: ic4.QueueSink, buffer: ic4.ImageBuffer, userdata: any):
         pass  # Frame processing is handled by popping buffer in the thread's loop
 
-    def frames_queued(self, sink: ic4.QueueSink, userdata: any):
-        pass
+    def frames_queued(self, sink: ic4.QueueSink):  # REMOVE 'userdata'
+        log.debug(
+            f"Listener '{self.owner_name}': Frames queued for {sink}."
+        )  # Optional: uncomment for debugging
+
+    pass
 
     def sink_connected(
         self, sink: ic4.QueueSink, image_type_proposed: ic4.ImageType, userdata: any
@@ -244,12 +248,12 @@ class SDKCameraThread(QThread):
                         continue
 
                     # Minimal buffer validation (optional, but good practice)
-                    if not buf.is_valid:
-                        log.warning(
-                            "Popped an invalid buffer. Releasing and continuing."
-                        )
-                        buf.release()
-                        continue
+                    # if not buf.is_valid:
+                    #    log.warning(
+                    #        "Popped an invalid buffer. Releasing and continuing."
+                    #    )
+                    #    buf.release()
+                    #    continue
 
                     # Access numpy array from buffer
                     arr = (
