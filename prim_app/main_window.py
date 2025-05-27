@@ -719,87 +719,14 @@ class MainWindow(QMainWindow):
         cam_menu.addAction(change_cti_act)
 
     def _change_cti_file(self):
-        if self.camera_thread and self.camera_thread.isRunning():
-            QMessageBox.warning(
-                self, "Camera Active", "Stop camera stream before changing CTI."
-            )
+        cti_path, _ = QFileDialog.getOpenFileName(self, "Select CTI File", "", "*.cti")
+        if not cti_path:
             return
-
-        current_cti = load_app_setting(SETTING_CTI_PATH, "")
-        suggested_dir = (
-            os.path.dirname(current_cti)
-            if current_cti and os.path.exists(current_cti)
-            else ""
-        )
-        cti_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select New GenTL Producer (.cti)",
-            suggested_dir,
-            "CTI Files (*.cti);;All Files (*)",
-        )
-
-        if cti_path and os.path.exists(cti_path):
-            if (
-                os.path.normpath(cti_path) == os.path.normpath(current_cti)
-                and is_ic4_fully_initialized()
-            ):
-                QMessageBox.information(
-                    self, "CTI Unchanged", "Selected CTI is already loaded."
-                )
-                return
-
-            if prim_app.IC4_LIBRARY_INITIALIZED and prim_app.ic4_library_module:
-                try:
-                    log.info("Exiting IC4 library before changing CTI...")
-                    prim_app.ic4_library_module.Library.exit()
-                    prim_app.IC4_LIBRARY_INITIALIZED = False
-                    prim_app.IC4_GENTL_SYSTEM_CONFIGURED = False
-                    log.info("IC4 library exited.")
-                except Exception as e:
-                    log.error(f"Error exiting IC4 library: {e}")
-                    QMessageBox.critical(
-                        self,
-                        "CTI Change Error",
-                        f"Could not unload previous CTI: {e}. Restart app.",
-                    )
-                    return
-            else:
-                prim_app.IC4_LIBRARY_INITIALIZED = False
-                prim_app.IC4_GENTL_SYSTEM_CONFIGURED = False
-
-            try:
-                initialize_ic4_with_cti(cti_path)
-                if is_ic4_fully_initialized():
-                    save_app_setting(SETTING_CTI_PATH, cti_path)
-                    save_app_setting(SETTING_LAST_PROFILE_NAME, None)
-                    save_app_setting(SETTING_LAST_CAMERA_SERIAL, None)
-                    if self.camera_panel:
-                        self.camera_panel.setEnabled(False)
-                    QMessageBox.information(
-                        self,
-                        "CTI Changed",
-                        f"GenTL Producer: {os.path.basename(cti_path)}\nUse 'Camera > Setup Camera...'.",
-                    )
-                    self.statusBar().showMessage(
-                        f"CTI changed: {os.path.basename(cti_path)}", 5000
-                    )
-                else:
-                    QMessageBox.critical(
-                        self,
-                        "CTI Load Error",
-                        f"Failed to init with new CTI: {os.path.basename(cti_path)}. Previous CTI (if any) inactive.",
-                    )
-            except Exception as e:
-                QMessageBox.critical(
-                    self,
-                    "CTI Exception",
-                    f"Error loading new CTI {os.path.basename(cti_path)}: {e}",
-                )
-                log.exception(f"Exception changing CTI to '{cti_path}'.")
-        elif cti_path:
-            QMessageBox.warning(
-                self, "File Not Found", f"Selected CTI file not found: {cti_path}"
-            )
+        try:
+            initialize_ic4_with_cti(cti_path)
+            QMessageBox.information(self, "CTI Loaded", f"Loaded CTI:\n{cti_path}")
+        except Exception as exc:
+            QMessageBox.critical(self, "CTI Exception", str(exc))
 
     def _build_main_toolbar(self):
         tb = QToolBar("Main Controls")

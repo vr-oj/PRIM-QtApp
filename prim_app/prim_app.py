@@ -10,7 +10,7 @@ from PyQt5.QtGui import QIcon
 
 # === App Settings Import ===
 try:
-    from utils.app_settings import load_app_setting, SETTING_CTI_PATH
+    from utils.app_settings import load_app_setting, SETTING_CTI_PATH, save_app_setting
 
     APP_SETTINGS_AVAILABLE = True
 except ImportError:
