@@ -46,88 +46,29 @@ if not module_log.handlers:  # Ensure basic handler if not configured by main lo
 
 def initialize_ic4_with_cti(cti_path: str):
     """
-    Initializes the IC4 library and configures the GenTL system with the specified CTI file's path.
+    Initialize IC4 by handing the CTI path directly to Library.init(),
+    then mark IC4_AVAILABLE=True so MainWindow will enable camera features.
     """
-    global IC4_AVAILABLE, IC4_LIBRARY_INITIALIZED, IC4_GENTL_SYSTEM_CONFIGURED, ic4_library_module
+    # 1) Persist your choice so on next launch you don’t get prompted again
+    save_app_setting(SETTING_CTI_PATH, cti_path)
 
-    module_log.info(f"Attempting to initialize IC4 with CTI: {cti_path}")
-    if not os.path.exists(cti_path):
-        module_log.error(f"CTI file not found at path: {cti_path}")
-        IC4_LIBRARY_INITIALIZED = False  # Ensure flags reflect failure
-        IC4_GENTL_SYSTEM_CONFIGURED = False
-        raise FileNotFoundError(f"CTI file not found: {cti_path}")
-
+    # 2) Call Library.init with the CTI path
     try:
-        if ic4_library_module is None:
-            import imagingcontrol4 as ic4
-
-            ic4_library_module = ic4
-        IC4_AVAILABLE = True  # Module is definitely available if import succeeds
-
-        # If Library.init() hasn't been called or was reset (e.g., after Library.exit()), call it.
-        if not IC4_LIBRARY_INITIALIZED:
-            module_log.info(
-                "Calling ic4.Library.init() as IC4_LIBRARY_INITIALIZED is False."
-            )
-            ic4_library_module.Library.init()
-            IC4_LIBRARY_INITIALIZED = (
-                True  # Mark that Library.init() is done for this "session"
-            )
-            module_log.info("ic4.Library.init() successful.")
-
-        # Configure the GenTL system with the CTI path's directory
-        cti_directory = os.path.dirname(cti_path)
-
-        # Ensure ic4.genicam.gentl module and System class exist
-        if (
-            not hasattr(ic4_library_module, "genicam")
-            or not hasattr(ic4_library_module.genicam, "gentl")
-            or not hasattr(ic4_library_module.genicam.gentl, "System")
-            or not hasattr(ic4_library_module.genicam.gentl.System, "instance")
-            or not hasattr(
-                ic4_library_module.genicam.gentl.System.instance(), "add_producer_path"
-            )
-        ):
-            module_log.error(
-                "ic4.genicam.gentl.System or add_producer_path not found. SDK structure might be different or incomplete."
-            )
-            IC4_GENTL_SYSTEM_CONFIGURED = False
-            # Even if Library.init() worked, CTI configuration failed, so effective camera init failed.
-            raise AttributeError(
-                "Required ic4.genicam.gentl.System.instance().add_producer_path API not found."
-            )
-
-        ic4_library_module.genicam.gentl.System.instance().add_producer_path(
-            cti_directory
-        )
-        IC4_GENTL_SYSTEM_CONFIGURED = True  # Mark CTI path has been processed by GenTL
-        module_log.info(
-            f"Added GenTL producer path: {cti_directory}. IC4 system configured for CTI."
-        )
-        # Both flags (IC4_LIBRARY_INITIALIZED and IC4_GENTL_SYSTEM_CONFIGURED) must be true for camera operations.
-
-    except ImportError:
-        module_log.error("imagingcontrol4 module could not be imported.")
-        IC4_AVAILABLE = False
-        IC4_LIBRARY_INITIALIZED = False
-        IC4_GENTL_SYSTEM_CONFIGURED = False
-        raise
-    except AttributeError as ae:
-        module_log.error(
-            f"AttributeError during IC4 CTI configuration for {cti_path}: {ae}. This indicates an API mismatch with the installed imagingcontrol4 version."
-        )
-        IC4_LIBRARY_INITIALIZED = True  # Library.init() might have succeeded
-        IC4_GENTL_SYSTEM_CONFIGURED = False  # But CTI configuration failed
-        raise
+        # In 1.3.x this will load that single CTI file (no need for gentl.System calls)
+        ic4.Library.init(cti_path)
+        log.info(f"IC4.Library.init({cti_path!r}) succeeded")
     except Exception as e:
-        module_log.error(
-            f"Generic exception during IC4 CTI configuration for {cti_path}: {e}"
-        )
-        # State of flags might be uncertain, but CTI config likely failed.
-        IC4_GENTL_SYSTEM_CONFIGURED = False
-        # Re-set library initialized to false too, as full sequence failed.
-        # IC4_LIBRARY_INITIALIZED = False # Decide if Library.init() itself should be considered failed
+        log.error(f"Failed to init IC4 with CTI {cti_path!r}: {e}")
+        # bubble up so you still get the dialog
         raise
+
+    # 3) Flip your flags so MainWindow knows everything is good
+    global IC4_LIBRARY_INITIALIZED, IC4_GENTL_SYSTEM_CONFIGURED, IC4_AVAILABLE
+    IC4_LIBRARY_INITIALIZED = True
+    IC4_GENTL_SYSTEM_CONFIGURED = (
+        True  # we don’t need gentl.System anymore, but you can keep this flag
+    )
+    IC4_AVAILABLE = True
 
 
 # --- Combined Check ---
