@@ -49,9 +49,17 @@ def get_camera_node_map(model: str, serial_pattern: str) -> dict:
     grabber = ic4.Grabber()
     try:
         devs = ic4.DeviceEnum.devices()
-        dev = next(
-            (x for x in devs if serial_pattern in getattr(x, "serial_number", "")), None
-        )
+        # match by serial if present, otherwise by model name
+        dev = None
+        for x in devs:
+            sn = getattr(x, "serial_number", "") or ""
+            md = getattr(x, "model_name", None) or getattr(x, "display_name", "")
+            if sn and serial_pattern in sn:
+                dev = x
+                break
+            if not sn and serial_pattern == md:
+                dev = x
+                break
         if not dev:
             raise RuntimeError(f"Camera with serial '{serial_pattern}' not found.")
         grabber.device_open(dev)
@@ -85,7 +93,8 @@ def get_camera_node_map(model: str, serial_pattern: str) -> dict:
                 module_log.warning(f"Failed reading property {pid.name}: {exc}")
         return nodemap
     finally:
-        if hasattr(grabber, "is_device_open") and grabber.is_device_open():
+        # is_device_open is a bool attribute, not a method
+        if getattr(grabber, "is_device_open", False):
             grabber.device_close()
 
 
@@ -125,8 +134,10 @@ def test_capture(model: str, serial_pattern: str, settings: dict) -> bool:
             module_log.error(f"pop_output_buffer error: {be}")
         return ok
     finally:
-        if hasattr(grabber, "is_acquisition_active") and grabber.is_acquisition_active:
+        # Stop acquisition if it’s active (boolean flag, not method)
+        if getattr(grabber, "is_acquisition_active", False):
             grabber.acquisition_stop()
             grabber.stream_stop()
-        if hasattr(grabber, "is_device_open") and grabber.is_device_open():
+        # Close device if open
+        if getattr(grabber, "is_device_open", False):
             grabber.device_close()

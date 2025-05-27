@@ -372,8 +372,9 @@ class MainWindow(QMainWindow):
             lambda v: th.apply_node_settings({"AcquisitionFrameRate": v})
         )
 
-        cp.start_stream.clicked.connect(th.start)
-        cp.stop_stream.clicked.connect(th.stop)
+        # Panel -> Thread
+        cp.start_stream.connect(th.start)
+        cp.stop_stream.connect(th.stop)
 
         th.frame_ready.connect(self.camera_view.update_frame)
         th.camera_error.connect(self._on_camera_error)
