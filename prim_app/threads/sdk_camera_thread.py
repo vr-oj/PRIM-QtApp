@@ -135,7 +135,7 @@ class SDKCameraThread(QThread):
             log.debug(
                 "SDKCameraThread (Simplified): Calling stream_setup(self.sink)..."
             )
-            self.grabber.stream_setup(self.sink)  # Let this do its work.
+            self.grabber.stream_setup(self.sink)
             log.info("SDKCameraThread (Simplified): stream_setup call completed.")
 
             # CRUCIAL CHECK: Immediately after stream_setup
@@ -143,7 +143,7 @@ class SDKCameraThread(QThread):
                 log.warning(
                     "SDKCameraThread (Simplified): Acquisition NOT active immediately after stream_setup. Attempting explicit acquisition_start()..."
                 )
-                self.grabber.acquisition_start()  # Try to explicitly start it
+                self.grabber.acquisition_start()
                 if not self.grabber.is_acquisition_active:
                     log.error(
                         "SDKCameraThread (Simplified): Explicit acquisition_start() also FAILED."
@@ -160,10 +160,14 @@ class SDKCameraThread(QThread):
                     "SDKCameraThread (Simplified): Acquisition IS active immediately after stream_setup."
                 )
 
+            # If we've reached here, acquisition should be active.
             log.info(
-                "SDKCameraThread (Simplified): Proceeding to frame acquisition loop..."
+                "SDKCameraThread (Simplified): Stream setup and acquisition start confirmed. Pausing briefly before loop."
             )
-            # QThread.msleep(100) # Optional: small delay before loop, likely not needed now
+            QThread.msleep(250)  # The pause we added
+            log.info(
+                "SDKCameraThread (Simplified): Pause complete. Proceeding to frame acquisition loop..."
+            )
 
             while not self._stop_requested:
                 buf = None  # Initialize buf
