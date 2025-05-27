@@ -84,7 +84,9 @@ class CameraScanPage(QWizardPage):
             return False
 
         self.wizard().settings["cameraModel"] = cam_data["model"]
-        self.wizard().settings["cameraSerialPattern"] = cam_data["serial"]
+        # if the camera didn’t report a serial, use the model as our “pattern”
+        serial = cam_data["serial"] or cam_data["model"]
+        self.wizard().settings["cameraSerialPattern"] = serial
         return True
 
 
@@ -127,7 +129,7 @@ class DefaultsPage(QWizardPage):
 
     def initializePage(self):
         # This page relies on get_camera_node_map which needs IC4 initialized and camera selected
-        if not self.wizard().settings.get("cameraSerialPattern"):
+        if "cameraSerialPattern" not in self.wizard().settings:
             QMessageBox.critical(self, "Error", "Camera not selected in previous step.")
             # Potentially go back: self.wizard().back() - but QWizard handles this if validatePage fails
             return
@@ -377,9 +379,9 @@ class TestCapturePage(QWizardPage):
         current_test_settings = {**default_settings, **advanced_settings}
 
         camera_model = self.wizard().settings.get("cameraModel")
-        camera_serial = self.wizard().settings.get("cameraSerialPattern")
-
-        if not camera_serial:
+        # get() will return "" if you stored a blank serial; that’s OK
+        camera_serial = self.wizard().settings.get("cameraSerialPattern", None)
+        if camera_serial is None:
             QMessageBox.critical(
                 self, "Capture Error", "Camera serial not found in wizard settings."
             )

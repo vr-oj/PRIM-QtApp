@@ -463,8 +463,8 @@ class MainWindow(QMainWindow):
             log.info(f"Loaded last camera profile: {last_profile_name}")
             self.camera_settings = profile_data
 
-            cam_serial = profile_data.get("serialPattern")
-            if not cam_serial:
+            cam_serial = profile_data.get("serialPattern", None)
+            if cam_serial is None:
                 log.error(f"Profile '{last_profile_name}' missing 'serialPattern'.")
                 if self.camera_panel:
                     self.camera_panel.setEnabled(False)
