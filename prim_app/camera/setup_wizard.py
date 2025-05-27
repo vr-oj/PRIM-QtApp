@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
 )
 
 from utils.config import CAMERA_PROFILES_DIR
-from utils.app_settings import load_app_setting, save_settings, SETTING_CTI_PATH
+from utils.app_settings import load_app_setting, save_app_setting, SETTING_CTI_PATH
 
 module_log = logging.getLogger(__name__)
 
@@ -286,7 +286,7 @@ class SummaryPage(QWizardPage):
         p = os.path.join(CAMERA_PROFILES_DIR, f"{n}.json")
         with open(p, "w") as f:
             json.dump(prof, f, indent=2)
-        save_settings({SETTING_CTI_PATH: cti_path})
+        save_app_setting(SETTING_CTI_PATH, cti_path)
         QMessageBox.information(self, "Saved", f"{p}")
         return True
 
