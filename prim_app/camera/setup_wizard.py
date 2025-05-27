@@ -1,4 +1,3 @@
-# PRIM-QTAPP/prim_app/camera/setup_wizard.py
 import os
 import json
 import logging
@@ -31,13 +30,18 @@ module_log = logging.getLogger(__name__)
 cti_path = load_app_setting(SETTING_CTI_PATH)
 if cti_path:
     os.environ["GENICAM_GENTL64_PATH"] = os.path.dirname(cti_path)
-    try:
-        ic4.Library.init()
-    except ic4.IC4Exception as e:
-        QMessageBox.critical(None, "IC4 Init Error", f"{e.code}: {e.message}")
-        raise
 else:
     QMessageBox.warning(None, "CTI Not Configured", "No CTI path found in settings.")
+
+# Initialize IC4 library if not already initialized
+try:
+    ic4.Library.init()
+except RuntimeError:
+    # Already initialized in prim_app.setup
+    pass
+except ic4.IC4Exception as e:
+    QMessageBox.critical(None, "IC4 Init Error", f"{e.code}: {e.message}")
+    raise
 
 
 class CameraScanPage(QWizardPage):
