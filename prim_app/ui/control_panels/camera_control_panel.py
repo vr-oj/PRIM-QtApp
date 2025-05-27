@@ -32,8 +32,8 @@ class CameraControlPanel(QWidget):
         super().__init__(parent)
         self.setMinimumWidth(220)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(10)
+        layout.setContentsMargins(3, 3, 3, 3)
+        layout.setSpacing(5)
 
         # Title
         title = QLabel("Camera Settings")

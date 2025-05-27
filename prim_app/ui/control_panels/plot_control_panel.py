@@ -25,8 +25,8 @@ class PlotControlPanel(QGroupBox):
         super().__init__("Plot Controls", parent)
 
         layout = QFormLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(6)
+        layout.setContentsMargins(3, 3, 3, 3)
+        layout.setSpacing(4)
 
         # X-axis controls
         self.auto_x_cb = QCheckBox("Auto-scale X")

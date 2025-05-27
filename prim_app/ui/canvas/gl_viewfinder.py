@@ -1,6 +1,9 @@
 # prim_app/ui/canvas/gl_viewfinder.py
 import numpy as np
-from PyQt5.QtWidgets import QOpenGLWidget
+from PyQt5.QtWidgets import (
+    QOpenGLWidget,
+    QSizePolicy,
+)  # Make sure QSizePolicy is imported
 from PyQt5.QtCore import pyqtSlot, Qt
 from PyQt5.QtGui import (
     QOpenGLShader,
@@ -9,15 +12,15 @@ from PyQt5.QtGui import (
     QImage,
 )
 from OpenGL import GL
-import logging  # Added logging
+import logging
 
-log = logging.getLogger(__name__)  # Added logger
+log = logging.getLogger(__name__)
 
 
 class GLViewfinder(QOpenGLWidget):
     """
     High-performance OpenGL viewfinder widget.
-    Receives raw numpy frames and renders them via GPU texture.
+    Receives raw numpy frames and renders them via GPU texture, maintaining aspect ratio.
     """
 
     def __init__(self, parent=None):
@@ -25,10 +28,14 @@ class GLViewfinder(QOpenGLWidget):
         self.program = None
         self.texture = None
         self.vbo_quad = None
-        self._frame_data = None  # Not currently used, but could be for caching
-        self.setMinimumSize(320, 240)
+
+        # Encourage the widget to expand and fill available space
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMinimumSize(320, 240)  # Maintain a reasonable minimum size
+
         self.current_frame_width = 0
         self.current_frame_height = 0
+        self.frame_aspect_ratio = 1.0  # Default aspect ratio (width / height)
 
     def initializeGL(self):
         vert_src = b"""
@@ -41,15 +48,22 @@ class GLViewfinder(QOpenGLWidget):
             v_texcoord = texcoord;
         }
         """
-        frag_src = b"""
+        frag_src_mono = b""" // Shader for single channel (e.g., R8_UNorm)
         #version 330 core
         uniform sampler2D tex;
         in vec2 v_texcoord;
         out vec4 fragColor;
         void main() {
-            fragColor = texture(tex, v_texcoord);
+            float intensity = texture(tex, v_texcoord).r; // Sample red channel
+            fragColor = vec4(intensity, intensity, intensity, 1.0); // Display as grayscale
         }
         """
+        # You might need a different fragment shader for color images if you support them later
+        # For now, assuming Mono8 is the primary format from your camera.
+        # If you also get BGR, you'd need to switch shaders or use a universal one.
+        # Let's keep it simple for Mono8 first with frag_src_mono.
+        # If your previous RGBA8_UNorm approach worked for mono, the original frag_src was okay
+        # but R8_UNorm is more efficient for mono data.
 
         self.program = QOpenGLShaderProgram(self.context())
         if not self.program.addShaderFromSourceCode(QOpenGLShader.Vertex, vert_src):
@@ -57,7 +71,10 @@ class GLViewfinder(QOpenGLWidget):
                 f"GLViewfinder: Vertex shader compilation error: {self.program.log()}"
             )
             return
-        if not self.program.addShaderFromSourceCode(QOpenGLShader.Fragment, frag_src):
+        # Using the mono-specific fragment shader
+        if not self.program.addShaderFromSourceCode(
+            QOpenGLShader.Fragment, frag_src_mono
+        ):  # Using frag_src_mono
             log.error(
                 f"GLViewfinder: Fragment shader compilation error: {self.program.log()}"
             )
@@ -65,7 +82,6 @@ class GLViewfinder(QOpenGLWidget):
         if not self.program.link():
             log.error(f"GLViewfinder: Shader link error: {self.program.log()}")
             return
-        # Binding is done before drawing, not necessarily at init.
 
         self.texture = QOpenGLTexture(QOpenGLTexture.Target2D)
         self.texture.setMinificationFilter(QOpenGLTexture.Linear)
@@ -94,7 +110,7 @@ class GLViewfinder(QOpenGLWidget):
             dtype=np.float32,
         )
 
-        self.makeCurrent()  # Ensure GL context is current for glGenBuffers etc.
+        self.makeCurrent()
         self.vbo_quad = GL.glGenBuffers(1)
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo_quad)
         GL.glBufferData(
@@ -104,24 +120,34 @@ class GLViewfinder(QOpenGLWidget):
         self.doneCurrent()
 
     def resizeGL(self, w: int, h: int):
-        self.makeCurrent()
-        GL.glViewport(0, 0, w, h)
-        self.doneCurrent()
+        # The actual viewport adjustment for aspect ratio is done in paintGL.
+        # This method is called by Qt when the widget resizes.
+        # The QOpenGLWidget base class handles basic setup like making context current.
+        # We don't need to explicitly set glViewport here to the full widget size
+        # if paintGL is going to override it for aspect ratio.
+        # log.debug(f"GLViewfinder resizeGL: w={w}, h={h}")
+        super().resizeGL(w, h)  # Call base implementation
 
-    @pyqtSlot(
-        QImage, object
-    )  # QImage from SDK thread (already converted), object is numpy array
+    @pyqtSlot(QImage, object)
     def update_frame(self, qimage_unused: QImage, frame: np.ndarray):
-        if frame is None or not self.isValid():  # Check if widget is valid
-            # log.debug("GLViewfinder: update_frame called with None frame or invalid widget.")
+        if frame is None or not self.isValid():
             return
 
-        self.makeCurrent()  # Ensure OpenGL context is current for texture operations
+        self.makeCurrent()
 
         h, w = frame.shape[:2]
         channels = frame.shape[2] if frame.ndim == 3 else 1
 
-        # Texture reallocation if size or format changes
+        # Calculate and store frame aspect ratio
+        current_aspect_ratio = w / h if h > 0 else 1.0
+        if (
+            abs(self.frame_aspect_ratio - current_aspect_ratio) > 1e-5
+        ):  # Update if changed
+            self.frame_aspect_ratio = current_aspect_ratio
+            # A repaint will be triggered by self.update() later anyway
+
+        # Texture reallocation if size or format changes (especially if supporting color later)
+        # For now, assuming Mono8, so format won't change often after first frame.
         if (
             not self.texture.isCreated()
             or self.current_frame_width != w
@@ -131,84 +157,54 @@ class GLViewfinder(QOpenGLWidget):
                 self.texture.destroy()
 
             self.texture.create()
-            self.texture.setSize(w, h)  # Set dimensions
-            # Set format based on incoming data. Assuming 8-bit for now.
-            # For QOpenGLTexture.setData, sourceFormat and sourceType are important.
-            # Internal format is often inferred or can be set explicitly.
-            self.texture.setFormat(
-                QOpenGLTexture.RGBA8_UNorm
-            )  # A common internal format for 8-bit/channel
+            self.texture.setSize(w, h)
+
+            # Optimized for Mono8 (single channel) data
+            # If you later support color (e.g., BGR), you'll need to adjust this
+            # and potentially the fragment shader.
+            internal_texture_format = (
+                QOpenGLTexture.R8_UNorm
+            )  # For single channel 8-bit data
+
+            self.texture.setFormat(internal_texture_format)
             self.texture.allocateStorage()  # Allocate based on setSize and setFormat
             self.current_frame_width = w
             self.current_frame_height = h
-            log.debug(f"GLViewfinder: Texture re(allocated) for {w}x{h}")
+            log.debug(
+                f"GLViewfinder: Texture re(allocated) for {w}x{h}, aspect: {self.frame_aspect_ratio:.2f}"
+            )
 
-        # Prepare data for texture upload (must be RGBA for RGBA8_UNorm internal format)
-        # Or, use a different internal format if source is grayscale (e.g., R8_UNorm)
-        # and adjust shader if needed. For simplicity, converting to RGBA on CPU.
+        data_for_texture = frame
+        # For R8_UNorm internal format, the source data should be single channel
+        source_pixel_format = (
+            QOpenGLTexture.Red
+        )  # Source data is treated as the Red channel
 
-        data_for_texture = None
-        source_format_gl = GL.GL_LUMINANCE  # Default for grayscale
-        pixel_type_gl = GL.GL_UNSIGNED_BYTE
-
-        if channels == 1:  # Grayscale
-            source_format_gl = GL.GL_LUMINANCE  # or GL_RED if shader expects R channel
-            if frame.ndim == 3 and frame.shape[2] == 1:
-                data_for_texture = frame[:, :, 0].copy()  # Make it 2D HxW
-            else:  # Already HxW
-                data_for_texture = frame.copy()
-            # If texture internal format is RGBA8, we might need to replicate mono to RGB channels
-            # Or, use a GL_R8 internal format and GL_RED source format.
-            # For now, let's assume QOpenGLTexture handles LUMINANCE to RGBA expansion if internal is RGBA.
-            # Alternatively, create an RGBA buffer:
-            # temp_rgba = np.empty((h,w,4), dtype=np.uint8)
-            # temp_rgba[..., 0] = data_for_texture
-            # temp_rgba[..., 1] = data_for_texture
-            # temp_rgba[..., 2] = data_for_texture
-            # temp_rgba[..., 3] = 255
-            # data_for_texture = temp_rgba
-            # source_format_gl = GL.GL_RGBA
-
-        elif channels == 3:  # Assuming BGR from OpenCV or similar
-            source_format_gl = GL.GL_BGR  # If QOpenGLTexture can take BGR directly
-            data_for_texture = frame.copy()
-            # If texture internal format is RGBA8, and source is BGR:
-            # temp_rgba = np.empty((h,w,4), dtype=np.uint8)
-            # temp_rgba[..., 0] = frame[..., 2] # R
-            # temp_rgba[..., 1] = frame[..., 1] # G
-            # temp_rgba[..., 2] = frame[..., 0] # B
-            # temp_rgba[..., 3] = 255          # A
-            # data_for_texture = temp_rgba
-            # source_format_gl = GL.GL_RGBA
-
-        elif channels == 4:  # Assuming BGRA or RGBA
-            source_format_gl = GL.GL_BGRA  # Or GL_RGBA depending on source
-            data_for_texture = frame.copy()
+        if channels == 1:
+            if frame.ndim == 3 and frame.shape[2] == 1:  # If HxWx1
+                data_for_texture = frame[
+                    :, :, 0
+                ].copy()  # Make it 2D HxW, ensure it's contiguous
+            elif frame.ndim == 2:  # Already HxW
+                data_for_texture = frame.copy()  # Ensure it's contiguous for safety
+            # else: error, should be 2D or HxWx1 for single channel
+        # elif channels == 3: # Example if you add BGR support later
+        # source_pixel_format = QOpenGLTexture.BGR
+        # internal_texture_format would need to be BGR8_UNorm or RGB8_UNorm
+        # data_for_texture = frame.copy()
         else:
             log.warning(
-                f"GLViewfinder: Unsupported number of channels ({channels}) in update_frame."
+                f"GLViewfinder: Unsupported number of channels ({channels}) for current setup (expected 1 for Mono8)."
             )
             self.doneCurrent()
             return
 
         if data_for_texture is not None:
             self.texture.bind()
-            # Use QOpenGLTexture.setData with appropriate QOpenGLTexture.PixelFormat and QOpenGLTexture.PixelType
-            # Mapping GL constants to QOpenGLTexture enums:
-            q_source_format = QOpenGLTexture.Luminance  # Default
-            if source_format_gl == GL.GL_BGR:
-                q_source_format = QOpenGLTexture.BGR
-            elif source_format_gl == GL.GL_RGB:
-                q_source_format = QOpenGLTexture.RGB
-            elif source_format_gl == GL.GL_RGBA:
-                q_source_format = QOpenGLTexture.RGBA
-            elif source_format_gl == GL.GL_BGRA:
-                q_source_format = QOpenGLTexture.BGRA
-            # Add more mappings if needed (e.g. GL_RED -> QOpenGLTexture.Red)
-
-            q_pixel_type = QOpenGLTexture.UInt8  # Assuming GL_UNSIGNED_BYTE
-
-            self.texture.setData(q_source_format, q_pixel_type, data_for_texture.data)
+            # Upload data: source format is Red, source type is UInt8 (for numpy uint8 array)
+            self.texture.setData(
+                source_pixel_format, QOpenGLTexture.UInt8, data_for_texture.data
+            )
             self.texture.release()
             self.update()  # Request a repaint (calls paintGL)
 
@@ -222,16 +218,49 @@ class GLViewfinder(QOpenGLWidget):
             or not self.texture
             or not self.texture.isCreated()
             or self.vbo_quad is None
+            or self.current_frame_width == 0  # Ensure we have valid frame dimensions
+            or self.current_frame_height == 0
         ):
-            # log.debug("paintGL: Not ready to paint.")
             return
 
         self.makeCurrent()
-        GL.glClearColor(0.1, 0.1, 0.1, 1.0)
+
+        # Set clear color (e.g., black for letterbox/pillarbox bars)
+        GL.glClearColor(0.0, 0.0, 0.0, 1.0)  # Changed to black
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+
+        widget_w = self.width()
+        widget_h = self.height()
+
+        if (
+            widget_w == 0 or widget_h == 0
+        ):  # Avoid division by zero if widget not yet sized
+            self.doneCurrent()
+            return
+
+        widget_aspect = widget_w / widget_h
+
+        # Calculate viewport to maintain frame's aspect ratio
+        vp_x, vp_y, vp_w, vp_h = 0, 0, widget_w, widget_h
+
+        if self.frame_aspect_ratio > widget_aspect:
+            # Frame is wider than widget display area (needs letterboxing: کاهش ارتفاع دید)
+            # Scale viewport height according to frame aspect ratio relative to widget width
+            vp_h = int(widget_w / self.frame_aspect_ratio)
+            vp_y = int((widget_h - vp_h) / 2)  # Center vertically
+        elif self.frame_aspect_ratio < widget_aspect:
+            # Frame is taller than widget display area (needs pillarboxing: کاهش عرض دید)
+            # Scale viewport width according to frame aspect ratio relative to widget height
+            vp_w = int(widget_h * self.frame_aspect_ratio)
+            vp_x = int((widget_w - vp_w) / 2)  # Center horizontally
+        # Else: aspect ratios match, use full widget_w, widget_h
+
+        GL.glViewport(vp_x, vp_y, vp_w, vp_h)  # Apply the calculated viewport
 
         if not self.program.bind():
             log.error("paintGL: Failed to bind shader program.")
+            # Reset viewport to full on error to avoid unexpected clipping if paintGL is called again
+            GL.glViewport(0, 0, widget_w, widget_h)
             self.doneCurrent()
             return
 
@@ -240,10 +269,7 @@ class GLViewfinder(QOpenGLWidget):
         self.program.setUniformValue("tex", 0)
 
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo_quad)
-        stride = (
-            4 * np.dtype(np.float32).itemsize
-        )  # 2 pos (vec2) + 2 tex (vec2) = 4 floats
-
+        stride = 4 * np.dtype(np.float32).itemsize
         pos_loc = self.program.attributeLocation("position")
         tex_loc = self.program.attributeLocation("texcoord")
 
@@ -262,7 +288,7 @@ class GLViewfinder(QOpenGLWidget):
                 GL.GL_FALSE,
                 stride,
                 GL.ctypes.c_void_p(2 * np.dtype(np.float32).itemsize),
-            )  # Offset by 2 floats
+            )
 
         GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
 
@@ -272,6 +298,14 @@ class GLViewfinder(QOpenGLWidget):
             GL.glDisableVertexAttribArray(tex_loc)
 
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
-        self.texture.release()  # Unbind texture
-        self.program.release()  # Unbind program
+        self.texture.release()
+        self.program.release()
+
+        # After drawing with the aspect-corrected viewport,
+        # some applications reset the viewport to the full widget size if other UI elements
+        # are drawn directly with OpenGL in the same paintGL call. For a dedicated viewfinder, it might not be strictly necessary.
+        # However, Qt might do further painting, so it's good practice to reset if unsure.
+        # For now, let's assume this widget is the only thing drawing in its paintGL.
+        # If you add overlays or other GL drawing, you might need: GL.glViewport(0, 0, widget_w, widget_h)
+
         self.doneCurrent()

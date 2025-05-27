@@ -25,6 +25,7 @@ from PyQt5.QtWidgets import (
     QWidget,
     QSplitter,
     QMessageBox,
+    QSizePolicy,
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize
 from PyQt5.QtGui import QIcon, QKeySequence
@@ -424,7 +425,10 @@ class MainWindow(QMainWindow):
             # You might want to create a placeholder or handle this error more gracefully
             # For now, it will just not be added if missing.
 
-        layout.addWidget(top_row)
+        top_row.setSizePolicy(
+            QSizePolicy.Preferred, QSizePolicy.Minimum
+        )  # Make vertical policy Minimum
+        layout.addWidget(top_row)  # Add top_row to the main vertical layout
         self.bottom_split = QSplitter(Qt.Horizontal)
         self.bottom_split.setChildrenCollapsible(False)  # Good practice
         self.camera_view = GLViewfinder(self)
