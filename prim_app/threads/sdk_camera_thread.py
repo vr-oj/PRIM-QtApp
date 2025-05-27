@@ -36,8 +36,10 @@ class MinimalSinkListener(ic4.QueueSinkListener):
         # but it's usually best to let the grabber decide or configure it on the grabber/device properties.
         return True
 
-    def sink_disconnected(self, sink: ic4.QueueSink, userdata: any):
-        log.debug(f"Listener '{self.owner_name}': Sink disconnected.")
+    def sink_disconnected(self, sink: ic4.QueueSink):  # REMOVE 'userdata'
+        log.debug(
+            f"Listener '{self.owner_name}': Sink disconnected from {sink}."
+        )  # Optional: log the sink
         pass
 
     def sink_property_changed(
@@ -173,28 +175,38 @@ class SDKCameraThread(QThread):
                 raise  # Critical error, cannot proceed
 
             log.debug("SDKCameraThread (Simplified): Setting up stream...")
-            # Stream setup with default options, start acquisition immediately
-            self.grabber.stream_setup(
-                self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
+
+            # Step 1: Prepare the stream (allocates buffers, etc.)
+            # Uses default setup_option (usually StreamSetupOption.PREPARE_ACQUISITION or similar)
+            self.grabber.stream_setup(self.sink)
+            log.info(
+                "SDKCameraThread (Simplified): Stream resources prepared via stream_setup."
             )
 
-            # Double check if acquisition is active; if not, try to start it.
-            # Some devices might require an explicit start even with ACQUISITION_START option.
-            if not self.grabber.is_acquisition_active:
-                log.info(
-                    "SDKCameraThread (Simplified): Acquisition not active after stream_setup, explicitly starting..."
-                )
-                self.grabber.acquisition_start()
+            # Step 2: Explicitly command the camera to start sending data
+            log.info(
+                "SDKCameraThread (Simplified): Attempting to start acquisition explicitly via acquisition_start()..."
+            )
+            self.grabber.acquisition_start()
+            log.info(
+                "SDKCameraThread (Simplified): acquisition_start() command issued to camera."
+            )
 
-            if self.grabber.is_acquisition_active:
-                log.info(
-                    "SDKCameraThread (Simplified): Stream setup complete and acquisition is active."
+            # Step 3: Verify if acquisition actually started
+            if not self.grabber.is_acquisition_active:
+                log.error(
+                    "SDKCameraThread (Simplified): Acquisition FAILED to start after explicit command (is_acquisition_active is false). The camera did not confirm it started streaming."
+                )
+                # This is a critical failure. It's possible acquisition_start() itself could timeout
+                # and raise an exception (which would be caught by the existing IC4Exception handler).
+                # If it doesn't raise but is_acquisition_active is false, it's also an error.
+                raise RuntimeError(
+                    "Failed to start camera acquisition: is_acquisition_active is false after explicit start command."
                 )
             else:
-                log.error(
-                    "SDKCameraThread (Simplified): Acquisition FAILED to start even after explicit command."
+                log.info(
+                    "SDKCameraThread (Simplified): Stream setup complete and acquisition is confirmed active."
                 )
-                raise RuntimeError("Failed to start camera acquisition.")
 
             while not self._stop_requested:
                 try:
@@ -290,7 +302,7 @@ class SDKCameraThread(QThread):
                         continue
                     # For other IC4Exceptions, log as error and potentially stop
                     log.error(
-                        f"IC4Exception in SDKCameraThread acquisition loop: {e} (Code: {e.code}, Name: {e.name})"
+                        f"IC4Exception in SDKCameraThread acquisition loop: {e} (Code: {e.code})"  # REMOVE .name
                     )
                     self.camera_error.emit(str(e), str(e.code))  # Emit error
                     break  # Exit loop on significant IC4 error
@@ -307,9 +319,9 @@ class SDKCameraThread(QThread):
         ) as e_rt:  # Errors during setup (e.g., no devices, device open fail)
             log.error(f"RuntimeError in SDKCameraThread.run (Simplified): {e_rt}")
             self.camera_error.emit(str(e_rt), "RUNTIME_SETUP_ERROR")
-        except ic4.IC4Exception as e_ic4_setup:  # IC4 specific errors during setup
+        except ic4.IC4Exception as e_ic4_setup:
             log.error(
-                f"IC4Exception during setup in SDKCameraThread.run (Simplified): {e_ic4_setup} (Code: {e_ic4_setup.code}, Name: {e_ic4_setup.name})"
+                f"IC4Exception during setup in SDKCameraThread.run (Simplified): {e_ic4_setup} (Code: {e_ic4_setup.code})"  # REMOVE .name
             )
             self.camera_error.emit(str(e_ic4_setup), str(e_ic4_setup.code))
         except (
