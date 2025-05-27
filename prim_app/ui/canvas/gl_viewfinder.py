@@ -25,8 +25,8 @@ class GLViewfinder(QOpenGLWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.program = None
-        self.texture = None
+        self.program = None  # Will be initialized in initializeGL
+        self.texture = None  # Will be initialized in initializeGL
         self.vbo_quad = None
 
         # Encourage the widget to expand and fill available space
@@ -38,8 +38,12 @@ class GLViewfinder(QOpenGLWidget):
         self.frame_aspect_ratio = 1.0  # Default aspect ratio (width / height)
 
     def initializeGL(self):
+        # Initialize critical members first to avoid NoneType errors if shader compilation/linking fails
+        self.texture = QOpenGLTexture(QOpenGLTexture.Target2D)
+        self.program = QOpenGLShaderProgram(self.context())
+
+        # Vertex shader source - NO #version directive here
         vert_src = b"""
-        #version 330 core
         layout (location = 0) in vec2 position;
         layout (location = 1) in vec2 texcoord;
         out vec2 v_texcoord;
@@ -48,42 +52,37 @@ class GLViewfinder(QOpenGLWidget):
             v_texcoord = texcoord;
         }
         """
-        frag_src_mono = b""" // Shader for single channel (e.g., R8_UNorm)
-        #version 330 core
+        # Fragment shader source for single channel (Mono8) - NO #version directive here
+        frag_src_mono = b"""
         uniform sampler2D tex;
         in vec2 v_texcoord;
         out vec4 fragColor;
         void main() {
-            float intensity = texture(tex, v_texcoord).r; // Sample red channel
+            float intensity = texture(tex, v_texcoord).r; // Sample red channel (for R8_UNorm)
             fragColor = vec4(intensity, intensity, intensity, 1.0); // Display as grayscale
         }
         """
-        # You might need a different fragment shader for color images if you support them later
-        # For now, assuming Mono8 is the primary format from your camera.
-        # If you also get BGR, you'd need to switch shaders or use a universal one.
-        # Let's keep it simple for Mono8 first with frag_src_mono.
-        # If your previous RGBA8_UNorm approach worked for mono, the original frag_src was okay
-        # but R8_UNorm is more efficient for mono data.
 
-        self.program = QOpenGLShaderProgram(self.context())
         if not self.program.addShaderFromSourceCode(QOpenGLShader.Vertex, vert_src):
             log.error(
                 f"GLViewfinder: Vertex shader compilation error: {self.program.log()}"
             )
+            self.program = None  # Mark as failed
             return
-        # Using the mono-specific fragment shader
         if not self.program.addShaderFromSourceCode(
             QOpenGLShader.Fragment, frag_src_mono
-        ):  # Using frag_src_mono
+        ):
             log.error(
                 f"GLViewfinder: Fragment shader compilation error: {self.program.log()}"
             )
+            self.program = None  # Mark as failed
             return
         if not self.program.link():
             log.error(f"GLViewfinder: Shader link error: {self.program.log()}")
+            self.program = None  # Mark as failed
             return
 
-        self.texture = QOpenGLTexture(QOpenGLTexture.Target2D)
+        # Configure texture (it's already instantiated)
         self.texture.setMinificationFilter(QOpenGLTexture.Linear)
         self.texture.setMagnificationFilter(QOpenGLTexture.Linear)
         self.texture.setWrapMode(QOpenGLTexture.ClampToEdge)
@@ -121,16 +120,21 @@ class GLViewfinder(QOpenGLWidget):
 
     def resizeGL(self, w: int, h: int):
         # The actual viewport adjustment for aspect ratio is done in paintGL.
-        # This method is called by Qt when the widget resizes.
-        # The QOpenGLWidget base class handles basic setup like making context current.
-        # We don't need to explicitly set glViewport here to the full widget size
-        # if paintGL is going to override it for aspect ratio.
-        # log.debug(f"GLViewfinder resizeGL: w={w}, h={h}")
         super().resizeGL(w, h)  # Call base implementation
 
     @pyqtSlot(QImage, object)
     def update_frame(self, qimage_unused: QImage, frame: np.ndarray):
-        if frame is None or not self.isValid():
+        # Add check for program and texture initialization
+        if (
+            frame is None
+            or not self.isValid()
+            or self.program is None
+            or self.texture is None
+        ):
+            if self.program is None or self.texture is None:
+                log.debug(
+                    "GLViewfinder: update_frame called but shaders or texture not initialized properly."
+                )
             return
 
         self.makeCurrent()
@@ -142,43 +146,39 @@ class GLViewfinder(QOpenGLWidget):
         current_aspect_ratio = w / h if h > 0 else 1.0
         if (
             abs(self.frame_aspect_ratio - current_aspect_ratio) > 1e-5
-        ):  # Update if changed
+        ):  # Update if changed significantly
             self.frame_aspect_ratio = current_aspect_ratio
-            # A repaint will be triggered by self.update() later anyway
 
-        # Texture reallocation if size or format changes (especially if supporting color later)
-        # For now, assuming Mono8, so format won't change often after first frame.
+        # Texture reallocation if size or format changes
         if (
-            not self.texture.isCreated()
+            not self.texture.isCreated()  # This should now be safe as self.texture is an object
             or self.current_frame_width != w
             or self.current_frame_height != h
+            # TODO: Add a check if texture internal_format needs to change if supporting color later
         ):
             if self.texture.isCreated():
                 self.texture.destroy()
 
-            self.texture.create()
+            self.texture.create()  # Create the OpenGL texture resource
             self.texture.setSize(w, h)
 
-            # Optimized for Mono8 (single channel) data
-            # If you later support color (e.g., BGR), you'll need to adjust this
-            # and potentially the fragment shader.
+            # Optimized for Mono8 (single channel) data from your camera
             internal_texture_format = (
                 QOpenGLTexture.R8_UNorm
             )  # For single channel 8-bit data
 
             self.texture.setFormat(internal_texture_format)
-            self.texture.allocateStorage()  # Allocate based on setSize and setFormat
+            self.texture.allocateStorage()  # Allocate GPU memory for the texture
             self.current_frame_width = w
             self.current_frame_height = h
             log.debug(
-                f"GLViewfinder: Texture re(allocated) for {w}x{h}, aspect: {self.frame_aspect_ratio:.2f}"
+                f"GLViewfinder: Texture re(allocated) for {w}x{h}, aspect: {self.frame_aspect_ratio:.2f}, format: {internal_texture_format}"
             )
 
         data_for_texture = frame
-        # For R8_UNorm internal format, the source data should be single channel
-        source_pixel_format = (
-            QOpenGLTexture.Red
-        )  # Source data is treated as the Red channel
+        # For R8_UNorm internal format, the source data should be single channel,
+        # and QOpenGLTexture.Red indicates the source data provides the red channel values.
+        source_pixel_format = QOpenGLTexture.Red
 
         if channels == 1:
             if frame.ndim == 3 and frame.shape[2] == 1:  # If HxWx1
@@ -186,11 +186,18 @@ class GLViewfinder(QOpenGLWidget):
                     :, :, 0
                 ].copy()  # Make it 2D HxW, ensure it's contiguous
             elif frame.ndim == 2:  # Already HxW
-                data_for_texture = frame.copy()  # Ensure it's contiguous for safety
-            # else: error, should be 2D or HxWx1 for single channel
+                data_for_texture = (
+                    frame.copy()
+                )  # Ensure it's contiguous for safety with .data pointer
+            else:
+                log.error(
+                    f"GLViewfinder: Frame has 1 channel but unexpected dimensions: {frame.shape}"
+                )
+                self.doneCurrent()
+                return
         # elif channels == 3: # Example if you add BGR support later
+        # internal_texture_format would need to be QOpenGLTexture.BGR8_UNorm or similar
         # source_pixel_format = QOpenGLTexture.BGR
-        # internal_texture_format would need to be BGR8_UNorm or RGB8_UNorm
         # data_for_texture = frame.copy()
         else:
             log.warning(
@@ -207,26 +214,37 @@ class GLViewfinder(QOpenGLWidget):
             )
             self.texture.release()
             self.update()  # Request a repaint (calls paintGL)
+        else:
+            log.warning("GLViewfinder: data_for_texture became None unexpectedly.")
 
         self.doneCurrent()
 
     def paintGL(self):
         if (
             not self.isValid()
-            or not self.program
-            or not self.program.isLinked()
-            or not self.texture
-            or not self.texture.isCreated()
+            or self.program is None  # Check if program was successfully compiled/linked
+            # or not self.program.isLinked() # Redundant if self.program is None on link failure
+            or self.texture is None  # Check if texture object was instantiated
+            or not self.texture.isCreated()  # Check if OpenGL texture resource is created
             or self.vbo_quad is None
             or self.current_frame_width == 0  # Ensure we have valid frame dimensions
             or self.current_frame_height == 0
         ):
+            # If shaders didn't compile or texture not ready, clear to a debug color or just return
+            if (
+                self.program is None and self.isValid()
+            ):  # Check isValid to ensure context is available
+                self.makeCurrent()
+                GL.glClearColor(
+                    0.3, 0.0, 0.0, 1.0
+                )  # Dark red indicates shader init problem
+                GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+                self.doneCurrent()
             return
 
         self.makeCurrent()
 
-        # Set clear color (e.g., black for letterbox/pillarbox bars)
-        GL.glClearColor(0.0, 0.0, 0.0, 1.0)  # Changed to black
+        GL.glClearColor(0.0, 0.0, 0.0, 1.0)  # Black for letterbox/pillarbox bars
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
 
         widget_w = self.width()
@@ -244,32 +262,31 @@ class GLViewfinder(QOpenGLWidget):
         vp_x, vp_y, vp_w, vp_h = 0, 0, widget_w, widget_h
 
         if self.frame_aspect_ratio > widget_aspect:
-            # Frame is wider than widget display area (needs letterboxing: کاهش ارتفاع دید)
-            # Scale viewport height according to frame aspect ratio relative to widget width
+            # Frame is wider than widget display area (needs letterboxing)
             vp_h = int(widget_w / self.frame_aspect_ratio)
             vp_y = int((widget_h - vp_h) / 2)  # Center vertically
         elif self.frame_aspect_ratio < widget_aspect:
-            # Frame is taller than widget display area (needs pillarboxing: کاهش عرض دید)
-            # Scale viewport width according to frame aspect ratio relative to widget height
+            # Frame is taller than widget display area (needs pillarboxing)
             vp_w = int(widget_h * self.frame_aspect_ratio)
             vp_x = int((widget_w - vp_w) / 2)  # Center horizontally
-        # Else: aspect ratios match, use full widget_w, widget_h
+        # Else: aspect ratios are close enough, use full widget_w, widget_h for viewport
 
         GL.glViewport(vp_x, vp_y, vp_w, vp_h)  # Apply the calculated viewport
 
-        if not self.program.bind():
+        if not self.program.bind():  # Check if bind is successful
             log.error("paintGL: Failed to bind shader program.")
-            # Reset viewport to full on error to avoid unexpected clipping if paintGL is called again
-            GL.glViewport(0, 0, widget_w, widget_h)
+            GL.glViewport(0, 0, widget_w, widget_h)  # Reset viewport if bind fails
             self.doneCurrent()
             return
 
         GL.glActiveTexture(GL.GL_TEXTURE0)
         self.texture.bind()
-        self.program.setUniformValue("tex", 0)
+        self.program.setUniformValue("tex", 0)  # Tell shader to use texture unit 0
 
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo_quad)
-        stride = 4 * np.dtype(np.float32).itemsize
+        stride = (
+            4 * np.dtype(np.float32).itemsize
+        )  # (2 pos floats + 2 tex floats) * size_of_float
         pos_loc = self.program.attributeLocation("position")
         tex_loc = self.program.attributeLocation("texcoord")
 
@@ -290,22 +307,16 @@ class GLViewfinder(QOpenGLWidget):
                 GL.ctypes.c_void_p(2 * np.dtype(np.float32).itemsize),
             )
 
-        GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+        GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)  # Draw the quad
 
+        # Cleanup
         if pos_loc != -1:
             GL.glDisableVertexAttribArray(pos_loc)
         if tex_loc != -1:
             GL.glDisableVertexAttribArray(tex_loc)
 
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
-        self.texture.release()
-        self.program.release()
-
-        # After drawing with the aspect-corrected viewport,
-        # some applications reset the viewport to the full widget size if other UI elements
-        # are drawn directly with OpenGL in the same paintGL call. For a dedicated viewfinder, it might not be strictly necessary.
-        # However, Qt might do further painting, so it's good practice to reset if unsure.
-        # For now, let's assume this widget is the only thing drawing in its paintGL.
-        # If you add overlays or other GL drawing, you might need: GL.glViewport(0, 0, widget_w, widget_h)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)  # Unbind VBO
+        self.texture.release()  # Unbind texture
+        self.program.release()  # Unbind program
 
         self.doneCurrent()
