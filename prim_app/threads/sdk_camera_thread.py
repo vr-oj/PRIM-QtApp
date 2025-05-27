@@ -23,11 +23,10 @@ class MinimalSinkListener(ic4.QueueSinkListener):
         pass  # Frame processing is handled by popping buffer in the thread's loop
 
     def frames_queued(self, sink: ic4.QueueSink):  # REMOVE 'userdata'
-        log.debug(
-            f"Listener '{self.owner_name}': Frames queued for {sink}."
-        )  # Optional: uncomment for debugging
-
-    pass
+        # log.debug(
+        #    f"Listener '{self.owner_name}': Frames queued for {sink}."
+        # )  # Optional: uncomment for debugging
+        pass
 
     def sink_connected(
         self, sink: ic4.QueueSink, image_type_proposed: ic4.ImageType, userdata: any
