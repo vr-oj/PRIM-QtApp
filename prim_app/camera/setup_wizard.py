@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
     QScrollArea,
     QWidget,
     QMessageBox,
+    QApplication,
     # QTextEdit, # Not used in provided snippet of SummaryPage
     # QDialogButtonBox, # Not used in provided snippet of SummaryPage
 )
