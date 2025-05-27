@@ -54,10 +54,8 @@ except ImportError:
 
 
 # === IC4 Initialization Flags and Module Reference ===
-IC4_AVAILABLE = False  # This line seems redundant given the try/except block above setting it. Consider reviewing.
 IC4_LIBRARY_INITIALIZED = False
 IC4_GENTL_SYSTEM_CONFIGURED = False
-ic4_library_module = None  # This line also seems redundant.
 
 module_log = logging.getLogger("prim_app.setup")
 if not module_log.handlers:  # Ensure basic handler if not configured by main logger yet
@@ -72,29 +70,34 @@ if not module_log.handlers:  # Ensure basic handler if not configured by main lo
 
 def initialize_ic4_with_cti(cti_path: str):
     """
-    Initialize IC4 by handing the CTI path directly to Library.init(),
-    then mark IC4_AVAILABLE=True so MainWindow will enable camera features.
+    Persist the CTI path, add its folder to GENICAM_GENTL64_PATH,
+    then initialize the IC4 library.
     """
-    # 1) Persist your choice so on next launch you don’t get prompted again
+    # 1) Persist choice
     save_app_setting(SETTING_CTI_PATH, cti_path)
 
-    # 2) Call Library.init with the CTI path
+    # 2) Add CTI folder to GENICAM_GENTL64_PATH
+    cti_dir = os.path.dirname(cti_path)
+    env_key = "GENICAM_GENTL64_PATH"
+    existing = os.environ.get(env_key, "")
+    paths = existing.split(os.pathsep) if existing else []
+    if cti_dir not in paths:
+        new_paths = os.pathsep.join([cti_dir] + paths)
+        os.environ[env_key] = new_paths
+        module_log.info(f"Set {env_key}={new_paths}")
+
+    # 3) Properly initialize the library (no CTI argument)
     try:
-        # In 1.3.x this will load that single CTI file (no need for gentl.System calls)
-        ic4.Library.init(cti_path)
-        log.info(f"IC4.Library.init({cti_path!r}) succeeded")
+        ic4.Library.init()
+        module_log.info("ic4.Library.init() succeeded")
     except Exception as e:
-        log.error(f"Failed to init IC4 with CTI {cti_path!r}: {e}")
-        # bubble up so you still get the dialog
+        module_log.error(f"ic4.Library.init() failed: {e}")
         raise
 
-    # 3) Flip your flags so MainWindow knows everything is good
+    # 4) Flip your flags so MainWindow enables camera features
+    # 4) Flip your flags so MainWindow enables camera features
     global IC4_LIBRARY_INITIALIZED, IC4_GENTL_SYSTEM_CONFIGURED, IC4_AVAILABLE
     IC4_LIBRARY_INITIALIZED = True
-    IC4_GENTL_SYSTEM_CONFIGURED = (
-        True  # we don’t need gentl.System anymore, but you can keep this flag
-    )
-    IC4_AVAILABLE = True
 
 
 # --- Combined Check ---
