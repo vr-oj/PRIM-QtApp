@@ -3,13 +3,12 @@ import os
 import sys
 import logging
 import csv
-import json  # For loading camera profiles
+import json
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
     QDockWidget,
     QTextEdit,
-    # QPushButton, # Not directly used, but QAction is
     QToolBar,
     QStatusBar,
     QAction,
@@ -24,13 +23,11 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QWidget,
     QSplitter,
-    # QSizePolicy, # Not directly used in this snippet
     QMessageBox,
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize, QThread
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize
 from PyQt5.QtGui import QIcon, QKeySequence
 
-# Module-level access to prim_app's functions and state flags
 import prim_app
 from prim_app import initialize_ic4_with_cti, is_ic4_fully_initialized
 
@@ -50,7 +47,6 @@ from utils.config import (
     PRIM_RESULTS_DIR,
     DEFAULT_VIDEO_EXTENSION,
     DEFAULT_VIDEO_CODEC,
-    # SUPPORTED_FORMATS, # Not directly used in this file snippet
     ABOUT_TEXT,
 )
 
@@ -64,8 +60,15 @@ from threads.serial_thread import SerialThread
 from recording import RecordingWorker
 from utils.utils import list_serial_ports
 
-
 log = logging.getLogger(__name__)
+
+
+def snake_case(name: str) -> str:
+    """Convert camelCase or PascalCase to SNAKE_CASE."""
+    import re
+
+    s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+    return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).upper()
 
 
 class MainWindow(QMainWindow):
@@ -87,17 +90,16 @@ class MainWindow(QMainWindow):
         self._build_main_toolbar()
         self._build_status_bar()
 
-        if self.top_ctrl and self.pressure_plot_widget:
-            self.top_ctrl.x_axis_limits_changed.connect(
-                self.pressure_plot_widget.set_manual_x_limits
-            )
-            self.top_ctrl.y_axis_limits_changed.connect(
-                self.pressure_plot_widget.set_manual_y_limits
-            )
-            self.top_ctrl.export_plot_image_requested.connect(
-                self.pressure_plot_widget.export_as_image
-            )
-            self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
+        self.top_ctrl.x_axis_limits_changed.connect(
+            self.pressure_plot_widget.set_manual_x_limits
+        )
+        self.top_ctrl.y_axis_limits_changed.connect(
+            self.pressure_plot_widget.set_manual_y_limits
+        )
+        self.top_ctrl.export_plot_image_requested.connect(
+            self.pressure_plot_widget.export_as_image
+        )
+        self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
 
         self.setWindowTitle(
             f"{prim_app.APP_NAME} - v{prim_app.CONFIG_APP_VERSION or '1.0'}"
@@ -115,13 +117,11 @@ class MainWindow(QMainWindow):
             )
 
         self.showMaximized()
-        QTimer.singleShot(
-            50, self._set_initial_splitter_sizes
-        )  # Small delay for layout
+        QTimer.singleShot(50, self._set_initial_splitter_sizes)
         self._set_initial_control_states()
         log.info("MainWindow initialized.")
 
-    def _set_initial_splitter_sizes(self):  # Definition added back
+    def _set_initial_splitter_sizes(self):
         if self.bottom_split:
             total_width = self.bottom_split.size().width()
             if total_width > 0:
@@ -129,12 +129,7 @@ class MainWindow(QMainWindow):
                 right = total_width - left
                 self.bottom_split.setSizes([left, right])
             else:
-                # This might be called before the window is fully shown and has a size.
-                # A QTimer.singleShot with a slightly longer delay, or connecting to showEvent
-                # might be more robust if this warning appears frequently.
-                log.debug(
-                    "Cannot set initial splitter sizes yet, total width is 0 (may resolve after window is fully shown)."
-                )
+                log.debug("Cannot set initial splitter sizes yet, total width is 0")
         else:
             log.warning(
                 "bottom_split not initialized when _set_initial_splitter_sizes was called."
@@ -142,23 +137,19 @@ class MainWindow(QMainWindow):
 
     def _check_and_prompt_for_cti_on_startup(self):
         if not is_ic4_fully_initialized() and prim_app.IC4_AVAILABLE:
-            log.info(
-                "IC4 SDK is available but not fully configured. Prompting for CTI file."
-            )
             QMessageBox.information(
                 self,
                 "Camera SDK Setup Required",
-                "The IC Imaging Control SDK needs a GenTL Producer file (.cti) to work with your camera(s).\n\n"
-                "This is usually provided by your camera manufacturer (e.g., The Imaging Source).\n\n"
-                "Please select the .cti file for your camera hardware.",
+                (
+                    "The IC Imaging Control SDK needs a GenTL Producer file (.cti).\n"
+                    "Please select the .cti file for your camera hardware."
+                ),
             )
-
             suggested_cti_dir = (
                 os.path.dirname(load_app_setting(SETTING_CTI_PATH, ""))
                 if load_app_setting(SETTING_CTI_PATH)
                 else ""
             )
-
             cti_path, _ = QFileDialog.getOpenFileName(
                 self,
                 "Select GenTL Producer File (.cti)",
@@ -168,32 +159,20 @@ class MainWindow(QMainWindow):
             if cti_path and os.path.exists(cti_path):
                 try:
                     initialize_ic4_with_cti(cti_path)
-                    if is_ic4_fully_initialized():
-                        save_app_setting(SETTING_CTI_PATH, cti_path)
-                        QMessageBox.information(
-                            self,
-                            "CTI Loaded",
-                            f"GenTL Producer loaded: {os.path.basename(cti_path)}\n"
-                            "Use 'Camera > Setup Camera...' to configure your specific camera.",
-                        )
-                        self.statusBar().showMessage(
-                            f"CTI loaded: {os.path.basename(cti_path)}", 5000
-                        )
-                    else:
-                        QMessageBox.critical(
-                            self,
-                            "CTI Load Error",
-                            f"Failed to fully initialize SDK with: {os.path.basename(cti_path)}.\n"
-                            "Check logs for details. Camera features may be limited.",
-                        )
+                    save_app_setting(SETTING_CTI_PATH, cti_path)
+                    QMessageBox.information(
+                        self,
+                        "CTI Loaded",
+                        f"GenTL Producer loaded: {os.path.basename(cti_path)}",
+                    )
+                    self.statusBar().showMessage(
+                        f"CTI loaded: {os.path.basename(cti_path)}", 5000
+                    )
                 except Exception as e:
                     QMessageBox.critical(
                         self,
-                        "CTI Loading Exception",
-                        f"Error loading {os.path.basename(cti_path)}: {e}",
-                    )
-                    log.exception(
-                        f"Exception initializing CTI '{cti_path}' via prompt."
+                        "CTI Load Error",
+                        f"Failed to initialize SDK with: {e}",
                     )
             elif cti_path:
                 QMessageBox.warning(
@@ -203,86 +182,102 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(
                     self,
                     "CTI Not Selected",
-                    "No CTI file selected. Camera features require CTI setup via 'Camera > Change CTI File...'.",
+                    "No CTI file selected. Use 'Camera > Change CTI File...'",
                 )
         elif is_ic4_fully_initialized():
-            log.info("IC4 already fully initialized. Skipping startup CTI prompt.")
             self.statusBar().showMessage(
-                f"IC4 initialized with CTI: {os.path.basename(load_app_setting(SETTING_CTI_PATH, 'Unknown CTI'))}",
+                f"IC4 initialized with CTI: {os.path.basename(load_app_setting(SETTING_CTI_PATH, 'Unknown'))}",
                 5000,
             )
-        elif not prim_app.IC4_AVAILABLE and not os.environ.get(
-            "PRIM_APP_TESTING_NO_IC4"
-        ):
-            log.warning("IC4_AVAILABLE is false. Camera features disabled.")
 
     def _connect_camera_signals(self):
-        if not self.camera_thread or not self.camera_panel or not self.camera_view:
-            log.error(
-                "Cannot connect camera signals, essential UI or thread components missing."
-            )
-            return True
-
         th = self.camera_thread
         cp = self.camera_panel
+        if not th or not cp or not self.camera_view:
+            log.error("Cannot connect camera signals: components missing.")
+            return True
 
-        # Disconnect previous signals to avoid multiple calls if re-connecting
-        for signal_name in [
-            "currentTextChanged",
-            "stateChanged",
-            "valueChanged",
-            "clicked",
+        # Disconnect any old signals
+        for sig in [
+            cp.res_combo.currentTextChanged,
+            cp.pix_combo.currentTextChanged,
+            cp.auto_exp_cb.stateChanged,
+            cp.exp_spin.valueChanged,
+            cp.gain_slider.valueChanged,
+            cp.fps_spin.valueChanged,
+            cp.start_stream,
+            cp.stop_stream,
         ]:
-            for widget in [
-                cp.res_combo,
-                cp.pix_combo,
-                cp.auto_exp_cb,
-                cp.exp_spin,
-                cp.gain_slider,
-                cp.fps_spin,
-                cp.start_stream,
-                cp.stop_stream,
-            ]:
-                signal = getattr(widget, signal_name, None)
-                if signal:
-                    try:
-                        while True:
-                            signal.disconnect()  # Disconnect all slots
-                    except (TypeError, RuntimeError):
-                        pass  # No more connections or error disconnecting
+            try:
+                sig.disconnect()
+            except Exception:
+                pass
 
-        for th_signal_name in [
-            "resolutions_updated",
-            "pixel_formats_updated",
-            "fps_range_updated",
-            "exposure_range_updated",
-            "gain_range_updated",
-            "auto_exposure_updated",
-            "properties_updated",
-            "frame_ready",
-            "camera_error",
+        for sig in [
+            th.resolutions_updated,
+            th.pixel_formats_updated,
+            th.fps_range_updated,
+            th.exposure_range_updated,
+            th.gain_range_updated,
+            th.auto_exposure_updated,
+            th.properties_updated,
+            th.frame_ready,
+            th.camera_error,
         ]:
-            th_signal = getattr(th, th_signal_name, None)
-            if th_signal:
-                try:
-                    while True:
-                        th_signal.disconnect()
-                except (TypeError, RuntimeError):
-                    pass
+            try:
+                sig.disconnect()
+            except Exception:
+                pass
 
         # Thread -> Panel
-        th.resolutions_updated.connect(
-            lambda res_list: (
-                cp.res_combo.clear(),
-                cp.res_combo.addItems(res_list or []),
+        th.resolutions_updated.connect(lambda res: cp.res_combo.addItems(res or []))
+        th.pixel_formats_updated.connect(lambda fmts: cp.pix_combo.addItems(fmts or []))
+        th.fps_range_updated.connect(lambda lo, hi: cp.fps_spin.setRange(lo, hi))
+        th.exposure_range_updated.connect(lambda lo, hi: cp.exp_spin.setRange(lo, hi))
+        th.gain_range_updated.connect(
+            lambda lo, hi: cp.gain_slider.setRange(int(lo), int(hi))
+        )
+        th.auto_exposure_updated.connect(cp.auto_exp_cb.setChecked)
+        th.properties_updated.connect(
+            lambda props: cp.exp_spin.setValue(
+                props.get("ExposureTime", cp.exp_spin.value())
             )
         )
-        th.pixel_formats_updated.connect(
-            lambda fmt_list: (
-                cp.pix_combo.clear(),
-                cp.pix_combo.addItems(fmt_list or []),
+        th.properties_updated.connect(
+            lambda props: cp.gain_slider.setValue(
+                int(props.get("Gain", cp.gain_slider.value()))
             )
         )
+
+        # Panel -> Thread
+        cp.resolution_changed.connect(
+            lambda r: th.apply_node_settings(
+                {"Width": int(r.split("x")[0]), "Height": int(r.split("x")[1])}
+            )
+        )
+        cp.pixel_format_changed.connect(
+            lambda f: th.apply_node_settings({"PixelFormat": f})
+        )
+        cp.auto_exposure_toggled.connect(
+            lambda on: th.apply_node_settings(
+                {"ExposureAuto": "Continuous" if on else "Off"}
+            )
+        )
+        cp.exposure_changed.connect(
+            lambda v: th.apply_node_settings({"ExposureTime": v})
+        )
+        cp.gain_changed.connect(lambda v: th.apply_node_settings({"Gain": v}))
+        cp.fps_changed.connect(
+            lambda v: th.apply_node_settings({"AcquisitionFrameRate": v})
+        )
+
+        cp.start_stream.connect(th.start)
+        cp.stop_stream.connect(th.stop)
+
+        th.frame_ready.connect(self.camera_view.update_frame)
+        th.camera_error.connect(self._on_camera_error)
+        log.info("Camera signals connected.")
+        return False
 
         def set_profile_aware_value(
             spinbox,
@@ -383,50 +378,30 @@ class MainWindow(QMainWindow):
 
     def _start_sdk_camera_thread(self, camera_serial, fps, initial_settings=None):
         if self.camera_thread and self.camera_thread.isRunning():
-            log.info("Stopping existing camera thread before starting new one...")
             self.camera_thread.stop()
-            if not self.camera_thread.wait(2000):
-                log.warning("Old camera thread did not stop gracefully, terminating.")
-                self.camera_thread.terminate()
-                self.camera_thread.wait(500)
-        if self.camera_thread:  # Ensure old thread is fully gone before reassigning
+            self.camera_thread.wait(2000)
             self.camera_thread.deleteLater()
-        self.camera_thread = None
-
-        log.info(
-            f"Initializing SDKCameraThread for device: {camera_serial} at {fps} FPS"
-        )
-        self.camera_thread = SDKCameraThread(
-            device_name=camera_serial, fps=fps, parent=self
-        )
+        self.camera_thread = SDKCameraThread(device_name=camera_serial, fps=fps)
         self.camera_settings["cameraSerialPattern"] = camera_serial
 
         if self._connect_camera_signals():
-            log.error(
-                "Failed to connect camera signals during _start_sdk_camera_thread. Aborting."
-            )
-            if self.camera_thread:
-                self.camera_thread.deleteLater()
+            log.error("Failed to connect camera signals. Aborting.")
+            self.camera_thread.deleteLater()
             self.camera_thread = None
             return
 
-        def apply_initial_cam_settings():
-            if self.camera_thread and initial_settings:
-                log.info(
-                    f"Applying initial settings post-start: {list(initial_settings.keys())}"
-                )
-                self.camera_thread.apply_node_settings(initial_settings)
+        def apply_initial():
+            if initial_settings:
+                # Map keys to PROPIDs in SDKCameraThread
+                mapped = {snake_case(k): v for k, v in initial_settings.items()}
+                self.camera_thread.apply_node_settings(mapped)
 
         if initial_settings:
-            QTimer.singleShot(300, apply_initial_cam_settings)
+            QTimer.singleShot(300, apply_initial)
 
         self.camera_thread.start()
-        self.statusBar().showMessage(
-            f"Camera '{self.camera_settings.get('model', camera_serial)}' starting...",
-            5000,
-        )
-        if self.camera_panel:
-            self.camera_panel.setEnabled(True)
+        self.statusBar().showMessage(f"Camera '{camera_serial}' starting...", 5000)
+        self.camera_panel.setEnabled(True)
 
     def _try_load_last_camera(self):
         if not is_ic4_fully_initialized():

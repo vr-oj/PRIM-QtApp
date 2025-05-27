@@ -14,8 +14,9 @@ def _ensure_initialized():
             ic4.Library.init()
             module_log.info("IC4 library initialized")
         except RuntimeError as e:
-            if "already called" in str(e).lower():
-                module_log.debug("IC4.Library.init() was already called, continuing")
+            msg = str(e).lower()
+            if "already called" in msg:
+                module_log.debug("IC4.Library.init() already called, continuing")
             else:
                 module_log.error(f"Error initializing IC4 library: {e}")
                 raise
@@ -24,33 +25,31 @@ def _ensure_initialized():
 
 def profile_camera() -> list:
     """
-    Initialize the IC4 library (once) and discover available cameras.
-    Returns a list of dicts: [{'model': str, 'serial': str}, ...]
+    Discover all IC4 cameras, returning [{'model': str, 'serial': str}, ...].
     """
     _ensure_initialized()
-    devices = ic4.DeviceEnum.devices()
+    devices = ic4.DeviceEnum.devices() or []
     cams = []
-    if not devices:
-        module_log.warning("No IC4 cameras found.")
     for d in devices:
         model = getattr(d, "model_name", None) or getattr(d, "display_name", "Unknown")
-        serial = getattr(d, "serial_number", "")
+        serial = getattr(d, "serial_number", "") or ""
         cams.append({"model": model, "serial": serial})
         module_log.debug(f"Found camera: {model} (SN: {serial})")
+    if not cams:
+        module_log.warning("No IC4 cameras found.")
     return cams
 
 
 def get_camera_node_map(model: str, serial_pattern: str) -> dict:
     """
-    Opens the selected camera and returns a mapping of key PropId names to metadata
-    including only the current value.  Limits and options omitted for simplicity.
+    Open the matching camera and return basic node "current" values.
     """
     _ensure_initialized()
     grabber = ic4.Grabber()
     try:
-        devs = ic4.DeviceEnum.devices()
-        # match by serial if present, otherwise by model name
+        devs = ic4.DeviceEnum.devices() or []
         dev = None
+        # match by serial first, then by exact model
         for x in devs:
             sn = getattr(x, "serial_number", "") or ""
             md = getattr(x, "model_name", None) or getattr(x, "display_name", "")
@@ -62,6 +61,7 @@ def get_camera_node_map(model: str, serial_pattern: str) -> dict:
                 break
         if not dev:
             raise RuntimeError(f"Camera with serial '{serial_pattern}' not found.")
+
         grabber.device_open(dev)
         prop_map = grabber.device_property_map
         nodemap = {}
@@ -73,7 +73,7 @@ def get_camera_node_map(model: str, serial_pattern: str) -> dict:
             ic4.PropId.HEIGHT,
         ):
             try:
-                # Attempt different typed getters
+                # try each getter until one succeeds
                 try:
                     val = prop_map.get_value_int(pid)
                 except Exception:
@@ -83,29 +83,25 @@ def get_camera_node_map(model: str, serial_pattern: str) -> dict:
                         try:
                             val = prop_map.get_value_str(pid)
                         except Exception:
-                            try:
-                                val = prop_map.get_value_bool(pid)
-                            except Exception as e:
-                                module_log.warning(f"Could not read {pid.name}: {e}")
-                                continue
+                            val = prop_map.get_value_bool(pid)
                 nodemap[pid.name] = {"current": val}
             except Exception as exc:
-                module_log.warning(f"Failed reading property {pid.name}: {exc}")
+                module_log.warning(f"Failed reading {pid.name}: {exc}")
         return nodemap
     finally:
-        # is_device_open is a bool attribute, not a method
+        # close if open
         if getattr(grabber, "is_device_open", False):
             grabber.device_close()
 
 
 def test_capture(model: str, serial_pattern: str, settings: dict) -> bool:
     """
-    Applies settings, grabs one frame, and returns True if successful.
+    Apply settings to the camera, grab one frame, return True on success.
     """
     _ensure_initialized()
     grabber = ic4.Grabber()
     try:
-        devs = ic4.DeviceEnum.devices()
+        devs = ic4.DeviceEnum.devices() or []
         dev = next(
             (x for x in devs if serial_pattern in getattr(x, "serial_number", "")), None
         )
@@ -113,9 +109,9 @@ def test_capture(model: str, serial_pattern: str, settings: dict) -> bool:
             raise RuntimeError(f"Camera with serial '{serial_pattern}' not found.")
         grabber.device_open(dev)
         prop_map = grabber.device_property_map
-        # Apply settings
+        # apply each setting if PropId exists
         for name, val in settings.items():
-            pid = getattr(ic4.PropId, name.upper(), None)
+            pid = getattr(ic4.PropId, name, None)
             if pid:
                 try:
                     prop_map.set_value(pid, val)
@@ -134,10 +130,8 @@ def test_capture(model: str, serial_pattern: str, settings: dict) -> bool:
             module_log.error(f"pop_output_buffer error: {be}")
         return ok
     finally:
-        # Stop acquisition if it’s active (boolean flag, not method)
         if getattr(grabber, "is_acquisition_active", False):
             grabber.acquisition_stop()
             grabber.stream_stop()
-        # Close device if open
         if getattr(grabber, "is_device_open", False):
             grabber.device_close()
