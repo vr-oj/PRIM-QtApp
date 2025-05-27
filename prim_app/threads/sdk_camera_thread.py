@@ -16,9 +16,10 @@ class MinimalSinkListener(ic4.QueueSinkListener):
         log.debug(f"MinimalSinkListener '{self.owner_name}' created.")
 
     def frame_ready(self, sink: ic4.QueueSink, buffer: ic4.ImageBuffer, userdata: any):
-        pass
+        pass  # Frame processing is handled by popping buffer in the thread's loop
 
-    def frames_queued(self, sink: ic4.QueueSink):
+    def frames_queued(self, sink: ic4.QueueSink):  # Corrected: Removed userdata
+        # log.debug(f"Listener '{self.owner_name}': Frames queued for {sink}.")
         pass
 
     def sink_connected(
@@ -29,12 +30,15 @@ class MinimalSinkListener(ic4.QueueSinkListener):
         )
         return True
 
-    def sink_disconnected(self, sink: ic4.QueueSink):
+    def sink_disconnected(self, sink: ic4.QueueSink):  # Corrected: Removed userdata
         log.debug(f"Listener '{self.owner_name}': Sink disconnected from {sink}.")
         pass
 
     def sink_property_changed(
-        self, sink: ic4.QueueSink, property_name: str, userdata: any
+        self,
+        sink: ic4.QueueSink,
+        property_name: str,
+        userdata: any,  # Assuming userdata is passed by SDK here
     ):
         pass
 
@@ -57,28 +61,65 @@ class SDKCameraThread(QThread):
             f"SDKCameraThread (Simplified) initialized for device_identifier: '{self.device_identifier}', target_fps (informational): {self.target_fps}"
         )
 
-    def apply_node_settings(self, settings: dict):
-        # This method is still bypassed in the simplified flow from MainWindow
-        # but could be used if we re-enable CameraControlPanel later.
-        if not self.pm or not self.grabber or not self.grabber.is_device_open:
-            log.warning(
-                "apply_node_settings called but property map or grabber not ready."
-            )
-            return
+    def _try_set_property(self, prop_name: str, value: any, value_type: str):
+        """Helper to set a property and log outcome."""
+        try:
+            prop_item = self.pm.find(prop_name)
+            if prop_item:
+                if prop_item.is_writable:
+                    actual_value_to_set = value
+                    if value_type == "enum" and isinstance(
+                        value, str
+                    ):  # For string representation of enum
+                        # Find the enum member by string value
+                        enum_member = getattr(
+                            ic4.PixelFormat, value, None
+                        )  # Example for PixelFormat
+                        if prop_name == "ExposureAuto":  # Example for ExposureAuto
+                            enum_member = getattr(ic4.ExposureAuto, value, None)
+                        # Add more enum types as needed
+                        if enum_member is not None:
+                            actual_value_to_set = enum_member
+                        else:  # Try to set string directly if specific enum member not found (some SDKs allow)
+                            log.warning(
+                                f"Enum member for '{value}' not found in known ic4 enums for {prop_name}. Trying to set string directly."
+                            )
 
-        log.debug(f"SDKCameraThread: Attempting to apply settings: {settings}")
-        for feature_name, value in settings.items():
-            try:
-                # Example: self.pm.set_value("ExposureTime", value) if feature_name == "ExposureTime"
-                # This would need more robust type handling and feature name mapping.
-                # For now, keeping it simple as it's not actively called in simplified mode.
-                log.info(
-                    f"Setting {feature_name} to {value} (actual implementation pending)."
-                )
-                # self.pm.set_value(feature_name, value) # Example
-            except Exception as e:
-                log.error(f"Error applying setting {feature_name}={value}: {e}")
-        pass  # Current simplified mode doesn't use this actively from UI
+                    self.pm.set_value(prop_name, actual_value_to_set)
+
+                    # Read back and log
+                    read_back_value_str = "N/A"
+                    if value_type == "int":
+                        read_back_value_str = str(self.pm.get_value_int(prop_name))
+                    elif value_type == "float":
+                        read_back_value_str = str(self.pm.get_value_float(prop_name))
+                    elif value_type == "bool":
+                        read_back_value_str = str(self.pm.get_value_bool(prop_name))
+                    elif value_type == "enum":
+                        read_back_value_str = self.pm.get_value_str(
+                            prop_name
+                        )  # Read as string
+
+                    log.info(
+                        f"Successfully set {prop_name} to {value}. Read back: {read_back_value_str}"
+                    )
+                else:
+                    current_val_str = "N/A"
+                    try:
+                        current_val_str = prop_item.value_to_str()
+                    except:
+                        pass
+                    log.warning(
+                        f"{prop_name} property found but is not writable. Current value: {current_val_str}"
+                    )
+            else:
+                log.warning(f"{prop_name} property not found.")
+        except ic4.IC4Exception as e_prop:
+            log.error(
+                f"IC4Exception setting {prop_name} to {value}: {e_prop} (Code: {e_prop.code})"
+            )
+        except Exception as e_gen:
+            log.error(f"Generic exception setting {prop_name} to {value}: {e_gen}")
 
     def run(self):
         try:
@@ -87,7 +128,6 @@ class SDKCameraThread(QThread):
                 raise RuntimeError("No camera devices found by IC4 DeviceEnum")
 
             target_device_info = None
-            # ... (device discovery logic remains the same as your last version) ...
             if self.device_identifier:
                 for dev_info in all_devices:
                     current_serial = (
@@ -137,81 +177,15 @@ class SDKCameraThread(QThread):
                 f"Device {target_device_info.model_name} opened. PropertyMap acquired."
             )
 
-            # --- ATTEMPT TO SET A LOWER RESOLUTION ---
-            try:
-                # Let's try a common low resolution, e.g., 640x480
-                # Other options: 800x600, 1280x720. Ensure camera supports it.
-                # The DMK 33UX250 has a max of 2448x2048.
-                new_width = 640
-                new_height = 480
-                log.info(
-                    f"Attempting to set target resolution to {new_width}x{new_height}..."
-                )
-
-                # PixelFormat: Default seems to be Mono8, which is good. Let's ensure it if possible.
-                try:
-                    pixel_format_prop = self.pm.find("PixelFormat")
-                    if pixel_format_prop and pixel_format_prop.is_writable:
-                        # Attempt to set to Mono8 if not already
-                        # current_pf_val = pixel_format_prop.value # This gets the enum member
-                        # if current_pf_val != ic4.PixelFormat.Mono8:
-                        self.pm.set_value("PixelFormat", ic4.PixelFormat.Mono8)
-                        log.info(
-                            f"PixelFormat set/confirmed to: {self.pm.get_value_str('PixelFormat')}"
-                        )
-                    elif pixel_format_prop:
-                        log.info(
-                            f"PixelFormat is {pixel_format_prop.value_to_str()}, not writable."
-                        )
-                    else:
-                        log.warning("PixelFormat property not found.")
-                except Exception as e_pf:
-                    log.error(f"Error handling PixelFormat: {e_pf}")
-
-                # Set Width
-                width_prop = self.pm.find("Width")
-                if width_prop and width_prop.is_writable:
-                    # You could add checks here: if new_width >= width_prop.min and new_width <= width_prop.max
-                    # And respect width_prop.increment if necessary for this camera.
-                    # For simplicity, we'll try setting it directly.
-                    self.pm.set_value("Width", new_width)
-                    log.info(
-                        f"Set Width to {new_width}. Read back: {self.pm.get_value_int('Width')}"
-                    )
-                elif width_prop:
-                    log.warning(
-                        f"Width property found but not writable. Current: {width_prop.value}"
-                    )
-                else:
-                    log.warning("Width property not found.")
-
-                # Set Height
-                height_prop = self.pm.find("Height")
-                if height_prop and height_prop.is_writable:
-                    self.pm.set_value("Height", new_height)
-                    log.info(
-                        f"Set Height to {new_height}. Read back: {self.pm.get_value_int('Height')}"
-                    )
-                elif height_prop:
-                    log.warning(
-                        f"Height property found but not writable. Current: {height_prop.value}"
-                    )
-                else:
-                    log.warning("Height property not found.")
-
-                log.info("Finished attempt to set resolution.")
-
-            except ic4.IC4Exception as e_res:
-                log.error(
-                    f"IC4Exception while trying to set resolution: {e_res} (Code: {e_res.code})"
-                )
-                log.warning("Continuing with current camera resolution due to error.")
-            except Exception as e_gen_res:
-                log.error(
-                    f"Generic exception while trying to set resolution: {e_gen_res}"
-                )
-                log.warning("Continuing with current camera resolution due to error.")
-            # --- END OF RESOLUTION SETTING ATTEMPT ---
+            # --- ATTEMPT TO SET A LOWER RESOLUTION AND PIXELFORMAT ---
+            log.info(
+                "Attempting to configure basic camera properties (PixelFormat, Resolution)..."
+            )
+            self._try_set_property("PixelFormat", "Mono8", "enum")  # Ensure Mono8
+            self._try_set_property("Width", 640, "int")
+            self._try_set_property("Height", 480, "int")
+            log.info("Finished attempt to configure basic camera properties.")
+            # --- END OF PROPERTY SETTING ATTEMPT ---
 
             try:
                 self.sink = ic4.QueueSink(listener=self.sink_listener)
@@ -270,7 +244,8 @@ class SDKCameraThread(QThread):
                             log.warning(
                                 f"Unsupported numpy array shape for QImage: {arr.shape}. Skipping frame."
                             )
-                            buf.release()
+                            if buf:
+                                buf.release()  # Release if we skip
                             continue
                         final_arr_for_qimage = arr
                         if (
@@ -349,7 +324,9 @@ class SDKCameraThread(QThread):
         except RuntimeError as e_rt:
             log.error(f"RuntimeError in SDKCameraThread.run: {e_rt}")
             self.camera_error.emit(str(e_rt), "RUNTIME_SETUP_ERROR")
-        except ic4.IC4Exception as e_ic4_setup:
+        except (
+            ic4.IC4Exception
+        ) as e_ic4_setup:  # This is the outer exception handler for setup phase
             log.error(
                 f"IC4Exception during setup phase in SDKCameraThread.run: {e_ic4_setup} (Code: {e_ic4_setup.code})"
             )
