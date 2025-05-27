@@ -58,3 +58,31 @@ AVAILABLE_RESOLUTIONS = [
     "1280x720",
     "1920x1080",
 ]
+
+# ─── Hardcoded Camera Defaults ───────────────────────────────────────────────────
+CAMERA_HARDCODED_DEFAULTS = {
+    "DMK 33UX250": {  # Based on DMK 33UX250_camera_report.json
+        "Width": 2448,  #
+        "Height": 2048,  #
+        "PixelFormat": "Mono8",  #
+        "ExposureAuto": "Off",  #
+        # REVIEW AND ADJUST THE FOLLOWING DEFAULT VALUES:
+        "AcquisitionFrameRate": 20.0,  # Example target FPS
+        "ExposureTime": 10000.0,  # Example exposure time in µs (e.g., 10ms)
+        "Gain": 0.0,  # Example gain in dB
+        "OffsetX": 0,  #
+        "OffsetY": 0,  #
+    },
+    "DMK 33UP5000": {  # Based on DMK 33UP5000_camera_report.json
+        "Width": 2592,  #
+        "Height": 2048,  #
+        "PixelFormat": "Mono8",  #
+        "ExposureAuto": "Continuous",  #
+        # REVIEW AND ADJUST THE FOLLOWING DEFAULT VALUES:
+        "AcquisitionFrameRate": 15.0,  # Example target FPS
+        "ExposureTime": 33000.0,  # Example exposure time in µs (e.g., 33ms)
+        "Gain": 0.0,  # Example gain in dB
+        "OffsetX": 0,  #
+        "OffsetY": 0,  #
+    },
+}

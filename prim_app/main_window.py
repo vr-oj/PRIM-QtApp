@@ -4,7 +4,7 @@ import sys
 import re
 import logging
 import csv
-import json
+import json  # Keep for other potential uses
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -31,31 +31,35 @@ from PyQt5.QtGui import QIcon, QKeySequence
 
 import prim_app
 from prim_app import initialize_ic4_with_cti, is_ic4_fully_initialized
+import imagingcontrol4 as ic4  # Ensured import
 
 from utils.app_settings import (
     save_app_setting,
     load_app_setting,
     SETTING_CTI_PATH,
     SETTING_LAST_CAMERA_SERIAL,
-    SETTING_LAST_PROFILE_NAME,
+    # SETTING_LAST_PROFILE_NAME, # Commented out as we shift to auto-detection
 )
 from utils.config import (
-    CAMERA_PROFILES_DIR,
+    # CAMERA_PROFILES_DIR, # Commented out
     DEFAULT_FPS,
     DEFAULT_FRAME_SIZE,
-    APP_NAME,
-    APP_VERSION,
+    APP_NAME,  # Used this instead of prim_app.APP_NAME for consistency
+    APP_VERSION,  # Used this instead of prim_app.CONFIG_APP_VERSION
     PRIM_RESULTS_DIR,
     DEFAULT_VIDEO_EXTENSION,
     DEFAULT_VIDEO_CODEC,
     ABOUT_TEXT,
+    CAMERA_HARDCODED_DEFAULTS,  # Import the new hardcoded defaults
 )
 
 from ui.control_panels.top_control_panel import TopControlPanel
 from ui.control_panels.camera_control_panel import CameraControlPanel
 from ui.canvas.gl_viewfinder import GLViewfinder
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
-from threads.sdk_camera_thread import SDKCameraThread
+from threads.sdk_camera_thread import (
+    SDKCameraThread,
+)  # Assumed this is the corrected version
 from camera.setup_wizard import CameraSetupWizard
 from threads.serial_thread import SerialThread
 from recording import RecordingWorker
@@ -64,8 +68,8 @@ from utils.utils import list_serial_ports
 log = logging.getLogger(__name__)
 
 
+# Consider moving snake_case to utils.py if used in multiple files
 def snake_case(name: str) -> str:
-    """Convert CamelCase to SNAKE_CASE"""
     s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
     return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).upper()
 
@@ -77,19 +81,18 @@ class MainWindow(QMainWindow):
         self._recording_worker = None
         self._is_recording = False
         self.camera_thread = None
-        self.camera_panel = None
-        self.camera_view = None
-        self.bottom_split = None
+        self.camera_panel = None  # Initialized in _build_central_widget_layout
+        self.camera_view = None  # Initialized in _build_central_widget_layout
+        self.bottom_split = None  # Initialized in _build_central_widget_layout
         self.camera_settings = {}
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
-        self._build_central_widget_layout()
+        self._build_central_widget_layout()  # Now self.camera_panel is created
         self._build_menus()
         self._build_main_toolbar()
         self._build_status_bar()
 
-        # Plot controls
         self.top_ctrl.x_axis_limits_changed.connect(
             self.pressure_plot_widget.set_manual_x_limits
         )
@@ -101,32 +104,34 @@ class MainWindow(QMainWindow):
         )
         self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
 
-        # Title
         self.setWindowTitle(
-            f"{prim_app.APP_NAME} - v{prim_app.CONFIG_APP_VERSION or '1.0'}"
+            f"{APP_NAME} - v{APP_VERSION}"  # Using imported config values
         )
 
-        # CTI prompt
         self._check_and_prompt_for_cti_on_startup()
         if is_ic4_fully_initialized():
-            QTimer.singleShot(0, self._try_load_last_camera)
+            QTimer.singleShot(0, self._initialize_camera_on_startup)
         else:
             self.statusBar().showMessage(
                 "IC4 SDK not fully configured. Use Camera > Setup...", 5000
             )
+            if self.camera_panel:
+                self.camera_panel.setEnabled(False)
 
         self.showMaximized()
         QTimer.singleShot(50, self._set_initial_splitter_sizes)
-        self._set_initial_control_states()
+        self._set_initial_control_states()  # Call after UI is built
         log.info("MainWindow initialized.")
 
     def _set_initial_splitter_sizes(self):
         if self.bottom_split:
             w = self.bottom_split.width()
-            if w > 0:
-                self.bottom_split.setSizes([int(w * 0.65), w - int(w * 0.65)])
+            if w > 0:  # Ensure width is positive
+                # Adjust as per your layout preference. This assumes 2 main panels in bottom_split.
+                self.bottom_split.setSizes([int(w * 0.6), int(w * 0.4)])
 
     def _check_and_prompt_for_cti_on_startup(self):
+        # Your existing logic here is good.
         if not is_ic4_fully_initialized() and prim_app.IC4_AVAILABLE:
             QMessageBox.information(
                 self,
@@ -147,6 +152,12 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage(f"CTI: {os.path.basename(cti)}", 5000)
                 except Exception as e:
                     QMessageBox.critical(self, "CTI Error", str(e))
+            else:
+                self.statusBar().showMessage(
+                    "No CTI file selected. Camera functionality will be limited.", 5000
+                )
+                if self.camera_panel:  # Check if camera_panel exists
+                    self.camera_panel.setEnabled(False)
         elif is_ic4_fully_initialized():
             self.statusBar().showMessage(
                 f"IC4 initialized with CTI: {os.path.basename(load_app_setting(SETTING_CTI_PATH, ''))}",
@@ -157,38 +168,87 @@ class MainWindow(QMainWindow):
         th = self.camera_thread
         cp = self.camera_panel
         if not (th and cp and self.camera_view):
+            log.warning(
+                "Cannot connect camera signals: thread, panel, or view missing."
+            )
             return True
 
-        # Disconnect existing
-        for sig in [
-            cp.res_combo.currentTextChanged,
-            cp.pix_combo.currentTextChanged,
-            cp.auto_exp_cb.stateChanged,
-            cp.exp_spin.valueChanged,
-            cp.gain_slider.valueChanged,
-            cp.fps_spin.valueChanged,
-            cp.start_stream,
-            cp.stop_stream,
-        ]:
-            try:
-                sig.disconnect()
-            except:
-                pass
-        for sig in [
-            th.resolutions_updated,
-            th.pixel_formats_updated,
-            th.fps_range_updated,
-            th.exposure_range_updated,
-            th.gain_range_updated,
-            th.auto_exposure_updated,
-            th.properties_updated,
-            th.frame_ready,
-            th.camera_error,
-        ]:
-            try:
-                sig.disconnect()
-            except:
-                pass
+        # Robust disconnection of any previous signals
+        # Store connections made to disconnect them specifically if needed,
+        # though Qt usually handles this if objects are parented or deleted.
+        # For simplicity, direct connect/disconnect or rely on Qt's auto-disconnect on object deletion.
+        # Your previous version's disconnect loop was fine, but let's ensure we're connecting to current instances.
+
+        # Disconnect all previous connections from signals to avoid multiple calls (idempotency)
+        try:
+            th.resolutions_updated.disconnect()
+        except TypeError:
+            pass
+        try:
+            th.pixel_formats_updated.disconnect()
+        except TypeError:
+            pass
+        try:
+            th.fps_range_updated.disconnect()
+        except TypeError:
+            pass
+        try:
+            th.exposure_range_updated.disconnect()
+        except TypeError:
+            pass
+        try:
+            th.gain_range_updated.disconnect()
+        except TypeError:
+            pass
+        try:
+            th.auto_exposure_updated.disconnect()
+        except TypeError:
+            pass
+        try:
+            th.properties_updated.disconnect()
+        except TypeError:
+            pass
+        try:
+            th.frame_ready.disconnect()
+        except TypeError:
+            pass
+        try:
+            th.camera_error.disconnect()
+        except TypeError:
+            pass
+
+        try:
+            cp.resolution_changed.disconnect()
+        except TypeError:
+            pass
+        try:
+            cp.pixel_format_changed.disconnect()
+        except TypeError:
+            pass
+        try:
+            cp.auto_exposure_toggled.disconnect()
+        except TypeError:
+            pass
+        try:
+            cp.exposure_changed.disconnect()
+        except TypeError:
+            pass
+        try:
+            cp.gain_changed.disconnect()
+        except TypeError:
+            pass
+        try:
+            cp.fps_changed.disconnect()
+        except TypeError:
+            pass
+        try:
+            cp.start_stream.disconnect()
+        except TypeError:
+            pass
+        try:
+            cp.stop_stream.disconnect()
+        except TypeError:
+            pass
 
         # Thread → Panel
         th.resolutions_updated.connect(
@@ -203,18 +263,31 @@ class MainWindow(QMainWindow):
             lambda lo, hi: cp.gain_slider.setRange(int(lo), int(hi))
         )
         th.auto_exposure_updated.connect(cp.auto_exp_cb.setChecked)
-        th.properties_updated.connect(
-            lambda props: cp.exp_spin.setValue(
-                props.get("ExposureTime", cp.exp_spin.value())
-            )
-        )
-        th.properties_updated.connect(
-            lambda props: cp.gain_slider.setValue(
-                int(props.get("Gain", cp.gain_slider.value()))
-            )
-        )
+
+        def update_panel_from_props(props_dict):
+            # SDKCameraThread emits dict with UPPER_SNAKE_CASE keys like "EXPOSURE_TIME"
+            # CameraControlPanel widgets should be updated accordingly.
+            if "EXPOSURE_TIME" in props_dict:
+                cp.exp_spin.setValue(props_dict["EXPOSURE_TIME"])
+            if "GAIN" in props_dict:
+                cp.gain_slider.setValue(int(props_dict["GAIN"]))
+            if "ACQUISITION_FRAME_RATE" in props_dict:
+                cp.fps_spin.setValue(props_dict["ACQUISITION_FRAME_RATE"])
+            # Update pixel format combo if PIXEL_FORMAT string is in props_dict
+            if "PIXEL_FORMAT" in props_dict:
+                idx = cp.pix_combo.findText(
+                    props_dict["PIXEL_FORMAT"], Qt.MatchFixedString
+                )
+                if idx >= 0:
+                    cp.pix_combo.setCurrentIndex(idx)
+            # Update resolution (Width/Height) if they are separate items in panel, or a combined string
+            # This part depends on how CameraControlPanel handles resolution display.
+            # Assuming for now it's handled by direct Width/Height properties if needed.
+
+        th.properties_updated.connect(update_panel_from_props)
 
         # Panel → Thread
+        # CameraControlPanel emits values that SDKCameraThread.apply_node_settings expects (CamelCase keys)
         cp.resolution_changed.connect(
             lambda r: r
             and th.apply_node_settings(
@@ -236,128 +309,193 @@ class MainWindow(QMainWindow):
         cp.fps_changed.connect(
             lambda v: th.apply_node_settings({"AcquisitionFrameRate": v})
         )
+
         cp.start_stream.connect(th.start)
         cp.stop_stream.connect(th.stop)
 
         th.frame_ready.connect(self.camera_view.update_frame)
         th.camera_error.connect(self._on_camera_error)
-        log.info("Camera signals connected.")
-        return False
 
-    def _start_sdk_camera_thread(self, camera_serial, fps, initial_settings=None):
-        # Stop any existing
+        log.info("Camera signals connected.")
+        return False  # Indicates success
+
+    def _start_sdk_camera_thread(self, camera_identifier, fps, initial_settings=None):
         if self.camera_thread and self.camera_thread.isRunning():
+            log.info("Stopping existing camera thread before starting new one.")
             self.camera_thread.stop()
-            self.camera_thread.wait(2000)
-            self.camera_thread.deleteLater()
-        # Create new thread
-        self.camera_thread = SDKCameraThread(device_name=camera_serial, fps=fps)
-        self.camera_settings["cameraSerialPattern"] = camera_serial
-        if self._connect_camera_signals():
-            log.error("Failed to connect camera signals.")
             self.camera_thread.deleteLater()
             self.camera_thread = None
-            return
+            QApplication.processEvents()
 
-        # Apply defaults after start
-        def apply_defaults():
-            if initial_settings:
-                mapped = {snake_case(k): v for k, v in initial_settings.items()}
-                self.camera_thread.apply_node_settings(mapped)
+        log.info(
+            f"Creating SDKCameraThread for device: '{camera_identifier}', Target FPS: {fps}"
+        )
+        self.camera_thread = SDKCameraThread(
+            device_name=camera_identifier, fps=float(fps), parent=self
+        )
 
-        if initial_settings:
-            QTimer.singleShot(300, apply_defaults)
+        # self.camera_settings is already populated by _initialize_camera_on_startup
+        # Update the 'cameraSerialPattern' which SDKCameraThread might use internally if 'device_name' isn't serial
+        self.camera_settings["cameraSerialPattern"] = camera_identifier
 
-        self.camera_thread.start()
-        self.statusBar().showMessage(f"Camera '{camera_serial}' starting...", 5000)
-        self.camera_panel.setEnabled(True)
-
-    def _try_load_last_camera(self):
-        if not is_ic4_fully_initialized():
-            log.info("IC4 not fully initialized, cannot auto-load last camera.")
-            return
-
-        last_profile_name = load_app_setting(SETTING_LAST_PROFILE_NAME)
-        if not last_profile_name:
-            log.info("No last camera profile saved. Use 'Camera > Setup Camera...'.")
-            self.statusBar().showMessage(
-                "No default camera profile. Use Camera > Setup Camera.", 5000
-            )
-            if self.camera_panel:
-                self.camera_panel.setEnabled(False)  # No camera to control
-            return
-
-        profile_path = os.path.join(CAMERA_PROFILES_DIR, f"{last_profile_name}.json")
-        if not os.path.exists(profile_path):
-            log.warning(
-                f"Last camera profile '{last_profile_name}' not found at {profile_path}."
-            )
-            self.statusBar().showMessage(
-                f"Profile '{last_profile_name}' missing. Use Camera > Setup Camera.",
-                5000,
-            )
-            save_app_setting(SETTING_LAST_PROFILE_NAME, None)
-            save_app_setting(SETTING_LAST_CAMERA_SERIAL, None)
+        if self._connect_camera_signals():
+            log.error("Failed to connect camera signals for new SDKCameraThread.")
+            self.camera_thread.deleteLater()
+            self.camera_thread = None
             if self.camera_panel:
                 self.camera_panel.setEnabled(False)
             return
 
-        try:
-            with open(profile_path, "r") as f:
-                profile_data = json.load(f)
-            log.info(f"Loaded last camera profile: {last_profile_name}")
-            self.camera_settings = profile_data
+        if initial_settings:
+            log.debug(
+                f"Queuing application of initial hardcoded settings: {initial_settings}"
+            )
 
-            cam_serial = profile_data.get("serialPattern", None)
-            if cam_serial is None:
-                log.error(f"Profile '{last_profile_name}' missing 'serialPattern'.")
+            def apply_initial_settings_on_thread():
+                if self.camera_thread and self.camera_thread.pm:
+                    log.info(
+                        f"Applying initial hardcoded settings via QTimer: {initial_settings}"
+                    )
+                    self.camera_thread.apply_node_settings(
+                        initial_settings
+                    )  # Assumes initial_settings keys are CamelCase
+                elif self.camera_thread:
+                    log.warning(
+                        "apply_initial_settings_on_thread: pm not ready, retrying..."
+                    )
+                    QTimer.singleShot(300, apply_initial_settings_on_thread)
+                else:
+                    log.warning(
+                        "apply_initial_settings_on_thread: camera_thread is None"
+                    )
+
+            # Increased delay to allow SDKCameraThread.run() to open device and init self.pm
+            QTimer.singleShot(700, apply_initial_settings_on_thread)
+
+        log.info(f"Starting SDKCameraThread for {camera_identifier}...")
+        self.camera_thread.start()
+        # UI panel enabling and status messages will be handled based on thread signals (e.g. successful init or error)
+        # For now, optimistically enable and set status.
+        # SDKCameraThread should emit signals that MainWindow can use to update UI precisely.
+        if self.camera_panel:
+            self.camera_panel.setEnabled(True)
+        current_model_display = self.camera_settings.get(
+            "cameraModel", camera_identifier
+        )
+        self.statusBar().showMessage(
+            f"Attempting to start camera: {current_model_display}", 5000
+        )
+
+    def _initialize_camera_on_startup(self):  # Renamed from _try_load_last_camera
+        if not is_ic4_fully_initialized():
+            log.info("IC4 not fully initialized, cannot auto-configure camera.")
+            self.statusBar().showMessage(
+                "IC4 SDK not configured. Use Camera > Setup...", 5000
+            )
+            if self.camera_panel:
+                self.camera_panel.setEnabled(False)
+            return
+
+        log.info("Attempting to auto-detect and configure known lab cameras...")
+
+        available_devices = []
+        try:
+            available_devices = ic4.DeviceEnum.devices()
+            if not available_devices:
+                log.warning("No camera devices found by ic4.DeviceEnum.")
+                self.statusBar().showMessage("No camera devices found.", 5000)
                 if self.camera_panel:
                     self.camera_panel.setEnabled(False)
                 return
-
-            all_initial_settings = {
-                **profile_data.get("defaults", {}),
-                **profile_data.get("advanced", {}),
-            }
-            target_fps = all_initial_settings.get("AcquisitionFrameRate", DEFAULT_FPS)
-
-            profile_cti = profile_data.get("ctiPathUsed")
-            current_cti = load_app_setting(SETTING_CTI_PATH)
-            if (
-                profile_cti
-                and current_cti
-                and os.path.normpath(profile_cti) != os.path.normpath(current_cti)
-            ):
-                log.warning(
-                    f"Profile '{last_profile_name}' CTI '{os.path.basename(profile_cti)}' "
-                    f"differs from current CTI '{os.path.basename(current_cti)}'."
-                )
-                QMessageBox.warning(
-                    self,
-                    "Profile/CTI Mismatch",
-                    f"Profile '{last_profile_name}' was saved with CTI:\n{os.path.basename(profile_cti)}\n\n"
-                    f"Currently loaded CTI is:\n{os.path.basename(current_cti)}\n\n"
-                    "Attempting connection. If issues occur, re-run Camera Setup or use 'Camera > Change CTI File...'.",
-                )
-
-            self._start_sdk_camera_thread(cam_serial, target_fps, all_initial_settings)
-        except json.JSONDecodeError:
-            log.error(f"Corrupted profile file: {profile_path}")
-            QMessageBox.critical(
-                self,
-                "Profile Error",
-                f"Could not parse profile: {last_profile_name}.json. Please delete it and re-setup.",
-            )
+        except Exception as e:
+            log.error(
+                f"Error enumerating IC4 devices: {e}"
+            )  # Catch specific ic4 exceptions if possible
+            self.statusBar().showMessage(f"Error enumerating devices: {e}", 5000)
             if self.camera_panel:
                 self.camera_panel.setEnabled(False)
-        except Exception as e:
-            log.exception(
-                f"Failed to auto-load or start last camera '{last_profile_name}': {e}"
+            return
+
+        detected_camera_device_info = None
+        camera_model_name_found = None
+
+        for dev_info in available_devices:
+            model_name = dev_info.model_name
+            log.debug(
+                f"Found device: Model='{model_name}', Serial='{dev_info.serial_number}', ID='{dev_info.unique_id}'"
             )
-            QMessageBox.critical(
-                self,
-                "Camera Auto-Load Error",
-                f"Could not auto-start '{last_profile_name}':\n{e}",
+            if model_name in CAMERA_HARDCODED_DEFAULTS:
+                log.info(
+                    f"Known lab camera detected: {model_name} (SN: {dev_info.serial_number})"
+                )
+                detected_camera_device_info = dev_info
+                camera_model_name_found = model_name
+                break  # Use the first known camera found
+
+        if not detected_camera_device_info:
+            models_found = [d.model_name for d in available_devices]
+            serials_found = [d.serial_number for d in available_devices]
+            log.warning(
+                f"No known lab cameras found. Connected devices models: {models_found}, serials: {serials_found}"
+            )
+            self.statusBar().showMessage("No supported lab camera detected.", 7000)
+            if self.camera_panel:
+                self.camera_panel.setEnabled(False)
+            return
+
+        if (
+            camera_model_name_found
+            and camera_model_name_found in CAMERA_HARDCODED_DEFAULTS
+        ):
+            hardcoded_settings = CAMERA_HARDCODED_DEFAULTS[
+                camera_model_name_found
+            ].copy()  # Use a copy
+            log.info(
+                f"Loading hardcoded default settings for {camera_model_name_found}: {hardcoded_settings}"
+            )
+
+            target_fps = float(
+                hardcoded_settings.get("AcquisitionFrameRate", DEFAULT_FPS)
+            )
+
+            camera_identifier = detected_camera_device_info.serial_number
+            if not camera_identifier:
+                camera_identifier = detected_camera_device_info.unique_id
+                log.warning(
+                    f"Serial for {camera_model_name_found} empty. Using Unique ID: {camera_identifier}"
+                )
+            if not camera_identifier:
+                camera_identifier = camera_model_name_found
+                log.warning(
+                    f"Unique ID for {camera_model_name_found} empty. Using Model: {camera_identifier} (less robust)."
+                )
+
+            self.camera_settings = {
+                "cameraModel": camera_model_name_found,
+                "cameraSerialPattern": camera_identifier,
+                "defaults": hardcoded_settings,  # For reference, SDKCameraThread gets flat dict
+                "source": "hardcoded_default",
+            }
+
+            try:
+                self._start_sdk_camera_thread(
+                    camera_identifier, target_fps, hardcoded_settings
+                )
+                save_app_setting(SETTING_LAST_CAMERA_SERIAL, camera_identifier)
+            except Exception as e:
+                log.exception(
+                    f"Failed to start camera '{camera_model_name_found}' with hardcoded settings: {e}"
+                )
+                QMessageBox.critical(
+                    self,
+                    "Camera Start Error",
+                    f"Could not start {camera_model_name_found}:\n{e}",
+                )
+                if self.camera_panel:
+                    self.camera_panel.setEnabled(False)
+        else:  # Should not happen if detected_camera_device_info is set
+            log.error(
+                "Logic error: Detected camera but couldn't find its hardcoded settings."
             )
             if self.camera_panel:
                 self.camera_panel.setEnabled(False)
@@ -367,66 +505,68 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Camera SDK Not Ready",
-                "The camera SDK (IC4) is not configured with a CTI file. "
-                "Please use 'Camera > Change CTI File...' to select one first, "
-                "or ensure IC Imaging Control SDK is correctly installed if the problem persists.",
+                "IC4 SDK not configured. Use 'Camera > Change CTI File...' first.",
             )
             return
 
         if self.camera_thread and self.camera_thread.isRunning():
             log.info("Stopping existing camera thread before running setup wizard...")
-            self.camera_thread.stop()  # This calls wait() internally now
-            # self.camera_thread.wait(3000) # Ensure it has time to stop and release device
-            self.camera_thread.deleteLater()  # Clean up the old thread
+            self.camera_thread.stop()
+            self.camera_thread.deleteLater()
             self.camera_thread = None
             if self.camera_panel:
                 self.camera_panel.setEnabled(False)
-            QApplication.processEvents()  # Allow Qt to process events for thread cleanup
-            log.info("Existing camera thread stopped and cleaned up.")
+            QApplication.processEvents()
+            log.info("Existing camera thread stopped for setup wizard.")
 
         wizard = CameraSetupWizard(self)
         if wizard.exec_() != QDialog.Accepted:
             log.info("Camera Setup Wizard cancelled.")
+            # Optionally, try to restart the previously auto-detected camera if self.camera_settings is still valid
+            # For now, if cancelled, camera remains off until app restart or manual action.
             return
 
         self.camera_settings = wizard.settings
         log.info(
-            f"Camera Setup Wizard completed. Settings acquired: {list(self.camera_settings.keys())}"
+            f"Camera Setup Wizard completed. Settings: {list(self.camera_settings.keys())}"
         )
 
+        # Save profile from wizard if you want to enable profiles again later
         profile_name_saved_as = self.camera_settings.get("profileNameSavedAs")
-        camera_serial = self.camera_settings.get("cameraSerialPattern")
+        camera_serial_from_wizard = self.camera_settings.get("cameraSerialPattern")
 
-        if profile_name_saved_as:
-            save_app_setting(SETTING_LAST_PROFILE_NAME, profile_name_saved_as)
-            log.info(f"Saved last profile name hint: {profile_name_saved_as}")
-        if camera_serial:
-            save_app_setting(SETTING_LAST_CAMERA_SERIAL, camera_serial)
-            log.info(f"Saved last camera serial hint: {camera_serial}")
+        # if profile_name_saved_as:
+        #     save_app_setting(SETTING_LAST_PROFILE_NAME, profile_name_saved_as) # Re-enable if using profiles
+        if camera_serial_from_wizard:
+            save_app_setting(SETTING_LAST_CAMERA_SERIAL, camera_serial_from_wizard)
 
-        target_fps = self.camera_settings.get("defaults", {}).get(
-            "AcquisitionFrameRate", DEFAULT_FPS
-        )
-        all_initial_settings = {
+        all_wizard_settings = {
             **self.camera_settings.get("defaults", {}),
             **self.camera_settings.get("advanced", {}),
         }
+        target_fps_from_wizard = float(
+            all_wizard_settings.get("AcquisitionFrameRate", DEFAULT_FPS)
+        )
 
-        if camera_serial:
+        if camera_serial_from_wizard:
+            log.info(
+                f"Starting camera from wizard settings for SN/Pattern: {camera_serial_from_wizard}"
+            )
             self._start_sdk_camera_thread(
-                camera_serial, target_fps, all_initial_settings
+                camera_serial_from_wizard, target_fps_from_wizard, all_wizard_settings
             )
         else:
-            log.error("No camera serial pattern in wizard settings post-completion.")
-            QMessageBox.critical(
-                self, "Setup Error", "Camera setup error: No camera serial identified."
-            )
+            log.error("No camera serial in wizard settings.")
+            QMessageBox.critical(self, "Setup Error", "No camera serial from wizard.")
 
     def _init_paths_and_icons(self):
+        # Your existing code seems fine.
         base = os.path.dirname(os.path.abspath(__file__))
         icon_dir = os.path.join(base, "ui", "icons")
         if not os.path.isdir(icon_dir):
-            alt_icon_dir = os.path.join(os.path.dirname(base), "ui", "icons")
+            alt_icon_dir = os.path.join(
+                os.path.dirname(base), "ui", "icons"
+            )  # For dev structure
             if os.path.isdir(alt_icon_dir):
                 icon_dir = alt_icon_dir
             else:
@@ -434,10 +574,7 @@ class MainWindow(QMainWindow):
 
         def get_icon(name):
             path = os.path.join(icon_dir, name)
-            if not os.path.exists(path):
-                log.warning(f"Icon not found: {path}")
-                return QIcon()
-            return QIcon(path)
+            return QIcon(path) if os.path.exists(path) else QIcon()
 
         self.icon_record_start = get_icon("record.svg")
         self.icon_record_stop = get_icon("stop.svg")
@@ -446,6 +583,7 @@ class MainWindow(QMainWindow):
         self.icon_disconnect = get_icon("plug_disconnect.svg")
 
     def _build_console_log_dock(self):
+        # Your existing code seems fine.
         self.dock_console = QDockWidget("Console Log", self)
         self.dock_console.setObjectName("ConsoleLogDock")
         self.dock_console.setAllowedAreas(
@@ -461,6 +599,7 @@ class MainWindow(QMainWindow):
         self.dock_console.setVisible(False)
 
     def _build_central_widget_layout(self):
+        # Your existing code seems fine.
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -469,15 +608,17 @@ class MainWindow(QMainWindow):
         top_layout = QHBoxLayout(top_row)
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(5)
-        self.camera_panel = CameraControlPanel(self)
+        self.camera_panel = CameraControlPanel(self)  # Panel created here
         top_layout.addWidget(self.camera_panel)
-        self.camera_panel.setEnabled(False)
+        # self.camera_panel.setEnabled(False) # Initial state set in _set_initial_control_states
         self.top_ctrl = TopControlPanel(self)
         top_layout.addWidget(self.top_ctrl)
         if hasattr(self.top_ctrl, "plot_controls"):
             top_layout.addWidget(self.top_ctrl.plot_controls)
         else:
-            log.error("self.top_ctrl.plot_controls not found.")
+            log.error(
+                "self.top_ctrl.plot_controls not found."
+            )  # Should not happen if TopControlPanel is correct
         layout.addWidget(top_row)
         self.bottom_split = QSplitter(Qt.Horizontal)
         self.bottom_split.setChildrenCollapsible(False)
@@ -491,6 +632,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
     def _build_menus(self):
+        # Your existing code seems fine.
         mb = self.menuBar()
         fm = mb.addMenu("&File")
         exp_data_act = QAction(
@@ -557,11 +699,8 @@ class MainWindow(QMainWindow):
         pm.addAction(reset_zoom_act)
 
         hm = mb.addMenu("&Help")
-        app_name_for_menu = (
-            prim_app.APP_NAME if hasattr(prim_app, "APP_NAME") else "Application"
-        )
         about_act = QAction(
-            f"&About {app_name_for_menu}", self, triggered=self._show_about_dialog
+            f"&About {APP_NAME}", self, triggered=self._show_about_dialog
         )
         hm.addAction(about_act)
         hm.addAction("About &Qt", QApplication.instance().aboutQt)
@@ -575,16 +714,20 @@ class MainWindow(QMainWindow):
         cam_menu.addAction(change_cti_act)
 
     def _change_cti_file(self):
+        # Your existing code seems fine.
         cti_path, _ = QFileDialog.getOpenFileName(self, "Select CTI File", "", "*.cti")
         if not cti_path:
             return
         try:
-            initialize_ic4_with_cti(cti_path)
+            initialize_ic4_with_cti(cti_path)  # from prim_app
             QMessageBox.information(self, "CTI Loaded", f"Loaded CTI:\n{cti_path}")
+            # Consider restarting camera detection or prompting user
+            self._initialize_camera_on_startup()  # Re-try camera init with new CTI
         except Exception as exc:
             QMessageBox.critical(self, "CTI Exception", str(exc))
 
     def _build_main_toolbar(self):
+        # Your existing code seems fine.
         tb = QToolBar("Main Controls")
         tb.setObjectName("MainControlsToolbar")
         tb.setIconSize(QSize(20, 20))
@@ -600,17 +743,19 @@ class MainWindow(QMainWindow):
         self.serial_port_combobox = QComboBox()
         self.serial_port_combobox.setToolTip("Select Serial Port")
         self.serial_port_combobox.setMinimumWidth(200)
-        self.serial_port_combobox.addItem("🔌 Simulated Data", QVariant())
-        ports = list_serial_ports()
+        self.serial_port_combobox.addItem(
+            "🔌 Simulated Data", QVariant()
+        )  # QVariant for consistency
+        ports = list_serial_ports()  # from utils.utils
         if ports:
-            [
+            for p_dev, p_desc in ports:  # Unpack tuple
                 self.serial_port_combobox.addItem(
-                    f"{os.path.basename(p)} ({d})", QVariant(p)
+                    f"{os.path.basename(p_dev)} ({p_desc})", QVariant(p_dev)
                 )
-                for p, d in ports
-            ]
         else:
-            self.serial_port_combobox.addItem("No Serial Ports Found", QVariant())
+            self.serial_port_combobox.addItem(
+                "No Serial Ports Found", QVariant()
+            )  # Use QVariant() for no port
             self.serial_port_combobox.setEnabled(False)
         tb.addWidget(self.serial_port_combobox)
         tb.addSeparator()
@@ -620,12 +765,14 @@ class MainWindow(QMainWindow):
             tb.addAction(self.stop_recording_action)
 
     def _build_status_bar(self):
-        sb = self.statusBar() or QStatusBar(self)
-        self.setStatusBar(sb)
+        # Your existing code seems fine.
+        sb = self.statusBar()  # Gets existing or creates one if None
+        self.setStatusBar(sb)  # Ensure it's set
         self.app_session_time_label = QLabel("Session: 00:00:00")
         sb.addPermanentWidget(self.app_session_time_label)
         self._app_session_seconds = 0
-        self._app_session_timer = QTimer(self, interval=1000)
+        self._app_session_timer = QTimer(self)  # Parent `self` is good
+        self._app_session_timer.setInterval(1000)  # Set interval explicitly
         self._app_session_timer.timeout.connect(self._update_app_session_time)
         self._app_session_timer.start()
 
@@ -636,11 +783,10 @@ class MainWindow(QMainWindow):
             self.start_recording_action.setEnabled(False)
         if hasattr(self, "stop_recording_action"):
             self.stop_recording_action.setEnabled(False)
+
+        # Camera panel is now enabled/disabled by camera start/stop logic
         if self.camera_panel:
-            self.camera_panel.setEnabled(
-                is_ic4_fully_initialized()
-                and bool(load_app_setting(SETTING_LAST_PROFILE_NAME))
-            )
+            self.camera_panel.setEnabled(False)
 
     @pyqtSlot(str)
     def _handle_serial_status_change(self, status: str):
@@ -781,6 +927,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "stop_recording_action"):
             self.stop_recording_action.setEnabled(can_stop)
 
+    # --- Recording Methods ---
     def _trigger_start_recording_dialog(self):
         if not (self._serial_thread and self._serial_thread.isRunning()):
             QMessageBox.warning(self, "Cannot Record", "PRIM device inactive.")
@@ -788,6 +935,7 @@ class MainWindow(QMainWindow):
         if self._is_recording:
             QMessageBox.information(self, "Recording Active", "Session already active.")
             return
+
         dialog = QDialog(self)
         dialog.setWindowTitle("New Recording Session")
         layout = QFormLayout(dialog)
@@ -804,6 +952,7 @@ class MainWindow(QMainWindow):
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addRow(buttons)
+
         if dialog.exec_() != QDialog.Accepted:
             return
         save_app_setting("last_operator", operator_edit.text())
@@ -819,33 +968,56 @@ class MainWindow(QMainWindow):
         if not session_name_safe:
             session_name_safe = f"Session_Unnamed_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')}"
         session_folder = os.path.join(PRIM_RESULTS_DIR, session_name_safe)
-        try:
-            os.makedirs(session_folder, exist_ok=True)
-        except Exception as e:
-            log.error(f"Fail create folder {session_folder}: {e}")
-            QMessageBox.critical(self, "File Error", f"Folder error:\n{e}")
-            return
+        os.makedirs(session_folder, exist_ok=True)
         recording_base_prefix = os.path.join(session_folder, session_name_safe)
         self.last_trial_basepath = session_folder
+
         w, h = DEFAULT_FRAME_SIZE
         record_fps = DEFAULT_FPS
-        if self.camera_thread and self.camera_settings:
-            current_width = self.camera_settings.get("defaults", {}).get("Width")
-            current_height = self.camera_settings.get("defaults", {}).get("Height")
-            current_fps_setting = self.camera_settings.get("defaults", {}).get(
-                "AcquisitionFrameRate"
+        active_cam_settings = self.camera_settings.get(
+            "defaults", {}
+        )  # 'defaults' holds the hardcoded set
+
+        queried_live = False
+        if self.camera_thread and self.camera_thread.pm:
+            try:
+                # Ensure PropId attributes are correctly accessed (assuming _propid_map is working in SDKCameraThread)
+                # For direct access here, we'd need to know if ic4.PropId.WIDTH etc. are valid.
+                # It's safer if SDKCameraThread stores these current values after setting or querying.
+                # Let's assume self.camera_settings["defaults"] has the applied Width/Height/FPS.
+                # If not, SDKCameraThread should emit them via properties_updated.
+
+                # Simplified: use stored settings from self.camera_settings which were applied.
+                # More robust would be to have SDKCameraThread maintain current W,H,FPS properties.
+                current_width = active_cam_settings.get("Width")
+                current_height = active_cam_settings.get("Height")
+                current_fps_setting = active_cam_settings.get("AcquisitionFrameRate")
+                if current_width and current_height:
+                    w, h = int(current_width), int(current_height)
+                if current_fps_setting:
+                    record_fps = float(current_fps_setting)
+                log.info(
+                    f"Using stored/hardcoded settings for recording: W={w}, H={h}, FPS={record_fps}"
+                )
+                queried_live = True  # Placeholder, as this is not truly live query here
+            except Exception as e_live_query:
+                log.warning(
+                    f"Could not use settings from self.camera_settings for recording, falling back: {e_live_query}"
+                )
+
+        if (
+            not queried_live
+        ):  # Fallback if settings not found in self.camera_settings.defaults
+            log.warning(
+                f"No camera settings in self.camera_settings.defaults, using general defaults for recording: W={w}, H={h}, FPS={record_fps}"
             )
-            if current_width and current_height:
-                w, h = int(current_width), int(current_height)
-                log.info(f"Using {w}x{h} from active cam settings.")
-            if current_fps_setting:
-                record_fps = float(current_fps_setting)
-                log.info(f"Using FPS {record_fps} from active cam settings.")
+
         video_ext = DEFAULT_VIDEO_EXTENSION.lower()
         codec = DEFAULT_VIDEO_CODEC
         log.info(
             f"REC Start: '{session_name_safe}'. Params: FPS:{record_fps}, Size:{w}x{h}, Format:{video_ext}/{codec}"
         )
+
         try:
             if self._recording_worker and self._recording_worker.isRunning():
                 self._recording_worker.stop_worker()
@@ -867,32 +1039,31 @@ class MainWindow(QMainWindow):
                 and self._recording_worker.isRunning()
                 and self._recording_worker.is_ready_to_record
             ):
-                log.error("REC worker/TrialRecorder not ready.")
                 raise RuntimeError("REC worker failed readiness.")
-        except Exception as e:
-            log.exception(f"Critical error REC start: {e}")
-            QMessageBox.critical(self, "REC Error", f"Could not start REC worker: {e}")
-            if self._recording_worker:
-                self._recording_worker.deleteLater()
-                self._recording_worker = None
-                return
-        self._is_recording = True
-        if hasattr(self, "start_recording_action"):
+            self._is_recording = True
             self.start_recording_action.setIcon(self.icon_recording_active)
-        self._update_recording_actions_enable_state()
-        if self.pressure_plot_widget:
+            self._update_recording_actions_enable_state()
             self.pressure_plot_widget.clear_plot()
-        self.statusBar().showMessage(f"REC: {session_name_safe}", 0)
+            self.statusBar().showMessage(f"REC: {session_name_safe}", 0)
+        except Exception as e:
+            log.exception("Critical error REC start")
+            QMessageBox.critical(self, "REC Error", f"Could not start REC: {e}")
+            self._is_recording = False
+            self._update_recording_actions_enable_state()
+            return
 
     def _trigger_stop_recording(self):
+        # Your existing code seems mostly fine.
         if not self._is_recording or not self._recording_worker:
             log.info("Stop REC called, not active/no worker.")
-            if self._is_recording:
-                self._is_recording = False
+            self._is_recording = False
             self._update_recording_actions_enable_state()
-            if self.statusBar().currentMessage().startswith("REC:"):
+            (
                 self.statusBar().clearMessage()
-                return
+                if self.statusBar().currentMessage().startswith("REC:")
+                else None
+            )
+            return
         log.info("Stopping REC by user...")
         session_name_stopped = (
             os.path.basename(self.last_trial_basepath)
@@ -902,7 +1073,7 @@ class MainWindow(QMainWindow):
         try:
             self._recording_worker.stop_worker()
             if not self._recording_worker.wait(10000):
-                log.warning("REC worker unresponsive. Terminating.")
+                log.warning("REC worker unresponsive, terminating.")
                 self._recording_worker.terminate()
                 self._recording_worker.wait(1000)
             count = self._recording_worker.video_frame_count
@@ -911,14 +1082,16 @@ class MainWindow(QMainWindow):
             )
             if hasattr(self, "last_trial_basepath") and self.last_trial_basepath:
                 self._save_current_plot_data_for_session()
-                reply = QMessageBox.information(
-                    self,
-                    "REC Saved",
-                    f"Session '{session_name_stopped}' saved:\n{self.last_trial_basepath}\n\nOpen folder?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No,
-                )
-                if reply == QMessageBox.Yes:
+                if (
+                    QMessageBox.information(
+                        self,
+                        "REC Saved",
+                        f"Session '{session_name_stopped}' saved:\n{self.last_trial_basepath}\n\nOpen folder?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No,
+                    )
+                    == QMessageBox.Yes
+                ):
                     if sys.platform == "win32":
                         os.startfile(self.last_trial_basepath)
                     elif sys.platform == "darwin":
@@ -930,18 +1103,23 @@ class MainWindow(QMainWindow):
                     self, "REC Stopped", f"{count} frames recorded. Path info missing."
                 )
         except Exception as e:
-            log.exception(f"Error during user stop REC: {e}")
+            log.exception("Error during user stop REC")
             self.statusBar().showMessage("Error stopping REC.", 5000)
         finally:
-            if self._recording_worker:
-                self._recording_worker.deleteLater()
+            self._recording_worker.deleteLater() if self._recording_worker else None
             self._recording_worker = None
             self._is_recording = False
-            if hasattr(self, "start_recording_action"):
+            (
                 self.start_recording_action.setIcon(self.icon_record_start)
+                if hasattr(self, "start_recording_action")
+                else None
+            )
             self._update_recording_actions_enable_state()
-            if self.statusBar().currentMessage().startswith("REC:"):
+            (
                 self.statusBar().clearMessage()
+                if self.statusBar().currentMessage().startswith("REC:")
+                else None
+            )
             log.info("REC fully stopped and UI updated.")
 
     def _save_current_plot_data_for_session(self):
@@ -1020,15 +1198,22 @@ class MainWindow(QMainWindow):
         full_msg = f"Camera Error: {msg}" + (f"\n(SDK Code: {code})" if code else "")
         log.error(full_msg)
         QMessageBox.critical(self, "Camera Runtime Error", full_msg)
-        if self.camera_thread and self.camera_thread.isRunning():
-            try:
-                self.camera_thread.stop()
-                self.camera_thread.wait(1000)
-            except Exception as e:
-                log.error(f"Error stopping cam thread post-error: {e}")
+
+        if self.camera_thread:
+            if self.camera_thread.isRunning():
+                try:
+                    log.info("Stopping camera thread due to error...")
+                    self.camera_thread.stop()
+                except Exception as e_stop:
+                    log.error(f"Error stopping camera thread post-error: {e_stop}")
+            self.camera_thread.deleteLater()
+            self.camera_thread = None
+
         if self.camera_panel:
             self.camera_panel.setEnabled(False)
-        self.statusBar().showMessage("Camera Error! Stream stopped.", 0)
+        self.statusBar().showMessage(
+            "Camera Error! Stream stopped or failed to start.", 0
+        )
 
     def closeEvent(self, event):
         log.info("MainWindow closeEvent triggered.")
@@ -1048,34 +1233,51 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
 
-        thread_timeout = 1500
-        threads_to_stop = [
-            ("Camera", self.camera_thread, getattr(self.camera_thread, "stop", None)),
-            ("Serial", self._serial_thread, getattr(self._serial_thread, "stop", None)),
+        # Orderly shutdown of threads
+        threads_to_clean = [
+            (
+                "Camera",
+                "_camera_thread",
+                (
+                    getattr(self.camera_thread, "stop", None)
+                    if self.camera_thread
+                    else None
+                ),
+            ),
+            (
+                "Serial",
+                "_serial_thread",
+                (
+                    getattr(self._serial_thread, "stop", None)
+                    if self._serial_thread
+                    else None
+                ),
+            ),
             (
                 "Recording",
-                self._recording_worker,
-                getattr(self._recording_worker, "stop_worker", None),
+                "_recording_worker",
+                (
+                    getattr(self._recording_worker, "stop_worker", None)
+                    if self._recording_worker
+                    else None
+                ),
             ),
         ]
-        for name, thread_instance, stop_method in threads_to_stop:
+
+        for name, attr_name, stop_method in threads_to_clean:
+            thread_instance = getattr(self, attr_name, None)
             if thread_instance:
                 if thread_instance.isRunning() and stop_method:
                     log.info(f"Stopping {name} thread on close...")
-                    stop_method()
-                    if not thread_instance.wait(
-                        thread_timeout + (2000 if name == "Recording" else 0)
-                    ):  # Extra for recording
+                    stop_method()  # Call the specific stop method
+                    # Adjust wait timeout as needed
+                    wait_timeout = 3000 if name == "Recording" else 1500
+                    if not thread_instance.wait(wait_timeout):
                         log.warning(f"{name} thread unresponsive, terminating.")
                         thread_instance.terminate()
-                        thread_instance.wait(500)  # wait after terminate
+                        thread_instance.wait(500)
                 thread_instance.deleteLater()
-                if name == "Camera":
-                    self.camera_thread = None
-                elif name == "Serial":
-                    self._serial_thread = None
-                elif name == "Recording":
-                    self._recording_worker = None
+                setattr(self, attr_name, None)  # Clear the attribute
 
         log.info("All threads processed. Proceeding with app close.")
         super().closeEvent(event)
