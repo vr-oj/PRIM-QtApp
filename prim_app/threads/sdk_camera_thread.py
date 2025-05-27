@@ -6,9 +6,7 @@ import imagingcontrol4 as ic4
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 
-from utils.utils import (
-    to_prop_name,
-)  # Still useful for emitting consistent UPPER_SNAKE_CASE keys in properties_updated
+from utils.utils import to_prop_name
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +31,9 @@ class MinimalSinkListener(ic4.QueueSinkListener):
         )
         return True
 
-    def sink_disconnected(self, sink: ic4.QueueSink, userdata: any):  # Added userdata
+    def sink_disconnected(
+        self, sink: ic4.QueueSink, userdata: any
+    ):  # userdata argument added
         log.debug(f"Listener '{self.owner_name}': Sink disconnected.")
         pass
 
@@ -43,39 +43,31 @@ class MinimalSinkListener(ic4.QueueSinkListener):
         pass
 
 
-def read_current(pm: ic4.PropertyMap, prop_identifier):
-    # prop_identifier can be a Property object, PropId object, or SFNC string name
-    # If it's a Property object, it should have .value
-    if hasattr(prop_identifier, "value") and not isinstance(
-        prop_identifier, (str, ic4.PropId)
-    ):
-        try:
-            return prop_identifier.value
-        except Exception as e_prop_val:
-            log.debug(f"Could not read .value from Property object: {e_prop_val}")
-            # Fallback to using pm.get_value with the property object itself if .value fails
-            target_for_get = prop_identifier
-    else:  # It's a string name or a PropId object
-        target_for_get = prop_identifier
-
+def read_current(
+    pm: ic4.PropertyMap, feature_name_sfnc: str
+):  # Expects SFNC string name
+    """
+    Try each typed getter until one succeeds, return the first value or None.
+    `feature_name_sfnc` is the GenICam SFNC string name (e.g., "ExposureTime").
+    """
     try:
-        return pm.get_value_int(target_for_get)
+        return pm.get_value_int(feature_name_sfnc)
     except ic4.IC4Exception:
         pass
     try:
-        return pm.get_value_float(target_for_get)
+        return pm.get_value_float(feature_name_sfnc)
     except ic4.IC4Exception:
         pass
     try:
-        return pm.get_value_str(target_for_get)
+        return pm.get_value_str(feature_name_sfnc)
     except ic4.IC4Exception:
         pass
     try:
-        return pm.get_value_bool(target_for_get)
+        return pm.get_value_bool(feature_name_sfnc)
     except ic4.IC4Exception:
         pass
     log.debug(
-        f"Could not read current value for property via standard getters: {prop_identifier}"
+        f"Could not read current value for property via standard getters: {feature_name_sfnc}"
     )
     return None
 
@@ -88,47 +80,11 @@ class SDKCameraThread(QThread):
     exposure_range_updated = pyqtSignal(float, float)
     gain_range_updated = pyqtSignal(float, float)
     auto_exposure_updated = pyqtSignal(bool)
-    properties_updated = pyqtSignal(
-        dict
-    )  # Emits dict with UPPER_SNAKE_CASE keys for internal consistency
+    properties_updated = pyqtSignal(dict)  # Emits dict with UPPER_SNAKE_CASE keys
     camera_error = pyqtSignal(str, str)
 
-    # _propid_map: Maps SFNC string name (e.g., "ExposureTime") to the actual ic4.PropId.ExposureTime object.
-    # The attributes on ic4.PropId are assumed to be the PropId objects themselves,
-    # and their .name attribute gives the SFNC string.
-    _propid_map = {}
-    try:
-        _propid_map = {
-            getattr(ic4.PropId, attr_name).name: getattr(ic4.PropId, attr_name)
-            for attr_name in dir(ic4.PropId)
-            if not attr_name.startswith("_")
-            and isinstance(getattr(ic4.PropId, attr_name), ic4.PropId)
-            and hasattr(
-                getattr(ic4.PropId, attr_name), "name"
-            )  # Ensure it's a PropId obj with a .name (SFNC string)
-        }
-        if (
-            not _propid_map
-        ):  # Fallback if the above yields empty (e.g. .name is not the SFNC string)
-            log.warning(
-                "_propid_map construction using .name as key failed or yielded empty. Trying attr_name as key."
-            )
-            _propid_map = {
-                attr_name: getattr(ic4.PropId, attr_name)
-                for attr_name in dir(ic4.PropId)
-                if not attr_name.startswith("_")
-                and isinstance(getattr(ic4.PropId, attr_name), ic4.PropId)
-            }
-            log.debug(
-                f"Fallback _propid_map (keys are attributes of ic4.PropId class): {_propid_map.keys()}"
-            )
-
-    except Exception as e_map:
-        log.error(
-            f"Error building _propid_map: {e_map}. Property operations might fail."
-        )
-
-    log.debug(f"Final _propid_map keys: {list(_propid_map.keys())}")
+    # _propid_map is removed. We will assume ic4.PropId.FeatureName (e.g. ic4.PropId.ExposureTime)
+    # directly provides the SFNC string name needed by pm.find() and pm.set_value().
 
     def __init__(self, device_name=None, fps=10, parent=None):
         super().__init__(parent)
@@ -146,61 +102,56 @@ class SDKCameraThread(QThread):
 
     def apply_node_settings(
         self, settings: dict
-    ):  # Expects CamelCase keys from UI/config
+    ):  # Expects CamelCase (SFNC) keys from UI/config
         if not self.grabber or not self.pm:
             log.warning("Apply_node_settings called but grabber or pm not initialized.")
             return
 
         applied = {}
         for (
-            key_camel_case,
+            feature_name_sfnc,
             val,
-        ) in settings.items():  # key_camel_case is SFNC name e.g. "ExposureTime"
-            # Try to get PropId object using the CamelCase key directly from the refined _propid_map
-            prop_id_obj = self._propid_map.get(key_camel_case)
-
-            target_for_set_value = prop_id_obj if prop_id_obj else key_camel_case
-            if not prop_id_obj:
-                log.warning(
-                    f"PropId object for '{key_camel_case}' not found in _propid_map. Will attempt to set using string name '{key_camel_case}'."
-                )
-
+        ) in settings.items():  # key is SFNC name e.g. "ExposureTime"
             try:
                 log.debug(
-                    f"Attempting to set GenICam Feature (using identifier: {target_for_set_value}, from key: {key_camel_case}) to {val} (type: {type(val)})"
+                    f"Attempting to set GenICam Feature '{feature_name_sfnc}' to {val} (type: {type(val)})"
                 )
 
-                if key_camel_case == "PixelFormat" and isinstance(val, str):
-                    pixel_format_member = getattr(ic4.PixelFormat, val, None)
+                # Directly use the SFNC feature name string with set_value
+                # Special handling for PixelFormat if it expects an enum member
+                if feature_name_sfnc == "PixelFormat" and isinstance(val, str):
+                    pixel_format_member = getattr(
+                        ic4.PixelFormat, val, None
+                    )  # e.g., ic4.PixelFormat.Mono8
                     if pixel_format_member is not None:
-                        self.pm.set_value(target_for_set_value, pixel_format_member)
+                        self.pm.set_value(feature_name_sfnc, pixel_format_member)
                     else:
-                        self.pm.set_value(target_for_set_value, val)
-                elif key_camel_case == "ExposureAuto" and isinstance(val, str):
-                    self.pm.set_value(target_for_set_value, val)
+                        self.pm.set_value(feature_name_sfnc, val)
+                elif feature_name_sfnc == "ExposureAuto" and isinstance(val, str):
+                    self.pm.set_value(feature_name_sfnc, val)
                 else:
-                    self.pm.set_value(target_for_set_value, val)
+                    self.pm.set_value(feature_name_sfnc, val)
 
-                current_val_after_set = read_current(self.pm, target_for_set_value)
+                current_val_after_set = read_current(self.pm, feature_name_sfnc)
                 log.info(
-                    f"Successfully set feature for key '{key_camel_case}' to {val}, read back: {current_val_after_set}"
+                    f"Successfully set feature '{feature_name_sfnc}' to {val}, read back: {current_val_after_set}"
                 )
-                applied[to_prop_name(key_camel_case)] = (
+                applied[to_prop_name(feature_name_sfnc)] = (
                     current_val_after_set  # Emit with UPPER_SNAKE_CASE key
                 )
             except ic4.IC4Exception as e:
                 log.error(
-                    f"IC4Exception setting feature for key '{key_camel_case}' to {val}: {e} (Code: {e.code})"
+                    f"IC4Exception setting feature '{feature_name_sfnc}' to {val}: {e} (Code: {e.code})"
                 )
                 self.camera_error.emit(
-                    f"Failed to set '{key_camel_case}' to {val}: {e}", str(e.code)
+                    f"Failed to set '{feature_name_sfnc}' to {val}: {e}", str(e.code)
                 )
             except Exception as e_gen:
                 log.exception(
-                    f"Generic Exception setting feature for key '{key_camel_case}' to {val}: {e_gen}"
+                    f"Generic Exception setting feature '{feature_name_sfnc}' to {val}: {e_gen}"
                 )
                 self.camera_error.emit(
-                    f"Failed to set '{key_camel_case}' to {val}: {e_gen}", ""
+                    f"Failed to set '{feature_name_sfnc}' to {val}: {e_gen}", ""
                 )
         if applied:
             self.properties_updated.emit(applied)
@@ -252,41 +203,33 @@ class SDKCameraThread(QThread):
             )
 
             def query_property_details(
-                feature_name_camel_case,
+                feature_name_sfnc,
                 range_signal_emitter=None,
                 current_val_direct_emitter=None,
                 properties_update_dict_emitter=None,
             ):
                 current_value = None
                 try:
-                    prop_item = self.pm.find(feature_name_camel_case)
+                    prop_item = self.pm.find(feature_name_sfnc)
                     if prop_item is None:
                         log.warning(
-                            f"GenICam Feature '{feature_name_camel_case}' not found in PropertyMap via find()."
+                            f"GenICam Feature '{feature_name_sfnc}' not found in PropertyMap via find()."
                         )
-                        # Fallback: try reading with PropId object if we can map it
-                        prop_id_obj = self._propid_map.get(
-                            feature_name_camel_case
-                        )  # Use CamelCase key for map
-                        if prop_id_obj:
-                            current_value = read_current(self.pm, prop_id_obj)
-                            if current_value is None:
-                                log.warning(
-                                    f"Still could not read current value for {feature_name_camel_case} using PropId object."
-                                )
-                            else:
-                                log.debug(
-                                    f"Read current value for {feature_name_camel_case} using PropId object directly: {current_value}"
-                                )
-                        else:
+                        # Attempt to read using the SFNC name directly if find fails (some properties might be direct readable)
+                        current_value = read_current(self.pm, feature_name_sfnc)
+                        if current_value is None:
                             log.warning(
-                                f"No PropId object for '{feature_name_camel_case}' in map for fallback read."
+                                f"Still could not read current value for {feature_name_sfnc} directly."
                             )
                             return None
+                        log.debug(
+                            f"Read current value for {feature_name_sfnc} directly (find failed): {current_value}"
+                        )
+                        # Cannot get min/max/options if prop_item is None
                     else:
                         current_value = prop_item.value
                         log.debug(
-                            f"Property '{feature_name_camel_case}': Type={prop_item.type}, Value={current_value}"
+                            f"Property '{feature_name_sfnc}': Type={prop_item.type}, Value={current_value}"
                         )
 
                         if (
@@ -309,33 +252,33 @@ class SDKCameraThread(QThread):
                                 )
 
                     if current_val_direct_emitter:
-                        if feature_name_camel_case == "ExposureAuto" and isinstance(
+                        if feature_name_sfnc == "ExposureAuto" and isinstance(
                             current_value, str
                         ):
                             current_val_direct_emitter.emit(
                                 current_value.lower() != "off"
                             )
                     if properties_update_dict_emitter and current_value is not None:
-                        # Emit with UPPER_SNAKE_CASE key for consistency with other parts of app if needed
                         properties_update_dict_emitter.emit(
-                            {to_prop_name(feature_name_camel_case): current_value}
+                            {to_prop_name(feature_name_sfnc): current_value}
                         )
 
                 except ic4.IC4Exception as e:
                     log.warning(
-                        f"IC4Exception querying details for '{feature_name_camel_case}': {e} (Code: {e.code})"
+                        f"IC4Exception querying details for '{feature_name_sfnc}': {e} (Code: {e.code})"
                     )
                 except AttributeError as e_attr:
                     log.warning(
-                        f"AttributeError querying details for '{feature_name_camel_case}': {e_attr}"
+                        f"AttributeError querying details for '{feature_name_sfnc}': {e_attr}"
                     )
                 except Exception as e_gen:
                     log.warning(
-                        f"Generic exception querying details for '{feature_name_camel_case}': {e_gen}"
+                        f"Generic exception querying details for '{feature_name_sfnc}': {e_gen}"
                     )
                 return current_value
 
-            initial_props_to_read_camel_case = [
+            # Use SFNC/CamelCase names for querying
+            initial_props_to_read_sfnc = [
                 "AcquisitionFrameRate",
                 "ExposureTime",
                 "Gain",
@@ -344,37 +287,46 @@ class SDKCameraThread(QThread):
                 "Width",
                 "Height",
             ]
-            for prop_name_cc in initial_props_to_read_camel_case:
+            for prop_name_sfnc in initial_props_to_read_sfnc:
                 range_emitter = None
                 direct_emitter = None
-                if prop_name_cc == "AcquisitionFrameRate":
+                if prop_name_sfnc == "AcquisitionFrameRate":
                     range_emitter = self.fps_range_updated
-                elif prop_name_cc == "ExposureTime":
+                elif prop_name_sfnc == "ExposureTime":
                     range_emitter = self.exposure_range_updated
-                elif prop_name_cc == "Gain":
+                elif prop_name_sfnc == "Gain":
                     range_emitter = self.gain_range_updated
-                elif prop_name_cc == "PixelFormat":
+                elif prop_name_sfnc == "PixelFormat":
                     range_emitter = self.pixel_formats_updated
-                elif prop_name_cc == "ExposureAuto":
+                elif prop_name_sfnc == "ExposureAuto":
                     direct_emitter = self.auto_exposure_updated
                 query_property_details(
-                    prop_name_cc, range_emitter, direct_emitter, self.properties_updated
+                    prop_name_sfnc,
+                    range_emitter,
+                    direct_emitter,
+                    self.properties_updated,
                 )
 
             try:
-                # Use CamelCase name to get PropId object from map
-                prop_id_fps_obj = self._propid_map.get("AcquisitionFrameRate")
-                if prop_id_fps_obj:
-                    # Find property item using its SFNC name (which should be prop_id_fps_obj.name)
-                    prop_fps_item = self.pm.find(prop_id_fps_obj.name)
-                    if prop_fps_item and prop_fps_item.is_writable:
-                        self.pm.set_value(prop_id_fps_obj, self.target_fps)
-                        log.info(
-                            f"SDKCameraThread: Set initial FPS to {self.target_fps}"
-                        )
-                        self.properties_updated.emit(
-                            {"ACQUISITION_FRAME_RATE": self.target_fps}
-                        )  # Emit UPPER_SNAKE_CASE
+                # Set initial FPS using its SFNC string name
+                # Check writability first by finding the property item
+                prop_fps_item = self.pm.find(
+                    ic4.PropId.AcquisitionFrameRate
+                )  # Assuming ic4.PropId.AcquisitionFrameRate IS the string "AcquisitionFrameRate"
+                if prop_fps_item and prop_fps_item.is_writable:
+                    self.pm.set_value(ic4.PropId.AcquisitionFrameRate, self.target_fps)
+                    log.info(f"SDKCameraThread: Set initial FPS to {self.target_fps}")
+                    self.properties_updated.emit(
+                        {"ACQUISITION_FRAME_RATE": self.target_fps}
+                    )
+                elif not prop_fps_item:
+                    log.warning(
+                        f"SDKCameraThread: Could not find property '{ic4.PropId.AcquisitionFrameRate}' to set initial FPS."
+                    )
+                else:  # Found but not writable
+                    log.warning(
+                        f"SDKCameraThread: Property '{ic4.PropId.AcquisitionFrameRate}' is not writable. Cannot set initial FPS."
+                    )
             except Exception as e_fps_set:
                 log.warning(
                     f"SDKCameraThread: Could not set initial FPS to {self.target_fps}: {e_fps_set}"
@@ -394,7 +346,11 @@ class SDKCameraThread(QThread):
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
-            log.info("SDKCameraThread: Stream setup complete, acquisition active.")
+            # Explicitly start acquisition if not already started by stream_setup
+            if not self.grabber.is_acquisition_active:
+                log.info("SDKCameraThread: Explicitly starting acquisition...")
+                self.grabber.acquisition_start()
+            log.info("SDKCameraThread: Stream setup and acquisition active.")
 
             while not self._stop_requested:
                 try:
@@ -402,7 +358,7 @@ class SDKCameraThread(QThread):
                     if not buf:
                         if self._stop_requested:
                             break
-                        QThread.msleep(10)
+                        QThread.msleep(10)  # Brief pause if no buffer and not stopping
                         continue
 
                     arr = buf.numpy_wrap()
@@ -436,6 +392,12 @@ class SDKCameraThread(QThread):
                 except ic4.IC4Exception as e:
                     if e.code == ic4.ErrorCode.Timeout:
                         log.debug("pop_output_buffer timed out (IC4Exception).")
+                        continue
+                    elif (
+                        e.code == ic4.ErrorCode.NoData
+                    ):  # Handle NoData gracefully if it's intermittent
+                        log.debug("pop_output_buffer returned NoData. Continuing.")
+                        QThread.msleep(5)  # Small pause
                         continue
                     log.error(
                         f"IC4Exception in SDKCameraThread acquisition loop: {e} (Code: {e.code})"
