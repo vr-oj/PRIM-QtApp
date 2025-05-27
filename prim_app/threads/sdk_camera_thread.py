@@ -180,17 +180,35 @@ class SDKCameraThread(QThread):
             # Uses default setup_option (usually StreamSetupOption.PREPARE_ACQUISITION or similar)
             self.grabber.stream_setup(self.sink)
             log.info(
-                "SDKCameraThread (Simplified): Stream resources prepared via stream_setup."
+                "SDKCameraThread (Simplified): Stream resources prepared via stream_setup. This may have also started acquisition."
             )
 
-            # Step 2: Explicitly command the camera to start sending data
-            log.info(
-                "SDKCameraThread (Simplified): Attempting to start acquisition explicitly via acquisition_start()..."
-            )
-            self.grabber.acquisition_start()
-            log.info(
-                "SDKCameraThread (Simplified): acquisition_start() command issued to camera."
-            )
+            # After stream_setup, check if acquisition is active.
+            # The previous "Acquisition is already active" error suggests stream_setup starts it.
+            if not self.grabber.is_acquisition_active:
+                # This case would be unexpected if the "already active" error was consistent.
+                # However, as a fallback, if it's NOT active, we can try one explicit start.
+                log.warning(
+                    "SDKCameraThread (Simplified): Acquisition not active after stream_setup. Attempting one explicit acquisition_start()..."
+                )
+                self.grabber.acquisition_start()
+
+                # Final check
+                if not self.grabber.is_acquisition_active:
+                    log.error(
+                        "SDKCameraThread (Simplified): Acquisition FAILED to start even after an explicit attempt (is_acquisition_active is false)."
+                    )
+                    raise RuntimeError(
+                        "Failed to start camera acquisition: is_acquisition_active remains false after all attempts."
+                    )
+                else:
+                    log.info(
+                        "SDKCameraThread (Simplified): Explicit acquisition_start() succeeded. Acquisition is active."
+                    )
+            else:
+                log.info(
+                    "SDKCameraThread (Simplified): Acquisition was already active after stream_setup. Proceeding to frame grabbing loop."
+                )
 
             # Step 3: Verify if acquisition actually started
             if not self.grabber.is_acquisition_active:
