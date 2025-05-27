@@ -10,7 +10,7 @@ from PyQt5.QtGui import QIcon
 
 # === App Settings Import ===
 try:
-    from utils.app_settings import load_app_setting, SETTING_CTI_PATH, save_app_setting
+    from utils.app_settings import load_app_setting, save_app_setting, SETTING_CTI_PATH
 
     APP_SETTINGS_AVAILABLE = True
 except ImportError:
@@ -22,6 +22,20 @@ except ImportError:
     SETTING_CTI_PATH = "cti_path"
     logging.getLogger("prim_app.setup").warning(
         "utils.app_settings not found. CTI persistence will not work."
+    )
+
+# === IC4 library import & availability flag ===
+try:
+    import imagingcontrol4 as ic4
+
+    IC4_AVAILABLE = True
+    ic4_library_module = ic4
+    module_log.info("imagingcontrol4 module imported successfully")
+except ImportError:
+    IC4_AVAILABLE = False
+    ic4_library_module = None
+    module_log.error(
+        "Could not import imagingcontrol4 — camera functionality will be disabled."
     )
 
 
