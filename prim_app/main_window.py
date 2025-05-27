@@ -372,6 +372,17 @@ class MainWindow(QMainWindow):
                 "or ensure IC Imaging Control SDK is correctly installed if the problem persists.",
             )
             return
+        
+        if self.camera_thread and self.camera_thread.isRunning():
+        log.info("Stopping existing camera thread before running setup wizard...")
+        self.camera_thread.stop() # This calls wait() internally now
+        # self.camera_thread.wait(3000) # Ensure it has time to stop and release device
+        self.camera_thread.deleteLater() # Clean up the old thread
+        self.camera_thread = None
+        if self.camera_panel:
+            self.camera_panel.setEnabled(False)
+        QApplication.processEvents() # Allow Qt to process events for thread cleanup
+        log.info("Existing camera thread stopped and cleaned up.")
 
         wizard = CameraSetupWizard(self)
         if wizard.exec_() != QDialog.Accepted:
