@@ -10,6 +10,7 @@ from PyQt5.QtGui import (
     QOpenGLShaderProgram,
     QOpenGLTexture,
     QImage,
+    QSurfaceFormat,
 )
 from OpenGL import GL
 import logging
@@ -25,6 +26,14 @@ class GLViewfinder(QOpenGLWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # Request an OpenGL 3.3 Core Profile context
+        fmt = QSurfaceFormat()
+        fmt.setDepthBufferSize(24)  # Optional, but good practice
+        fmt.setStencilBufferSize(8)  # Optional
+        fmt.setVersion(3, 3)
+        fmt.setProfile(QSurfaceFormat.CoreProfile)
+        # fmt.setOption(QSurfaceFormat.DebugContext) # Useful for more detailed GL errors
+        self.setFormat(fmt)  # Apply this format to the QOpenGLWidget
         self.program = None  # Will be initialized in initializeGL
         self.texture = None  # Will be initialized in initializeGL
         self.vbo_quad = None
@@ -38,30 +47,27 @@ class GLViewfinder(QOpenGLWidget):
         self.frame_aspect_ratio = 1.0  # Default aspect ratio (width / height)
 
     def initializeGL(self):
-        # Initialize critical members first to avoid NoneType errors if shader compilation/linking fails
         self.texture = QOpenGLTexture(QOpenGLTexture.Target2D)
         self.program = QOpenGLShaderProgram(self.context())
 
-        # Vertex shader source - NO #version directive here
-        vert_src = b"""
-        layout (location = 0) in vec2 position;
-        layout (location = 1) in vec2 texcoord;
-        out vec2 v_texcoord;
-        void main() {
-            gl_Position = vec4(position, 0.0, 1.0);
-            v_texcoord = texcoord;
-        }
-        """
-        # Fragment shader source for single channel (Mono8) - NO #version directive here
-        frag_src_mono = b"""
-        uniform sampler2D tex;
-        in vec2 v_texcoord;
-        out vec4 fragColor;
-        void main() {
-            float intensity = texture(tex, v_texcoord).r; // Sample red channel (for R8_UNorm)
-            fragColor = vec4(intensity, intensity, intensity, 1.0); // Display as grayscale
-        }
-        """
+        vert_src = b"""#version 330 core
+            layout (location = 0) in vec2 position;
+            layout (location = 1) in vec2 texcoord;
+            out vec2 v_texcoord;
+            void main() {
+                gl_Position = vec4(position, 0.0, 1.0);
+                v_texcoord = texcoord;
+            }
+            """
+        frag_src_mono = b"""#version 330 core
+            uniform sampler2D tex;
+            in vec2 v_texcoord;
+            out vec4 fragColor;
+            void main() {
+                float intensity = texture(tex, v_texcoord).r;
+                fragColor = vec4(intensity, intensity, intensity, 1.0);
+            }
+            """
 
         if not self.program.addShaderFromSourceCode(QOpenGLShader.Vertex, vert_src):
             log.error(
