@@ -23,7 +23,11 @@ from PyQt5.QtWidgets import (
 
 from utils.config import CAMERA_PROFILES_DIR
 from utils.app_settings import load_app_setting, SETTING_CTI_PATH
-from camera.camera_profiler import profile_camera, get_camera_node_map, test_capture
+from camera.camera_profiler import (
+    profile_camera_devices,
+    get_camera_node_map,
+    test_capture,
+)
 
 module_log = logging.getLogger(__name__)
 

@@ -1,6 +1,7 @@
 # prim_app/camera/camera_profiler.py
 import logging
 import imagingcontrol4 as ic4
+from utils.utils import to_prop_name
 
 # from threads.sdk_camera_thread import to_prop_name # Not strictly needed if wizard provides CamelCase keys
 

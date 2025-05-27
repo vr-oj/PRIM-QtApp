@@ -3,16 +3,11 @@ import re
 import numpy as np
 import logging
 import imagingcontrol4 as ic4
+from utils.utils import to_prop_name
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 
 log = logging.getLogger(__name__)
-
-
-def to_prop_name(key: str) -> str:
-    """Convert CamelCase or mixed to UPPER_SNAKE_CASE to match PropId names."""
-    s1 = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", key)
-    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s1).upper()
 
 
 def read_current(pm, prop_id_obj_or_name):
