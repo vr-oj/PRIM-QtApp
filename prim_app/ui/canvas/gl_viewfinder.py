@@ -10,7 +10,7 @@ from PyQt5.QtGui import (
     QOpenGLShaderProgram,
     QOpenGLTexture,
     QImage,
-    QSurfaceFormat,  # Keep for logging context
+    QSurfaceFormat,
 )
 from OpenGL import GL
 import logging
@@ -22,13 +22,12 @@ class GLViewfinder(QOpenGLWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # Comment out per-widget format setting to see what global default (or system fallback) provides
-        # fmt = QSurfaceFormat()
-        # fmt.setDepthBufferSize(24)
-        # fmt.setStencilBufferSize(8)
-        # fmt.setVersion(3, 3)
-        # fmt.setProfile(QSurfaceFormat.CoreProfile)
-        # self.setFormat(fmt)
+        # Per-widget format request (belt-and-suspenders with global default)
+        # This helped confirm we get the right context.
+        fmt = QSurfaceFormat()
+        fmt.setVersion(3, 3)
+        fmt.setProfile(QSurfaceFormat.CoreProfile)
+        self.setFormat(fmt)
 
         self.program = None
         self.texture = None
@@ -40,73 +39,62 @@ class GLViewfinder(QOpenGLWidget):
         self.frame_aspect_ratio = 1.0
 
     def initializeGL(self):
-        # Log the actual context information provided to this widget
         actual_fmt = self.context().format()
         log.info(
             f"GLViewfinder.initializeGL: Actual Context Version: {actual_fmt.majorVersion()}.{actual_fmt.minorVersion()}, Profile: {'Core' if actual_fmt.profile() == QSurfaceFormat.CoreProfile else 'Compatibility' if actual_fmt.profile() == QSurfaceFormat.CompatibilityProfile else 'NoProfile'}"
         )
-        log.info(
-            f"GLSL Version reported by context: {GL.glGetString(GL.GL_SHADING_LANGUAGE_VERSION).decode()}"
-        )
+        glsl_version_str = GL.glGetString(GL.GL_SHADING_LANGUAGE_VERSION)
+        if glsl_version_str:
+            log.info(f"GLSL Version reported by context: {glsl_version_str.decode()}")
+        else:
+            log.warning("Could not retrieve GLSL version string.")
 
         self.texture = QOpenGLTexture(QOpenGLTexture.Target2D)
         self.program = QOpenGLShaderProgram(self.context())
 
-        # GLSL 1.20 Compatible Shaders
-        vert_src_compat = b"""
-#version 120
-attribute vec2 position_attr; // Renamed to avoid conflict with built-ins if any
-attribute vec2 texcoord_attr; // Renamed
-varying vec2 v_texcoord;
+        # Modern GLSL 3.30 Shaders
+        vert_src = b"""#version 330 core
+layout (location = 0) in vec2 position;
+layout (location = 1) in vec2 texcoord;
+out vec2 v_texcoord;
 void main() {
-    gl_Position = vec4(position_attr, 0.0, 1.0);
-    v_texcoord = texcoord_attr;
+    gl_Position = vec4(position, 0.0, 1.0);
+    v_texcoord = texcoord;
 }
 """
-        frag_src_compat_mono = b"""
-#version 120
-uniform sampler2D tex_sampler; // Renamed uniform
-varying vec2 v_texcoord;
+        frag_src_mono = b"""#version 330 core
+uniform sampler2D tex_sampler; // Changed uniform name for clarity
+in vec2 v_texcoord;
+out vec4 fragColor;
 void main() {
-    float intensity = texture2D(tex_sampler, v_texcoord).r;
-    gl_FragColor = vec4(intensity, intensity, intensity, 1.0);
+    float intensity = texture(tex_sampler, v_texcoord).r; // Use modern texture()
+    fragColor = vec4(intensity, intensity, intensity, 1.0);
 }
 """
 
-        if not self.program.addShaderFromSourceCode(
-            QOpenGLShader.Vertex, vert_src_compat
-        ):
+        if not self.program.addShaderFromSourceCode(QOpenGLShader.Vertex, vert_src):
             log.error(
-                f"GLViewfinder: Compat Vertex shader compilation error: {self.program.log()}"
+                f"GLViewfinder: Vertex shader (3.30) compilation error: {self.program.log()}"
             )
             self.program = None
             return
         if not self.program.addShaderFromSourceCode(
-            QOpenGLShader.Fragment, frag_src_compat_mono
+            QOpenGLShader.Fragment, frag_src_mono
         ):
             log.error(
-                f"GLViewfinder: Compat Fragment shader compilation error: {self.program.log()}"
+                f"GLViewfinder: Fragment shader (3.30) compilation error: {self.program.log()}"
             )
             self.program = None
             return
 
-        # IMPORTANT: Bind attribute locations BEFORE linking for older GLSL
-        self.program.bindAttributeLocation(
-            "position_attr", 0
-        )  # "position_attr" must match name in shader
-        self.program.bindAttributeLocation(
-            "texcoord_attr", 1
-        )  # "texcoord_attr" must match name in shader
-        log.info("Bound attribute locations for compatibility shaders.")
+        # No need for bindAttributeLocation with GLSL 3.30 and layout qualifiers
 
         if not self.program.link():
             log.error(f"GLViewfinder: Shader link error: {self.program.log()}")
             self.program = None
             return
 
-        log.info(
-            "GLViewfinder: Compatibility shaders compiled and linked successfully."
-        )
+        log.info("GLViewfinder: GLSL 3.30 shaders compiled and linked successfully.")
 
         self.texture.setMinificationFilter(QOpenGLTexture.Linear)
         self.texture.setMagnificationFilter(QOpenGLTexture.Linear)
@@ -252,15 +240,14 @@ void main() {
             return
         GL.glActiveTexture(GL.GL_TEXTURE0)
         self.texture.bind()
-        self.program.setUniformValue(
-            "tex_sampler", 0
-        )  # Use new uniform name: "tex_sampler"
+        # Ensure uniform name matches the one in the fragment shader
+        self.program.setUniformValue("tex_sampler", 0)
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo_quad)
         stride = 4 * np.dtype(np.float32).itemsize
 
-        # Use the bound locations (0 and 1) directly
-        pos_loc = 0  # Bound to "position_attr"
-        tex_loc = 1  # Bound to "texcoord_attr"
+        # For GLSL 3.30 with layout(location=N), attribute locations are N
+        pos_loc = 0
+        tex_loc = 1
 
         GL.glEnableVertexAttribArray(pos_loc)
         GL.glVertexAttribPointer(
