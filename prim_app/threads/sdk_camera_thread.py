@@ -49,7 +49,11 @@ class SDKCameraThread(QThread):
     camera_error = pyqtSignal(str, str)
 
     # Pre-build mapping of PropId names to constants
-    _propid_map = {member.name: member for member in ic4.PropId}
+    _propid_map = {
+        name: getattr(ic4.PropId, name)
+        for name in dir(ic4.PropId)
+        if not name.startswith("_") and not callable(getattr(ic4.PropId, name))
+    }
 
     def __init__(self, device_name=None, fps=10, parent=None):
         super().__init__(parent)
