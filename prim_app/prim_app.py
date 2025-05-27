@@ -71,7 +71,7 @@ if not module_log.handlers:  # Ensure basic handler if not configured by main lo
 def initialize_ic4_with_cti(cti_path: str):
     """
     Persist the CTI path, add its folder to GENICAM_GENTL64_PATH,
-    then initialize the IC4 library.
+    then initialize the IC4 library (idempotently) and set both init flags.
     """
     # 1) Persist choice
     save_app_setting(SETTING_CTI_PATH, cti_path)
@@ -86,18 +86,28 @@ def initialize_ic4_with_cti(cti_path: str):
         os.environ[env_key] = new_paths
         module_log.info(f"Set {env_key}={new_paths}")
 
-    # 3) Properly initialize the library (no CTI argument)
+    # 3) Initialize the library exactly once
     try:
-        ic4.Library.init()
-        module_log.info("ic4.Library.init() succeeded")
-    except Exception as e:
-        module_log.error(f"ic4.Library.init() failed: {e}")
-        raise
+        if not IC4_LIBRARY_INITIALIZED:
+            ic4.Library.init()
+            module_log.info("ic4.Library.init() succeeded")
+        else:
+            module_log.info("ic4.Library.init() already called; skipping")
+    except RuntimeError as e:
+        msg = str(e)
+        if "already called" in msg:
+            module_log.info(
+                "ic4.Library.init() was already called previously; treating as success"
+            )
+        else:
+            module_log.error(f"ic4.Library.init() failed unexpectedly: {e}")
+            raise
 
-    # 4) Flip your flags so MainWindow enables camera features
-    # 4) Flip your flags so MainWindow enables camera features
+    # 4) Flip **both** flags so MainWindow will enable camera features
     global IC4_LIBRARY_INITIALIZED, IC4_GENTL_SYSTEM_CONFIGURED, IC4_AVAILABLE
     IC4_LIBRARY_INITIALIZED = True
+    IC4_GENTL_SYSTEM_CONFIGURED = True
+    IC4_AVAILABLE = True
 
 
 # --- Combined Check ---
