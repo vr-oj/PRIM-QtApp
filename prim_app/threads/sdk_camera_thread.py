@@ -23,17 +23,15 @@ class MinimalSinkListener(ic4.QueueSinkListener):
     def frames_queued(self, sink: ic4.QueueSink, userdata: any):
         pass
 
-    # CORRECTED sink_connected method
     def sink_connected(
         self, sink: ic4.QueueSink, image_type_proposed: ic4.ImageType, userdata: any
     ) -> bool:
-        # The second parameter is the ImageType proposed by the grabber.
-        # The listener must return True if it accepts this image type.
         log.debug(
             f"Listener '{self.owner_name}': Sink connected. Grabber proposed ImageType: {image_type_proposed}. Accepting."
         )
-        return True  # Accept the proposed image type
+        return True
 
+    # CORRECTED: Added userdata argument
     def sink_disconnected(self, sink: ic4.QueueSink, userdata: any):
         log.debug(f"Listener '{self.owner_name}': Sink disconnected.")
         pass
@@ -119,7 +117,7 @@ class SDKCameraThread(QThread):
             prop_id_obj = self._propid_map.get(pid_name_upper_snake)
 
             if not prop_id_obj:
-                log.error(
+                log.warning(
                     f"PropId object for '{key_camel_case}' (maps to '{pid_name_upper_snake}') not found in _propid_map. Trying to set by string name '{key_camel_case}'."
                 )
                 target_for_set_value = key_camel_case
@@ -350,9 +348,19 @@ class SDKCameraThread(QThread):
 
             while not self._stop_requested:
                 try:
-                    buf = self.sink.pop_output_buffer(1000)
+                    # CORRECTED: Call pop_output_buffer without timeout argument
+                    buf = self.sink.pop_output_buffer()
                     if not buf:
+                        # If pop_output_buffer can return None on non-error (e.g. clean stop), handle it.
+                        # Otherwise, a None here might indicate an issue or that the stream stopped.
+                        log.debug(
+                            "pop_output_buffer returned None, checking stop_requested flag."
+                        )
+                        if self._stop_requested:
+                            break  # Exit loop if stop was requested
+                        QThread.msleep(10)  # Brief pause if no buffer and not stopping
                         continue
+
                     arr = buf.numpy_wrap()
 
                     q_image_format = QImage.Format_Grayscale8
@@ -382,8 +390,12 @@ class SDKCameraThread(QThread):
                     self.frame_ready.emit(q_image.copy(), arr.copy())
                     buf.release()
                 except ic4.IC4Exception as e:
-                    if e.code == ic4.ErrorCode.Timeout:
+                    if (
+                        e.code == ic4.ErrorCode.Timeout
+                    ):  # This might not happen if pop_output_buffer is blocking
+                        log.debug("pop_output_buffer timed out (IC4Exception).")
                         continue
+                    # For other IC4 errors, log and break
                     log.error(
                         f"IC4Exception in SDKCameraThread acquisition loop: {e} (Code: {e.code})"
                     )
@@ -430,6 +442,8 @@ class SDKCameraThread(QThread):
             self.grabber = None
             self.pm = None
             if hasattr(self, "sink") and self.sink:
+                # Unregister listener if necessary, or rely on __del__
+                # self.sink.listener_unregister(self.sink_listener_token) # If token was stored
                 pass
             log.info("SDKCameraThread finished and cleaned up.")
 
