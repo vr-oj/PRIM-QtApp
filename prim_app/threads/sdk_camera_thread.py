@@ -313,11 +313,11 @@ class SDKCameraThread(QThread):
                         continue
                     elif (
                         e.code == ic4.ErrorCode.NoData
-                    ):  # Another non-fatal "no data yet"
-                        log.debug("pop_output_buffer returned NoData. Continuing.")
+                    ):  # This might be how a non-blocking call indicates no data
+                        # log.debug("pop_output_buffer raised IC4Exception with NoData. Continuing.") # Commented out for cleaner logs
                         if self._stop_requested:
                             break
-                        QThread.msleep(5)  # Brief pause
+                        QThread.msleep(5)
                         continue
                     # For other IC4Exceptions, log as error and potentially stop
                     log.error(
