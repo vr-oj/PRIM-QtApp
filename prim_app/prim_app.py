@@ -73,6 +73,9 @@ def initialize_ic4_with_cti(cti_path: str):
     Persist the CTI path, add its folder to GENICAM_GENTL64_PATH,
     then initialize the IC4 library (idempotently) and set both init flags.
     """
+    # declare before any use
+    global IC4_LIBRARY_INITIALIZED, IC4_GENTL_SYSTEM_CONFIGURED, IC4_AVAILABLE
+
     # 1) Persist choice
     save_app_setting(SETTING_CTI_PATH, cti_path)
 
@@ -104,7 +107,6 @@ def initialize_ic4_with_cti(cti_path: str):
             raise
 
     # 4) Flip **both** flags so MainWindow will enable camera features
-    global IC4_LIBRARY_INITIALIZED, IC4_GENTL_SYSTEM_CONFIGURED, IC4_AVAILABLE
     IC4_LIBRARY_INITIALIZED = True
     IC4_GENTL_SYSTEM_CONFIGURED = True
     IC4_AVAILABLE = True
