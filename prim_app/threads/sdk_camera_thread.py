@@ -43,29 +43,43 @@ class MinimalSinkListener(ic4.QueueSinkListener):
         pass
 
 
-def read_current(
-    pm: ic4.PropertyMap, feature_name_sfnc: str
-):  # Expects SFNC string name
+def read_current(pm: ic4.PropertyMap, feature_name_sfnc: str):
     """
     Try each typed getter until one succeeds, return the first value or None.
     `feature_name_sfnc` is the GenICam SFNC string name (e.g., "ExposureTime").
     """
-    try:
-        return pm.get_value_int(feature_name_sfnc)
-    except ic4.IC4Exception:
-        pass
+    # Order of attempts can matter. For enums, string is often best.
+    # For numeric, float then int. Boolean last.
+    if feature_name_sfnc in [
+        "PixelFormat",
+        "ExposureAuto",
+        "TriggerMode",
+    ]:  # Known enums
+        try:
+            return pm.get_value_str(feature_name_sfnc)
+        except ic4.IC4Exception:
+            pass
+
     try:
         return pm.get_value_float(feature_name_sfnc)
     except ic4.IC4Exception:
         pass
     try:
-        return pm.get_value_str(feature_name_sfnc)
+        return pm.get_value_int(feature_name_sfnc)
     except ic4.IC4Exception:
         pass
     try:
         return pm.get_value_bool(feature_name_sfnc)
     except ic4.IC4Exception:
         pass
+
+    # Last resort for non-identified enums or other types
+    if feature_name_sfnc not in ["PixelFormat", "ExposureAuto", "TriggerMode"]:
+        try:
+            return pm.get_value_str(feature_name_sfnc)
+        except ic4.IC4Exception:
+            pass
+
     log.debug(
         f"Could not read current value for property via standard getters: {feature_name_sfnc}"
     )
@@ -80,11 +94,10 @@ class SDKCameraThread(QThread):
     exposure_range_updated = pyqtSignal(float, float)
     gain_range_updated = pyqtSignal(float, float)
     auto_exposure_updated = pyqtSignal(bool)
-    properties_updated = pyqtSignal(dict)  # Emits dict with UPPER_SNAKE_CASE keys
+    properties_updated = pyqtSignal(dict)
     camera_error = pyqtSignal(str, str)
 
-    # _propid_map is removed. We will assume ic4.PropId.FeatureName (e.g. ic4.PropId.ExposureTime)
-    # directly provides the SFNC string name needed by pm.find() and pm.set_value().
+    # _propid_map is removed. We assume ic4.PropId.FeatureName constants ARE the SFNC strings.
 
     def __init__(self, device_name=None, fps=10, parent=None):
         super().__init__(parent)
@@ -118,7 +131,6 @@ class SDKCameraThread(QThread):
                 )
 
                 # Directly use the SFNC feature name string with set_value
-                # Special handling for PixelFormat if it expects an enum member
                 if feature_name_sfnc == "PixelFormat" and isinstance(val, str):
                     pixel_format_member = getattr(
                         ic4.PixelFormat, val, None
@@ -213,9 +225,8 @@ class SDKCameraThread(QThread):
                     prop_item = self.pm.find(feature_name_sfnc)
                     if prop_item is None:
                         log.warning(
-                            f"GenICam Feature '{feature_name_sfnc}' not found in PropertyMap via find()."
+                            f"GenICam Feature '{feature_name_sfnc}' not found in PropertyMap via find(). Trying direct read."
                         )
-                        # Attempt to read using the SFNC name directly if find fails (some properties might be direct readable)
                         current_value = read_current(self.pm, feature_name_sfnc)
                         if current_value is None:
                             log.warning(
@@ -225,7 +236,7 @@ class SDKCameraThread(QThread):
                         log.debug(
                             f"Read current value for {feature_name_sfnc} directly (find failed): {current_value}"
                         )
-                        # Cannot get min/max/options if prop_item is None
+                        # If find failed, we can't get min/max/options from prop_item
                     else:
                         current_value = prop_item.value
                         log.debug(
@@ -277,53 +288,54 @@ class SDKCameraThread(QThread):
                     )
                 return current_value
 
-            # Use SFNC/CamelCase names for querying
+            # Use SFNC/CamelCase names for querying, assuming these are defined in ic4.PropId
             initial_props_to_read_sfnc = [
-                "AcquisitionFrameRate",
-                "ExposureTime",
-                "Gain",
-                "ExposureAuto",
-                "PixelFormat",
-                "Width",
-                "Height",
+                ic4.PropId.AcquisitionFrameRate,
+                ic4.PropId.ExposureTime,
+                ic4.PropId.Gain,
+                ic4.PropId.ExposureAuto,
+                ic4.PropId.PixelFormat,
+                ic4.PropId.Width,
+                ic4.PropId.Height,
             ]
-            for prop_name_sfnc in initial_props_to_read_sfnc:
+            for (
+                prop_sfnc_name
+            ) in (
+                initial_props_to_read_sfnc
+            ):  # prop_sfnc_name is now e.g. "ExposureTime"
                 range_emitter = None
                 direct_emitter = None
-                if prop_name_sfnc == "AcquisitionFrameRate":
+                if prop_sfnc_name == ic4.PropId.AcquisitionFrameRate:
                     range_emitter = self.fps_range_updated
-                elif prop_name_sfnc == "ExposureTime":
+                elif prop_sfnc_name == ic4.PropId.ExposureTime:
                     range_emitter = self.exposure_range_updated
-                elif prop_name_sfnc == "Gain":
+                elif prop_sfnc_name == ic4.PropId.Gain:
                     range_emitter = self.gain_range_updated
-                elif prop_name_sfnc == "PixelFormat":
+                elif prop_sfnc_name == ic4.PropId.PixelFormat:
                     range_emitter = self.pixel_formats_updated
-                elif prop_name_sfnc == "ExposureAuto":
+                elif prop_sfnc_name == ic4.PropId.ExposureAuto:
                     direct_emitter = self.auto_exposure_updated
                 query_property_details(
-                    prop_name_sfnc,
+                    prop_sfnc_name,
                     range_emitter,
                     direct_emitter,
                     self.properties_updated,
                 )
 
             try:
-                # Set initial FPS using its SFNC string name
-                # Check writability first by finding the property item
-                prop_fps_item = self.pm.find(
-                    ic4.PropId.AcquisitionFrameRate
-                )  # Assuming ic4.PropId.AcquisitionFrameRate IS the string "AcquisitionFrameRate"
+                # Set initial FPS using its SFNC string name (assuming ic4.PropId.AcquisitionFrameRate is that string)
+                prop_fps_item = self.pm.find(ic4.PropId.AcquisitionFrameRate)
                 if prop_fps_item and prop_fps_item.is_writable:
                     self.pm.set_value(ic4.PropId.AcquisitionFrameRate, self.target_fps)
                     log.info(f"SDKCameraThread: Set initial FPS to {self.target_fps}")
                     self.properties_updated.emit(
                         {"ACQUISITION_FRAME_RATE": self.target_fps}
-                    )
+                    )  # Emit UPPER_SNAKE_CASE
                 elif not prop_fps_item:
                     log.warning(
                         f"SDKCameraThread: Could not find property '{ic4.PropId.AcquisitionFrameRate}' to set initial FPS."
                     )
-                else:  # Found but not writable
+                else:
                     log.warning(
                         f"SDKCameraThread: Property '{ic4.PropId.AcquisitionFrameRate}' is not writable. Cannot set initial FPS."
                     )
@@ -346,8 +358,7 @@ class SDKCameraThread(QThread):
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
-            # Explicitly start acquisition if not already started by stream_setup
-            if not self.grabber.is_acquisition_active:
+            if not self.grabber.is_acquisition_active:  # Check property
                 log.info("SDKCameraThread: Explicitly starting acquisition...")
                 self.grabber.acquisition_start()
             log.info("SDKCameraThread: Stream setup and acquisition active.")
@@ -358,7 +369,7 @@ class SDKCameraThread(QThread):
                     if not buf:
                         if self._stop_requested:
                             break
-                        QThread.msleep(10)  # Brief pause if no buffer and not stopping
+                        QThread.msleep(10)
                         continue
 
                     arr = buf.numpy_wrap()
@@ -393,11 +404,9 @@ class SDKCameraThread(QThread):
                     if e.code == ic4.ErrorCode.Timeout:
                         log.debug("pop_output_buffer timed out (IC4Exception).")
                         continue
-                    elif (
-                        e.code == ic4.ErrorCode.NoData
-                    ):  # Handle NoData gracefully if it's intermittent
+                    elif e.code == ic4.ErrorCode.NoData:
                         log.debug("pop_output_buffer returned NoData. Continuing.")
-                        QThread.msleep(5)  # Small pause
+                        QThread.msleep(5)
                         continue
                     log.error(
                         f"IC4Exception in SDKCameraThread acquisition loop: {e} (Code: {e.code})"
