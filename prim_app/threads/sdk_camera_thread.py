@@ -9,11 +9,33 @@ from PyQt5.QtGui import QImage
 log = logging.getLogger(__name__)
 
 
+def to_prop_name(key: str) -> str:
+    """Convert CamelCase or mixed to UPPER_SNAKE_CASE to match PropId names."""
+    s1 = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", key)
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s1).upper()
+
+
+def read_current(pm, pid):
+    """
+    Try each typed getter until one succeeds, return the first value or None.
+    """
+    for getter in (
+        pm.get_value_int,
+        pm.get_value_float,
+        pm.get_value_str,
+        pm.get_value_bool,
+    ):
+        try:
+            return getter(pid)
+        except Exception:
+            continue
+    return None
+
+
 class SDKCameraThread(QThread):
     """
     Thread to grab live frames from a DMK camera using IC Imaging Control 4.
-    Expects the GenTL producer to be loaded and ic4.Library initialized externally.
-    Emits QImage frames, raw numpy arrays, and camera property updates via signals.
+    Emits QImage frames, raw numpy arrays, and camera property updates.
     """
 
     frame_ready = pyqtSignal(QImage, object)
@@ -26,6 +48,9 @@ class SDKCameraThread(QThread):
     properties_updated = pyqtSignal(dict)
     camera_error = pyqtSignal(str, str)
 
+    # Pre-build mapping of PropId names to constants
+    _propid_map = {pid.name: pid for pid in ic4.PropId}
+
     def __init__(self, device_name=None, fps=10, parent=None):
         super().__init__(parent)
         self.device_name = device_name
@@ -34,44 +59,38 @@ class SDKCameraThread(QThread):
         self.grabber = None
 
     def apply_node_settings(self, settings: dict):
-        """
-        Apply GenICam feature settings (e.g., ExposureTime, Gain) to the opened device.
-        Emits properties_updated with actual applied values.
-        """
         if not self.grabber:
             return
         pm = self.grabber.device_property_map
         applied = {}
-        for name, val in settings.items():
-            # map CamelCase or snake_case to UPPER_SNAKE_CASE PropId name
-            prop_name = (
-                name
-                if name.isupper()
-                else re.sub(r"(?<!^)(?=[A-Z])", "_", name).upper()
-            )
+
+        for key, val in settings.items():
+            pid_name = to_prop_name(key)
+            pid = self._propid_map.get(pid_name)
+            if not pid:
+                self.camera_error.emit(f"Unknown property '{key}'", "")
+                continue
+
             try:
-                prop_id = getattr(ic4.PropId, prop_name)
-                pm.set_value(prop_id, val)
-                # you may need to pick get_value_int/float/str/… here:
-                actual = pm.get_value(prop_id)
-                applied[prop_name] = actual
+                pm.set_value(pid, val)
+                actual = read_current(pm, pid)
+                applied[pid_name] = actual
             except Exception as e:
                 code = getattr(e, "code", "")
                 self.camera_error.emit(
-                    f"Failed to set {prop_name} to {val}: {e}", str(code)
+                    f"Failed to set {pid_name} to {val}: {e}",
+                    str(code),
                 )
 
         if applied:
             self.properties_updated.emit(applied)
 
     def run(self):
-        import re  # needed for the above mapping
-
         try:
-            # Discover and open device
             devices = ic4.DeviceEnum.devices()
             if not devices:
                 raise RuntimeError("No camera devices found")
+
             dev = next(
                 (
                     d
@@ -87,7 +106,7 @@ class SDKCameraThread(QThread):
             self.grabber = grabber
             pm = grabber.device_property_map
 
-            # Resolutions & pixel formats
+            # Report available resolutions & pixel formats
             try:
                 modes = getattr(grabber.device_info, "video_modes", [])
                 res_list = [f"{m.width}x{m.height}" for m in modes]
@@ -97,7 +116,7 @@ class SDKCameraThread(QThread):
             self.resolutions_updated.emit(res_list)
             self.pixel_formats_updated.emit(fmt_list)
 
-            # FPS
+            # FPS range
             try:
                 lo = pm.get_min(ic4.PropId.AcquisitionFrameRate)
                 hi = pm.get_max(ic4.PropId.AcquisitionFrameRate)
@@ -106,17 +125,17 @@ class SDKCameraThread(QThread):
             except Exception:
                 log.debug("FPS range not available")
 
-            # Exposure
+            # Exposure range & auto
             try:
                 lo = pm.get_min(ic4.PropId.ExposureTime)
                 hi = pm.get_max(ic4.PropId.ExposureTime)
                 self.exposure_range_updated.emit(lo, hi)
-                auto = pm.get_value(ic4.PropId.ExposureAuto) != 0
+                auto = bool(read_current(pm, ic4.PropId.ExposureAuto))
                 self.auto_exposure_updated.emit(auto)
             except Exception:
                 log.debug("Exposure range not available")
 
-            # Gain
+            # Gain range
             try:
                 lo = pm.get_min(ic4.PropId.Gain)
                 hi = pm.get_max(ic4.PropId.Gain)
@@ -124,22 +143,21 @@ class SDKCameraThread(QThread):
             except Exception:
                 log.debug("Gain range not available")
 
-            # Initial props
-            init = {}
+            # Initial property values
+            init_props = {}
             for pid in (
                 ic4.PropId.ExposureTime,
                 ic4.PropId.Gain,
                 ic4.PropId.PixelFormat,
                 ic4.PropId.AcquisitionFrameRate,
             ):
-                try:
-                    init[pid.name] = pm.get_value(pid)
-                except Exception:
-                    pass
-            if init:
-                self.properties_updated.emit(init)
+                val = read_current(pm, pid)
+                if val is not None:
+                    init_props[pid.name] = val
+            if init_props:
+                self.properties_updated.emit(init_props)
 
-            # Start acquisition
+            # Start streaming
             sink = ic4.QueueSink()
             grabber.stream_setup(
                 sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
@@ -155,6 +173,7 @@ class SDKCameraThread(QThread):
                     continue
                 if not buf:
                     continue
+
                 arr = buf.numpy_wrap()
                 # convert to QImage
                 if arr.ndim == 3 and arr.shape[2] == 3:
@@ -178,7 +197,7 @@ class SDKCameraThread(QThread):
                 self.frame_ready.emit(img.copy(), arr)
                 buf.release()
 
-            # cleanup
+            # Cleanup
             try:
                 grabber.acquisition_stop()
                 grabber.stream_stop()
