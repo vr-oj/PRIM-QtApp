@@ -11,33 +11,41 @@ logging.basicConfig(
 log = logging.getLogger("IC4Test")
 
 
-# Define a minimal listener class for the test script
 class TestSinkListener(ic4.QueueSinkListener):
     def __init__(self):
         super().__init__()
         log.debug("TestSinkListener created.")
 
-    def frame_ready(self, sink, buffer, userdata):
-        # This callback indicates a frame is ready if using specific listener notifications.
-        # For this test, we are primarily relying on polling pop_output_buffer.
+    # These signatures should match how they are called.
+    # frame_ready and sink_connected are often called with userdata.
+    # frames_queued and sink_disconnected are sometimes called without by some SDKs/wrappers.
+    # The TypeError is the guide.
+
+    def frame_ready(self, sink: ic4.QueueSink, buffer: ic4.ImageBuffer, userdata: any):
         # log.debug(f"TestSinkListener: Frame ready (callback).")
         pass
 
-    def frames_queued(self, sink, userdata):
-        # log.debug(f"TestSinkListener: Frames queued (callback).")
+    def frames_queued(self, sink: ic4.QueueSink):  # Based on previous similar errors
+        # log.debug(f"TestSinkListener: Frames queued.")
         pass
 
-    def sink_connected(self, sink, image_type_proposed, userdata):
+    def sink_connected(
+        self, sink: ic4.QueueSink, image_type_proposed: ic4.ImageType, userdata: any
+    ) -> bool:
         log.debug(
-            f"TestSinkListener: Sink connected to grabber, proposed type: {image_type_proposed}"
+            f"TestSinkListener: Sink connected, proposed type: {image_type_proposed}"
         )
-        return True  # Accept the proposed type
+        return True
 
-    def sink_disconnected(self, sink, userdata):
-        log.debug(f"TestSinkListener: Sink disconnected from grabber.")
+    def sink_disconnected(
+        self, sink: ic4.QueueSink
+    ):  # Corrected based on latest TypeError for this listener
+        log.debug(f"TestSinkListener: Sink disconnected.")
         pass
 
-    def sink_property_changed(self, sink, property_name, userdata):
+    def sink_property_changed(
+        self, sink: ic4.QueueSink, property_name: str, userdata: any
+    ):
         pass
 
 
