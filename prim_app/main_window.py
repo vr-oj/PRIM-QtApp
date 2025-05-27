@@ -262,7 +262,8 @@ class MainWindow(QMainWindow):
         # Apply defaults after start
         def apply_defaults():
             if initial_settings:
-                self.camera_thread.apply_node_settings(initial_settings)
+                mapped = {snake_case(k): v for k, v in initial_settings.items()}
+                self.camera_thread.apply_node_settings(mapped)
 
         if initial_settings:
             QTimer.singleShot(300, apply_defaults)

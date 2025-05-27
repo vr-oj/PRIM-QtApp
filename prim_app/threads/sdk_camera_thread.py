@@ -1,4 +1,5 @@
 # PRIM-QTAPP/prim_app/threads/sdk_camera_thread.py
+import re
 import numpy as np
 import logging
 import imagingcontrol4 as ic4
@@ -42,30 +43,23 @@ class SDKCameraThread(QThread):
         pm = self.grabber.device_property_map
         applied = {}
         for name, val in settings.items():
-            # map CamelCase name to PropId.<UPPER_SNAKE>
-            prop_name = re.sub(r"(?<!^)(?=[A-Z])", "_", name).upper()
-            prop_id = getattr(ic4.PropId, prop_name, None)
-            if not prop_id:
-                log.warning(f"No PropId for setting '{name}'")
-                continue
-
+            # map CamelCase or snake_case to UPPER_SNAKE_CASE PropId name
+            prop_name = (
+                name
+                if name.isupper()
+                else re.sub(r"(?<!^)(?=[A-Z])", "_", name).upper()
+            )
             try:
+                prop_id = getattr(ic4.PropId, prop_name)
                 pm.set_value(prop_id, val)
-                # retrieve via typed getter
-                try:
-                    actual = pm.get_value_int(prop_id)
-                except Exception:
-                    try:
-                        actual = pm.get_value_float(prop_id)
-                    except Exception:
-                        try:
-                            actual = pm.get_value_str(prop_id)
-                        except Exception:
-                            actual = pm.get_value_bool(prop_id)
-                applied[name] = actual
+                # you may need to pick get_value_int/float/str/… here:
+                actual = pm.get_value(prop_id)
+                applied[prop_name] = actual
             except Exception as e:
                 code = getattr(e, "code", "")
-                self.camera_error.emit(f"Failed to set {name} to {val}: {e}", str(code))
+                self.camera_error.emit(
+                    f"Failed to set {prop_name} to {val}: {e}", str(code)
+                )
 
         if applied:
             self.properties_updated.emit(applied)
