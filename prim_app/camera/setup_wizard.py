@@ -2,6 +2,7 @@
 import os
 import json
 import logging
+import imagingcontrol4 as ic4
 from PyQt5.QtWidgets import (
     QApplication,
     QWizard,
@@ -23,13 +24,20 @@ from PyQt5.QtWidgets import (
 
 from utils.config import CAMERA_PROFILES_DIR
 from utils.app_settings import load_app_setting, SETTING_CTI_PATH
-from camera.camera_profiler import (
-    profile_camera_devices,
-    get_camera_node_map,
-    test_capture,
-)
 
 module_log = logging.getLogger(__name__)
+
+# Ensure CTI path is set before using wizard
+cti_path = load_app_setting(SETTING_CTI_PATH)
+if cti_path:
+    os.environ["GENICAM_GENTL64_PATH"] = os.path.dirname(cti_path)
+    try:
+        ic4.Library.init()
+    except ic4.IC4Exception as e:
+        QMessageBox.critical(None, "IC4 Init Error", f"{e.code}: {e.message}")
+        raise
+else:
+    QMessageBox.warning(None, "CTI Not Configured", "No CTI path found in settings.")
 
 
 class CameraScanPage(QWizardPage):
@@ -48,36 +56,30 @@ class CameraScanPage(QWizardPage):
 
     def scan_cameras(self):
         try:
-            cams = profile_camera()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Camera scan failed:\n{e}")
+            devices = ic4.Device.enumerate()
+        except ic4.IC4Exception as e:
+            QMessageBox.critical(self, "IC4 Error", f"{e.code}: {e.message}")
             module_log.error(f"Camera scan error: {e}")
             return
         self.cameraCombo.clear()
-        if not cams:
+        if not devices:
             self.cameraCombo.addItem("No IC4 cameras found.")
             self.cameraCombo.setEnabled(False)
         else:
             self.cameraCombo.setEnabled(True)
-            for cam in cams:
-                desc = f"{cam['model']} (SN: {cam['serial'] or 'unknown'})"
-                self.cameraCombo.addItem(desc, cam)
+            for dev in devices:
+                desc = f"{dev.model_name} (SN: {dev.serial_number})"
+                self.cameraCombo.addItem(desc, dev)
 
     def validatePage(self):
-        data = self.cameraCombo.currentData()
-        if not data or not isinstance(data, dict):
+        dev = self.cameraCombo.currentData()
+        if not dev:
             QMessageBox.warning(
                 self, "No Camera", "Please scan and select a valid camera."
             )
             return False
-        model = data.get("model")
-        serial = data.get("serial") or model
-        self.wizard().settings.update(
-            {
-                "cameraModel": model,
-                "cameraSerialPattern": serial,
-            }
-        )
+        # Store the DeviceInfo object
+        self.wizard().settings["device_info"] = dev
         return True
 
 
@@ -94,20 +96,10 @@ class DefaultsPage(QWizardPage):
         self.expAutoCombo.addItems(["Off", "Continuous"])
         self.expTimeSpin = QDoubleSpinBox()
         self.expTimeSpin.setSuffix(" µs")
-        self.expTimeSpin.setRange(1, 10_000_000)
-        self.expTimeSpin.setValue(20_000)
-        self.expTimeSpin.setSingleStep(100)
-
         self.gainSpin = QDoubleSpinBox()
         self.gainSpin.setSuffix(" dB")
-        self.gainSpin.setRange(0, 100)
-        self.gainSpin.setDecimals(1)
-
         self.fpsSpin = QDoubleSpinBox()
         self.fpsSpin.setSuffix(" FPS")
-        self.fpsSpin.setRange(1, 500)
-        self.fpsSpin.setDecimals(1)
-
         self.pixFmtCombo = QComboBox()
         self.widthSpin = QSpinBox()
         self.heightSpin = QSpinBox()
@@ -125,18 +117,25 @@ class DefaultsPage(QWizardPage):
             self.form.addRow(label, widget)
 
     def initializePage(self):
-        s = self.wizard().settings
-        pattern = s.get("cameraSerialPattern")
-        if not pattern:
+        dev = self.wizard().settings.get("device_info")
+        if not dev:
             QMessageBox.critical(self, "Error", "Camera not selected.")
             return
-        nodes = get_camera_node_map(s["cameraModel"], pattern) or {}
+        grabber = ic4.Grabber(dev)
+        grabber.device_open()
+        node_map = grabber.node_map
 
-        # Populate or fallback
+        # PixelFormat options
+        pix_node = node_map.get("PixelFormat")
         self.pixFmtCombo.clear()
-        options = nodes.get("PixelFormat", {}).get("options", ["Mono8", "BayerRG8"])
-        self.pixFmtCombo.addItems([str(o) for o in options])
+        if pix_node:
+            self.pixFmtCombo.addItems([str(opt) for opt in pix_node.options])
+            cur = str(pix_node.value)
+            idx = self.pixFmtCombo.findText(cur)
+            if idx >= 0:
+                self.pixFmtCombo.setCurrentIndex(idx)
 
+        # Numeric nodes
         for name, widget in [
             ("Width", self.widthSpin),
             ("Height", self.heightSpin),
@@ -144,18 +143,20 @@ class DefaultsPage(QWizardPage):
             ("Gain", self.gainSpin),
             ("AcquisitionFrameRate", self.fpsSpin),
         ]:
-            info = nodes.get(name, {})
-            if "min" in info and "max" in info:
-                widget.setRange(info["min"], info["max"])
-            widget.setValue(info.get("current", widget.value()))
+            node = node_map.get(name)
+            if node:
+                widget.setRange(node.min, node.max)
+                widget.setValue(node.value)
 
-        # ExposureAuto
-        cur = nodes.get("ExposureAuto", {}).get("current", "Off")
-        if isinstance(cur, bool):
-            cur = "Continuous" if cur else "Off"
-        idx = self.expAutoCombo.findText(str(cur))
-        if idx >= 0:
-            self.expAutoCombo.setCurrentIndex(idx)
+        # Exposure Auto enumeration
+        exp_node = node_map.get("ExposureAuto")
+        if exp_node:
+            self.expAutoCombo.clear()
+            self.expAutoCombo.addItems([str(o) for o in exp_node.options])
+            cur = str(exp_node.value)
+            idx = self.expAutoCombo.findText(cur)
+            if idx >= 0:
+                self.expAutoCombo.setCurrentIndex(idx)
 
     def validatePage(self):
         self.wizard().settings["defaults"] = {
@@ -194,33 +195,35 @@ class AdvancedSettingsPage(QWizardPage):
                 w.deleteLater()
         self.nodeWidgets.clear()
 
-        s = self.wizard().settings
-        nodes = get_camera_node_map(s["cameraModel"], s["cameraSerialPattern"]) or {}
+        dev = self.wizard().settings.get("device_info")
+        if not dev:
+            return
+        grabber = ic4.Grabber(dev)
+        grabber.device_open()
+        node_map = grabber.node_map
         defaults = set(self.wizard().settings.get("defaults", {}).keys())
 
-        for name, info in sorted(nodes.items()):
-            if name in defaults or not info.get("type"):
+        for name, node in sorted(node_map.items()):
+            if name in defaults or node is None:
                 continue
             widget = None
-            t = info.get("type")
-            cur = info.get("current")
-            if t == "IEnumeration":
+            if node.type == "IEnumeration":
                 widget = QComboBox()
-                widget.addItems([str(o) for o in info.get("options", [])])
-                idx = widget.findText(str(cur))
+                widget.addItems([str(o) for o in node.options])
+                idx = widget.findText(str(node.value))
                 if idx >= 0:
                     widget.setCurrentIndex(idx)
-            elif t == "IInteger":
+            elif node.type == "IInteger":
                 widget = QSpinBox()
-                widget.setRange(info.get("min", 0), info.get("max", 0))
-                widget.setValue(cur or 0)
-            elif t == "IFloat":
+                widget.setRange(node.min, node.max)
+                widget.setValue(node.value)
+            elif node.type == "IFloat":
                 widget = QDoubleSpinBox()
-                widget.setRange(info.get("min", 0), info.get("max", 0))
-                widget.setValue(cur or 0)
-            elif t == "IBoolean":
+                widget.setRange(node.min, node.max)
+                widget.setValue(node.value)
+            elif node.type == "IBoolean":
                 widget = QCheckBox()
-                widget.setChecked(bool(cur))
+                widget.setChecked(bool(node.value))
             if widget:
                 self.form.addRow(f"{name}:", widget)
                 self.nodeWidgets[name] = widget
@@ -248,112 +251,4 @@ class TestCapturePage(QWizardPage):
         self.infoLabel = QLabel(
             "Click 'Test Capture' to grab a frame with the current settings."
         )
-        self.testBtn = QPushButton("Test Capture")
-        self.testBtn.clicked.connect(self.run_test)
-        layout.addWidget(self.infoLabel)
-        layout.addWidget(self.testBtn)
-        self.tested_successfully = False
-
-    def run_test(self):
-        self.testBtn.setEnabled(False)
-        self.infoLabel.setText("Attempting test capture...")
-        QApplication.processEvents()
-        s = self.wizard().settings
-        settings = {**s.get("defaults", {}), **s.get("advanced", {})}
-        try:
-            ok = test_capture(s["cameraModel"], s["cameraSerialPattern"], settings)
-            self.tested_successfully = ok
-            self.infoLabel.setText(
-                "Test capture SUCCEEDED!" if ok else "Test capture FAILED."
-            )
-            if not ok:
-                QMessageBox.warning(self, "Capture Failed", "No frame returned.")
-        except Exception as e:
-            module_log.error(f"Test capture exception: {e}")
-            QMessageBox.critical(self, "Capture Exception", str(e))
-            self.infoLabel.setText(f"Error: {e}")
-            self.tested_successfully = False
-        finally:
-            self.testBtn.setEnabled(True)
-
-    def validatePage(self):
-        if not self.tested_successfully:
-            return (
-                QMessageBox.warning(
-                    self,
-                    "Test Not Successful",
-                    "Proceed anyway?",
-                    QMessageBox.Yes | QMessageBox.No,
-                )
-                == QMessageBox.Yes
-            )
-        return True
-
-
-class SummaryPage(QWizardPage):
-    """Page 5: Save the configured profile to disk"""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setTitle("Save Camera Profile")
-        layout = QFormLayout(self)
-        self.nameEdit = QLineEdit()
-        layout.addRow("Profile Name:", self.nameEdit)
-
-    def initializePage(self):
-        s = self.wizard().settings
-        model = s.get("cameraModel", "Camera")
-        serial = s.get("cameraSerialPattern", "")
-        name = f"{model}_{serial}_Profile".replace(" ", "_")
-        self.nameEdit.setText(name)
-
-    def validatePage(self):
-        name = self.nameEdit.text().strip()
-        if not name:
-            QMessageBox.warning(self, "Profile Name Required", "Enter a profile name.")
-            return False
-        s = self.wizard().settings
-        profile = {
-            "profileName": name,
-            "model": s.get("cameraModel"),
-            "serialPattern": s.get("cameraSerialPattern"),
-            "defaults": s.get("defaults", {}),
-            "advanced": s.get("advanced", {}),
-            "ctiPathUsed": load_app_setting(SETTING_CTI_PATH),
-        }
-        os.makedirs(CAMERA_PROFILES_DIR, exist_ok=True)
-        filename = f"{name}.json"
-        path = os.path.join(CAMERA_PROFILES_DIR, filename)
-        if os.path.exists(path):
-            if QMessageBox.No == QMessageBox.warning(
-                self,
-                "Overwrite?",
-                f"'{filename}' exists. Overwrite?",
-                QMessageBox.Yes | QMessageBox.No,
-            ):
-                return False
-        try:
-            with open(path, "w") as f:
-                json.dump(profile, f, indent=4)
-            QMessageBox.information(self, "Profile Saved", f"Saved to {path}")
-            s["profileNameSavedAs"] = name
-            return True
-        except Exception as e:
-            module_log.error(f"Save profile error: {e}")
-            QMessageBox.critical(self, "Save Error", str(e))
-            return False
-
-
-class CameraSetupWizard(QWizard):
-    """Top-level wizard orchestrating camera setup"""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Camera Setup Wizard")
-        self.settings = {}
-        self.setWizardStyle(QWizard.ModernStyle)
-        self.addPage(CameraScanPage())
-        self.addPage(DefaultsPage())
-        self.addPage(AdvancedSettingsPage())
-        self.addPage(TestCapturePage())
-        self.addPage(SummaryPage())
+        self.test
