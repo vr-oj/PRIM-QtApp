@@ -31,9 +31,7 @@ class MinimalSinkListener(ic4.QueueSinkListener):
         )
         return True
 
-    def sink_disconnected(
-        self, sink: ic4.QueueSink, userdata: any
-    ):  # userdata argument added
+    def sink_disconnected(self, sink: ic4.QueueSink, userdata: any):
         log.debug(f"Listener '{self.owner_name}': Sink disconnected.")
         pass
 
@@ -116,8 +114,6 @@ class SDKCameraThread(QThread):
                     f"Attempting to set GenICam Feature '{feature_name_sfnc}' to {val} (type: {type(val)})"
                 )
 
-                # Use SFNC string name directly with set_value
-                # Special handling for PixelFormat if it expects an enum member
                 if feature_name_sfnc == "PixelFormat" and isinstance(val, str):
                     pixel_format_member = getattr(ic4.PixelFormat, val, None)
                     if pixel_format_member is not None:
@@ -270,32 +266,28 @@ class SDKCameraThread(QThread):
                     )
                 return current_value
 
-            # Use SFNC/CamelCase names for querying, assuming these are defined in ic4.PropId constants
-            # and that these constants are the string names themselves.
+            # Use HARDCODED SFNC strings for querying
             initial_props_to_read_sfnc = [
-                ic4.PropId.AcquisitionFrameRate,
-                ic4.PropId.ExposureTime,
-                ic4.PropId.Gain,
-                ic4.PropId.ExposureAuto,
-                ic4.PropId.PixelFormat,
-                ic4.PropId.Width,
-                ic4.PropId.Height,
+                "AcquisitionFrameRate",
+                "ExposureTime",
+                "Gain",
+                "ExposureAuto",
+                "PixelFormat",
+                "Width",
+                "Height",
             ]
-            for prop_sfnc_name_const in initial_props_to_read_sfnc:
-                # Assuming prop_sfnc_name_const IS the string like "AcquisitionFrameRate"
-                prop_sfnc_name = str(prop_sfnc_name_const)  # Ensure it's a string
-
+            for prop_sfnc_name in initial_props_to_read_sfnc:
                 range_emitter = None
                 direct_emitter = None
-                if prop_sfnc_name == str(ic4.PropId.AcquisitionFrameRate):
+                if prop_sfnc_name == "AcquisitionFrameRate":
                     range_emitter = self.fps_range_updated
-                elif prop_sfnc_name == str(ic4.PropId.ExposureTime):
+                elif prop_sfnc_name == "ExposureTime":
                     range_emitter = self.exposure_range_updated
-                elif prop_sfnc_name == str(ic4.PropId.Gain):
+                elif prop_sfnc_name == "Gain":
                     range_emitter = self.gain_range_updated
-                elif prop_sfnc_name == str(ic4.PropId.PixelFormat):
+                elif prop_sfnc_name == "PixelFormat":
                     range_emitter = self.pixel_formats_updated
-                elif prop_sfnc_name == str(ic4.PropId.ExposureAuto):
+                elif prop_sfnc_name == "ExposureAuto":
                     direct_emitter = self.auto_exposure_updated
                 query_property_details(
                     prop_sfnc_name,
@@ -305,13 +297,11 @@ class SDKCameraThread(QThread):
                 )
 
             try:
-                # Set initial FPS using its SFNC string name (assuming ic4.PropId.AcquisitionFrameRate is that string)
-                fps_sfnc_name = str(ic4.PropId.AcquisitionFrameRate)
+                fps_sfnc_name = "AcquisitionFrameRate"  # Use hardcoded SFNC string
                 prop_fps_item = self.pm.find(fps_sfnc_name)
                 if prop_fps_item and prop_fps_item.is_writable:
                     self.pm.set_value(fps_sfnc_name, self.target_fps)
                     log.info(f"SDKCameraThread: Set initial FPS to {self.target_fps}")
-                    # Emit with UPPER_SNAKE_CASE key
                     self.properties_updated.emit(
                         {to_prop_name(fps_sfnc_name): self.target_fps}
                     )
@@ -349,7 +339,7 @@ class SDKCameraThread(QThread):
 
             while not self._stop_requested:
                 try:
-                    buf = self.sink.pop_output_buffer()  # No timeout argument
+                    buf = self.sink.pop_output_buffer()
                     if not buf:
                         if self._stop_requested:
                             break
