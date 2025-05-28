@@ -176,99 +176,183 @@ class MainWindow(QMainWindow):
 
     def _connect_camera_signals(self):
         th = self.camera_thread
-        # cp = self.camera_panel # cp is self.camera_panel
+        cp = self.camera_panel  # This is your tabbed CameraControlPanel
 
-        # We only connect essential signals for the simplified stream display for now.
-        # Connections to camera controls (exposure, gain etc.) will be added in Phase 2.
-        if not (
-            th and self.camera_view and self.camera_panel
-        ):  # Ensure camera_panel also exists
+        if not (th and self.camera_view and cp):
             log.warning(
                 "Cannot connect camera signals: thread, view, or camera_panel missing."
             )
             return True
 
-        # Disconnect previous signals to be safe if re-connecting
+        # --- Disconnect ALL signals from th and cp first to prevent multiple connections ---
+        # (More robustly, check if connected before disconnecting, or use QObject.disconnect())
         try:
-            th.frame_ready.disconnect()
+            th.frame_ready.disconnect(self.camera_view.update_frame)
         except TypeError:
             pass
         try:
-            th.camera_error.disconnect()
+            th.camera_error.disconnect(self._on_camera_error)
         except TypeError:
             pass
 
-        # This is for a future signal from SDKCameraThread that would carry dynamic camera info
-        # For now, we'll manually update status info once after camera starts.
-        # If SDKCameraThread later emits a signal like:
-        # camera_info_ready = pyqtSignal(dict) # e.g., dict with model, serial, res, pixfmt, fps
-        # you would connect it here:
-        # if hasattr(th, 'camera_info_ready') and hasattr(self.camera_panel, 'update_status_info_from_dict'):
-        #    th.camera_info_ready.connect(self.camera_panel.update_status_info_from_dict) # Assuming update_status_info_from_dict in CameraControlPanel
+        if hasattr(th, "camera_info_updated"):
+            try:
+                th.camera_info_updated.disconnect(self._update_camera_status_tab)
+            except TypeError:
+                pass
+        if hasattr(th, "exposure_params_updated"):
+            try:
+                th.exposure_params_updated.disconnect(
+                    self._update_camera_exposure_controls
+                )
+            except TypeError:
+                pass
+        # Add for gain later:
+        # if hasattr(th, 'gain_params_updated'):
+        # try: th.gain_params_updated.disconnect(self._update_camera_gain_controls)
+        # except TypeError: pass
 
+        # --- Connect SDKCameraThread signals to MainWindow/CameraPanel slots ---
         th.frame_ready.connect(self.camera_view.update_frame)
         th.camera_error.connect(self._on_camera_error)
 
-        log.info(
-            "Core camera signals connected (frame_ready, camera_error). Status tab updates handled separately for now."
-        )
+        if hasattr(th, "camera_info_updated"):
+            th.camera_info_updated.connect(self._update_camera_status_tab)
+        if hasattr(th, "exposure_params_updated"):
+            th.exposure_params_updated.connect(self._update_camera_exposure_controls)
+        # Add for gain later:
+        # if hasattr(th, 'gain_params_updated'):
+        # th.gain_params_updated.connect(self._update_camera_gain_controls)
+
+        # --- Connect CameraControlPanel UI signals to MainWindow slots (for sending commands to thread) ---
+        # For Exposure
+        if hasattr(cp, "auto_exp_cb"):
+            try:
+                cp.auto_exp_cb.toggled.disconnect(
+                    self._on_auto_exposure_changed
+                )  # Use toggled for QCheckBox
+            except TypeError:
+                pass
+            cp.auto_exp_cb.toggled.connect(self._on_auto_exposure_changed)
+
+        if hasattr(cp, "exp_spin"):
+            try:
+                cp.exp_spin.valueChanged.disconnect(self._on_exposure_time_changed)
+            except TypeError:
+                pass
+            cp.exp_spin.valueChanged.connect(self._on_exposure_time_changed)
+
+        # Add for Gain later
+        # if hasattr(cp, 'gain_spin'):
+        # try: cp.gain_spin.valueChanged.disconnect(self._on_gain_changed)
+        # except TypeError: pass
+        # cp.gain_spin.valueChanged.connect(self._on_gain_changed)
+
+        # Add for Resolution, PixelFormat, FPS later if re-enabled
+
+        log.info("Camera signals connected for live feed and initial controls.")
         return False
 
-    def _start_sdk_camera_thread(
-        self, camera_identifier, fps, initial_settings=None
-    ):  # initial_settings will be None
+    @pyqtSlot(bool)
+    def _on_auto_exposure_changed(self, checked: bool):
         if self.camera_thread and self.camera_thread.isRunning():
-            log.info("Stopping existing camera thread before starting new one.")
-            self.camera_thread.stop()  # stop() should handle waiting
+            exposure_auto_str = "Continuous" if checked else "Off"
+            log.debug(f"UI changed: ExposureAuto to {exposure_auto_str}")
+            self.camera_thread._attempt_set_property(
+                "ExposureAuto", exposure_auto_str, exposure_auto_str
+            )
+            # Re-query exposure params to update UI state (e.g., enable/disable manual exposure spinbox)
+            # This is a bit indirect; ideally, SDKCameraThread confirms the change and re-emits params.
+            # For now, let's assume the set was successful and update UI based on 'checked'.
+            if self.camera_panel and hasattr(self.camera_panel, "exp_spin"):
+                self.camera_panel.exp_spin.setEnabled(not checked)
+
+    @pyqtSlot(float)
+    def _on_exposure_time_changed(self, value_us: float):
+        if self.camera_thread and self.camera_thread.isRunning():
+            # Only set if auto exposure is off
+            if (
+                self.camera_panel
+                and hasattr(self.camera_panel, "auto_exp_cb")
+                and not self.camera_panel.auto_exp_cb.isChecked()
+            ):
+                log.debug(f"UI changed: ExposureTime to {value_us} µs")
+                self.camera_thread._attempt_set_property(
+                    "ExposureTime", value_us, f"{value_us}"
+                )
+
+    # Add _on_gain_changed etc. later
+
+    # --- New SLOTS in MainWindow to update CameraControlPanel from SDKCameraThread signals ---
+    @pyqtSlot(dict)
+    def _update_camera_status_tab(self, info: dict):
+        if self.camera_panel and hasattr(self.camera_panel, "update_status_info"):
+            self.camera_panel.update_status_info(
+                model=info.get("model", "N/A"),
+                serial=info.get("serial", "N/A"),
+                resolution=f"{info.get('width','N/A')}x{info.get('height','N/A')}",
+                pix_format=info.get("pixel_format", "N/A"),
+                fps=f"{info.get('fps', 0.0):.1f}",
+            )
+            log.debug(f"Camera status tab updated: {info}")
+
+    @pyqtSlot(dict)
+    def _update_camera_exposure_controls(self, params: dict):
+        if self.camera_panel and hasattr(self.camera_panel, "update_exposure_controls"):
+            self.camera_panel.update_exposure_controls(
+                enabled=params.get("is_writable", False)
+                or params.get(
+                    "auto_is_writable", False
+                ),  # Enable if either is writable
+                is_auto=params.get("auto_on", False),
+                value_us=params.get("current_us", 0.0),
+                min_us=params.get("min_us", 0.0),
+                max_us=params.get("max_us", 1000000.0),
+            )
+            log.debug(f"Camera exposure controls updated: {params}")
+            # Ensure adjustments tab is enabled if controls are active
+            if (
+                hasattr(self.camera_panel, "tab_widget")
+                and self.camera_panel.tab_widget.count() > 1
+            ):
+                self.camera_panel.tab_widget.setTabEnabled(
+                    1, True
+                )  # Index 1 for "Adjustments" tab
+
+    # Ensure it doesn't unconditionally disable camera_panel if it was enabled by _initialize_camera_on_startup.
+    def _start_sdk_camera_thread(self, camera_identifier, fps, initial_settings=None):
+        if self.camera_thread and self.camera_thread.isRunning():
+            log.info("Stopping existing camera thread...")
+            self.camera_thread.stop()
             self.camera_thread.deleteLater()
             self.camera_thread = None
-            QApplication.processEvents()  # Allow deletion to process
+            QApplication.processEvents()
 
-        log.info(
-            f"Creating SDKCameraThread for device: '{camera_identifier}', Target FPS: {fps} (FPS setting will be ignored by simplified thread)"
-        )
+        log.info(f"Creating SDKCameraThread for device: '{camera_identifier}'")
         self.camera_thread = SDKCameraThread(
             device_name=camera_identifier, fps=float(fps), parent=self
         )
-
-        # Store basic identifier, could be serial or model name if serial not available
         self.camera_settings["cameraSerialPattern"] = camera_identifier
 
         if (
             self._connect_camera_signals()
-        ):  # This will now connect only essential signals
-            log.error(
-                "Failed to connect simplified camera signals for new SDKCameraThread."
-            )
-            self.camera_thread.deleteLater()
-            self.camera_thread = None
+        ):  # This connects frame_ready, error, and new status/param signals
+            log.error("Failed to connect camera signals for SDKCameraThread.")
             if self.camera_panel:
                 self.camera_panel.setEnabled(False)
             return
 
-        # No initial_settings application in simplified version
-        if initial_settings:
-            log.warning(
-                "Simplified mode: 'initial_settings' will be ignored by SDKCameraThread."
-            )
-
-        log.info(f"Starting simplified SDKCameraThread for {camera_identifier}...")
+        log.info(f"Starting SDKCameraThread for {camera_identifier}...")
         self.camera_thread.start()
-
-        # Keep camera_panel disabled as we are not using its controls
-        if self.camera_panel:
-            self.camera_panel.setEnabled(False)
-
-        current_model_display = self.camera_settings.get(
-            "cameraModel", camera_identifier
-        )
+        # camera_panel should already be enabled by _initialize_camera_on_startup if IC4 is ready
         self.statusBar().showMessage(
-            f"Attempting to start basic live feed: {current_model_display}", 5000
+            f"Attempting basic live feed: {self.camera_settings.get('cameraModel', camera_identifier)}",
+            5000,
         )
 
-    def _initialize_camera_on_startup(self):
+    def _initialize_camera_on_startup(self):  # Modified to update status tab
         if not is_ic4_fully_initialized():
-            log.info("IC4 not fully initialized, cannot auto-configure camera.")
+            log.info("IC4 not fully initialized.")
             self.statusBar().showMessage(
                 "IC4 SDK not configured. Use Camera menu...", 5000
             )
@@ -276,21 +360,24 @@ class MainWindow(QMainWindow):
                 self.camera_panel.setEnabled(False)
             return
 
-        log.info("Attempting to get first available IC4 camera for basic live feed...")
-        # Enable the camera panel now that IC4 is ready and we're trying to start a camera
+        log.info("Attempting to get first available IC4 camera...")
         if self.camera_panel:
-            self.camera_panel.setEnabled(True)
-            # If you have tabs and want to ensure "Status" is default or "Adjustments" is initially disabled:
-            # if hasattr(self.camera_panel, 'tab_widget'):
-            #     self.camera_panel.tab_widget.setCurrentIndex(0) # Ensure Status tab is shown
-            #     self.camera_panel.tab_widget.setTabEnabled(1, False) # Disable "Adjustments" tab initially
+            self.camera_panel.setEnabled(
+                True
+            )  # Enable the panel as we are trying to use camera
+            if (
+                hasattr(self.camera_panel, "tab_widget")
+                and self.camera_panel.tab_widget.count() > 1
+            ):
+                # self.camera_panel.tab_widget.setTabEnabled(1, False) # Keep adjustments initially disabled until params arrive
+                pass  # Let controls be enabled by default, their interactive state depends on camera signals
 
         available_devices = []
         try:
             available_devices = ic4.DeviceEnum.devices()
             if not available_devices:
-                log.warning("No camera devices found by ic4.DeviceEnum.")
-                self.statusBar().showMessage("No camera devices found.", 5000)
+                log.warning("No IC4 devices found.")
+                self.statusBar().showMessage("No cameras found.", 5000)
                 if self.camera_panel:
                     self.camera_panel.setEnabled(False)
                 return
@@ -302,7 +389,6 @@ class MainWindow(QMainWindow):
             return
 
         first_device_info = available_devices[0]
-        camera_identifier = None
         camera_model_name = (
             first_device_info.model_name
             if hasattr(first_device_info, "model_name")
@@ -313,69 +399,44 @@ class MainWindow(QMainWindow):
             if hasattr(first_device_info, "serial") and first_device_info.serial
             else "N/A"
         )
+        camera_identifier = (
+            camera_serial_number
+            if camera_serial_number != "N/A"
+            else (
+                first_device_info.unique_name
+                if hasattr(first_device_info, "unique_name")
+                and first_device_info.unique_name
+                else camera_model_name
+            )
+        )
 
-        if hasattr(first_device_info, "serial") and first_device_info.serial:
-            camera_identifier = first_device_info.serial
-        elif (
-            hasattr(first_device_info, "unique_name") and first_device_info.unique_name
-        ):
-            camera_identifier = first_device_info.unique_name
-            log.info(
-                f"Using unique_name as identifier for {camera_model_name}: {camera_identifier}"
-            )
-        else:
-            camera_identifier = camera_model_name
-            log.warning(
-                f"Using model_name as identifier for {camera_model_name} (serial/unique_name not available/empty)."
-            )
-
-        if not camera_identifier:
-            log.error(
-                f"Could not determine identifier for first camera: {camera_model_name}"
-            )
-            self.statusBar().showMessage(
-                f"Could not identify {camera_model_name}.", 5000
-            )
+        if not camera_identifier:  # Should not happen if model_name is fallback
+            log.error(f"Could not ID first camera: {camera_model_name}")
+            self.statusBar().showMessage(f"Could not ID {camera_model_name}.", 5000)
             if self.camera_panel:
                 self.camera_panel.setEnabled(False)
             return
 
-        log.info(
-            f"Found first camera: {camera_model_name} (ID: {camera_identifier}). Attempting stream."
-        )
-        # Store basic info for potential use in status tab
+        log.info(f"Found first camera: {camera_model_name} (ID: {camera_identifier}).")
         self.camera_settings["cameraModel"] = camera_model_name
         self.camera_settings["cameraSerial"] = camera_serial_number
         self.camera_settings["cameraIdentifier"] = camera_identifier
 
         try:
-            # DEFAULT_FPS is used here just as an informational target for SDKCameraThread,
-            # actual FPS will be camera's default or what SDK negotiates.
             self._start_sdk_camera_thread(
                 camera_identifier, DEFAULT_FPS, initial_settings=None
             )
             save_app_setting(SETTING_LAST_CAMERA_SERIAL, camera_identifier)
 
-            # After starting thread, update status tab in CameraControlPanel
-            # This is an initial update. Dynamic updates would come from SDKCameraThread signals.
+            # Initial update for status tab - SDKThread will send more complete info via signal
             if self.camera_panel and hasattr(self.camera_panel, "update_status_info"):
-                # We know SDKCameraThread attempts to set 640x480 and Mono8
-                current_res_str = "640x480 (Target)"
-                current_pix_format_str = "Mono8 (Target)"
-                # Actual streaming FPS is not actively controlled or queried yet in simplified mode
-                # We can display the target_fps passed to the thread as an indication.
-                actual_fps_str = f"~{self.camera_thread.target_fps if self.camera_thread else DEFAULT_FPS} (Target)"
-
                 self.camera_panel.update_status_info(
                     model=self.camera_settings.get("cameraModel", "N/A"),
                     serial=self.camera_settings.get("cameraSerial", "N/A"),
-                    resolution=current_res_str,
-                    pix_format=current_pix_format_str,
-                    fps=actual_fps_str,
+                    resolution="640x480 (Target)",  # This is what SDKCameraThread sets
+                    pix_format="Mono8 (Target)",  # This is what SDKCameraThread sets
+                    fps=f"~{DEFAULT_FPS} (Target)",  # Actual FPS will come from SDKCameraThread signal
                 )
-                # Keep camera_panel enabled as stream attempt is underway
-                # self.camera_panel.setEnabled(True) # Already done above if IC4 is ready
-
         except Exception as e:
             log.exception(f"Failed to start camera '{camera_model_name}': {e}")
             QMessageBox.critical(
@@ -383,6 +444,29 @@ class MainWindow(QMainWindow):
             )
             if self.camera_panel:
                 self.camera_panel.setEnabled(False)
+
+    def _set_initial_control_states(self):  # Your existing method is mostly fine
+        if self.top_ctrl:
+            self.top_ctrl.update_connection_status("Disconnected", False)
+        if hasattr(self, "start_recording_action"):
+            self.start_recording_action.setEnabled(False)
+        if hasattr(self, "stop_recording_action"):
+            self.stop_recording_action.setEnabled(False)
+
+        if self.camera_panel:
+            self.camera_panel.setEnabled(False)  # Start disabled
+            # Ensure the "Adjustments" tab controls are initially disabled if the panel itself is disabled.
+            # Or, individual controls within CameraControlPanel can set their own initial enabled state.
+            # For now, disabling the whole panel is sufficient at start.
+            # The "Adjustments" tab itself can be enabled, but its widgets will be disabled
+            # until specific camera parameters are received.
+            if (
+                hasattr(self.camera_panel, "tab_widget")
+                and self.camera_panel.tab_widget.count() > 1
+            ):
+                self.camera_panel.tab_widget.setTabEnabled(
+                    1, True
+                )  # Keep tab enabled, but panel's setEnabled(False) will disable contents.
 
     def _run_camera_setup(self):
         # Temporarily disable the camera setup wizard functionality
