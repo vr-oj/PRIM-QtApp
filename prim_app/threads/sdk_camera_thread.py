@@ -84,9 +84,9 @@ class SDKCameraThread(QThread):
         if not self.pm:
             log.warning("Cannot query camera parameters: PropertyMap not available.")
             return
+        # General camera info
         info = {}
 
-        # Safe read helper
         def safe_read(prop, as_str=False, default=None):
             if not prop:
                 return default
@@ -98,7 +98,6 @@ class SDKCameraThread(QThread):
                 log.warning(f"Unable to read {prop.name}: {e}")
                 return default
 
-        # General camera info
         camera_props = [
             ("model", "DeviceModelName", True),
             ("serial", "DeviceSerialNumber", True),
@@ -134,13 +133,28 @@ class SDKCameraThread(QThread):
             ]
         p_time = self.pm.find("ExposureTime")
         if p_time:
-            exp["time_is_writable"] = getattr(p_time, "is_writable", False)
+            # allow time control whenever auto is off
+            exp["time_is_writable"] = (
+                True
+                if exp["auto_current"] == "Off"
+                else getattr(p_time, "is_writable", False)
+            )
             try:
                 exp["time_current_us"] = p_time.value
             except Exception:
                 exp["time_current_us"] = None
-            exp["time_min_us"] = getattr(p_time, "min", None)
-            exp["time_max_us"] = getattr(p_time, "max", None)
+            # try common range attrs
+            exp["time_min_us"] = getattr(p_time, "min", None) or getattr(
+                p_time, "minimum", None
+            )
+            exp["time_max_us"] = getattr(p_time, "max", None) or getattr(
+                p_time, "maximum", None
+            )
+            # fallback defaults
+            if exp["time_min_us"] is None:
+                exp["time_min_us"] = 1.0
+            if exp["time_max_us"] is None:
+                exp["time_max_us"] = exp["time_current_us"] or 1000000.0
         self.exposure_params_updated.emit(exp)
         log.debug(f"exposure_params_updated: {exp}")
 
@@ -165,26 +179,20 @@ class SDKCameraThread(QThread):
             devices = ic4.DeviceEnum.devices()
             if not devices:
                 raise RuntimeError("No IC4 devices found.")
-            # select device
+            target = None
             if self.device_identifier:
-                target = next(
-                    (
-                        d
-                        for d in devices
-                        if self.device_identifier
-                        in (
-                            getattr(d, "serial", ""),
-                            getattr(d, "unique_name", ""),
-                            getattr(d, "model_name", ""),
-                        )
-                    ),
-                    None,
-                )
+                for d in devices:
+                    if self.device_identifier in (
+                        getattr(d, "serial", ""),
+                        getattr(d, "unique_name", ""),
+                        getattr(d, "model_name", ""),
+                    ):
+                        target = d
+                        break
                 if not target:
                     raise RuntimeError(f"Camera '{self.device_identifier}' not found.")
             else:
                 target = devices[0]
-            # open
             self.grabber = ic4.Grabber()
             self.grabber.device_open(target)
             self.pm = self.grabber.device_property_map
@@ -202,7 +210,6 @@ class SDKCameraThread(QThread):
             self.grabber.stream_setup(self.sink)
             if not self.grabber.is_acquisition_active:
                 self.grabber.acquisition_start()
-            # frame loop
             while not self._stop_requested:
                 try:
                     buf = self.sink.pop_output_buffer()
