@@ -4,7 +4,7 @@ import sys
 import re
 import logging
 import csv
-import json  # Required for QInputDialog in _proceed_with_camera_setup_dialog if not already imported
+import json
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (
     QSplitter,
     QMessageBox,
     QSizePolicy,
-    QInputDialog,  # Added QInputDialog
+    QInputDialog,
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize, QThread
 from PyQt5.QtGui import QIcon, QKeySequence
@@ -206,7 +206,7 @@ class MainWindow(QMainWindow):
         th.resolution_params_updated.connect(self._update_camera_resolution_params)
 
         try:
-            cp.auto_exposure_toggled.disconnect(th.set_exposure_auto)
+            cp.auto_exposure_toggled.disconnect()  # Disconnect all slots from this signal
             cp.exposure_changed.disconnect(th.set_exposure_time)
             cp.gain_changed.disconnect(th.set_gain)
             cp.fps_changed.disconnect(th.set_fps)
@@ -219,7 +219,10 @@ class MainWindow(QMainWindow):
         except Exception as e:
             log.error(f"Error during control signal disconnection: {e}")
 
-        cp.auto_exposure_toggled.connect(th.set_exposure_auto)
+        # Corrected connection for auto_exposure_toggled
+        cp.auto_exposure_toggled.connect(
+            lambda checked: th.set_exposure_auto("Continuous" if checked else "Off")
+        )
         cp.exposure_changed.connect(th.set_exposure_time)
         cp.gain_changed.connect(th.set_gain)
         cp.fps_changed.connect(th.set_fps)
@@ -236,7 +239,7 @@ class MainWindow(QMainWindow):
     def _update_camera_status_tab(self, info: dict):
         if self.camera_panel:
             self.camera_panel.update_status_info(info)
-            self.camera_settings["_last_cam_info_dict"] = info  # Store for recorder
+            self.camera_settings["_last_cam_info_dict"] = info
 
     @pyqtSlot(dict)
     def _update_camera_exposure_controls(self, params: dict):
@@ -323,12 +326,8 @@ class MainWindow(QMainWindow):
             log.info(
                 "Attempting to stop existing camera thread before starting a new one."
             )
-            # Use the same mechanism as the stop button to ensure UI consistency
             self._on_stop_live_button_pressed()
-            # Starting a new thread immediately might be problematic if the old one hasn't fully stopped.
-            # A more robust solution would wait for the 'finished' signal or use a QTimer.
-            # For now, we'll proceed, assuming stop is reasonably fast or next start will overwrite.
-            QApplication.processEvents()  # Give a moment for stop to propagate
+            QApplication.processEvents()
 
         log.info(
             f"Creating SDKCameraThread for '{camera_identifier}' with target FPS: {fps_target}"
@@ -355,16 +354,14 @@ class MainWindow(QMainWindow):
             self.camera_panel.setEnabled(True)
             self.camera_panel.start_btn.setEnabled(False)
             self.camera_panel.stop_btn.setEnabled(True)
-            # Adjustment tab is enabled via _update_camera_exposure_controls or similar
 
     @pyqtSlot()
     def _handle_camera_thread_finished(self):
         log.info("SDKCameraThread 'finished' signal received.")
-        sender = self.sender()  # The QThread instance that finished
-        if self.camera_thread is sender:  # Check if it's the one we currently know
+        sender = self.sender()
+        if self.camera_thread is sender:
             log.info("Current SDKCameraThread instance has finished.")
-            # self.camera_thread.deleteLater() # Schedule for deletion by Qt's event loop
-            self.camera_thread = None  # Clear the reference
+            self.camera_thread = None
 
             if self.camera_panel:
                 self.camera_panel.setEnabled(True)
@@ -372,7 +369,7 @@ class MainWindow(QMainWindow):
                 self.camera_panel.stop_btn.setEnabled(False)
                 if hasattr(self.camera_panel, "enable_adjustment_controls"):
                     self.camera_panel.enable_adjustment_controls(False)
-                self.camera_panel.update_status_info()  # Clears to N/A
+                self.camera_panel.update_status_info()
 
             current_msg = self.statusBar().currentMessage()
             if current_msg.startswith("Attempting live feed") or (
@@ -385,7 +382,7 @@ class MainWindow(QMainWindow):
             log.warning(
                 "Received 'finished' from an orphaned SDKCameraThread instance. Letting Qt manage its deletion."
             )
-            # sender.deleteLater() # It's parented to self, so Qt should handle it on MainWindow close
+            sender.deleteLater()
 
     def _initialize_camera_on_startup(self):
         if not is_ic4_fully_initialized():
@@ -401,7 +398,7 @@ class MainWindow(QMainWindow):
             return
 
         log.info("Attempting to get IC4 camera...")
-        if self.camera_panel:  # Ensure panel is in a known state before trying
+        if self.camera_panel:
             self.camera_panel.setEnabled(False)
             self.camera_panel.disable_controls_initially()
 
@@ -414,12 +411,8 @@ class MainWindow(QMainWindow):
                     "No cameras found. Check connection or CTI.", 5000
                 )
                 if self.camera_panel:
-                    self.camera_panel.setEnabled(
-                        True
-                    )  # Allow access to CTI change etc.
-                    self.camera_panel.start_btn.setEnabled(
-                        True
-                    )  # User can try to start
+                    self.camera_panel.setEnabled(True)
+                    self.camera_panel.start_btn.setEnabled(True)
                 return
         except Exception as e:
             log.error(f"Error enumerating IC4 devices: {e}")
@@ -438,13 +431,13 @@ class MainWindow(QMainWindow):
                     getattr(dev_info, "serial", ""),
                     getattr(dev_info, "unique_name", ""),
                     getattr(dev_info, "model_name", ""),
-                ):  # Match against any stored ID type
+                ):
                     device_to_use_info = dev_info
                     log.info(f"Found last used camera by ID: {last_cam_id}")
                     break
 
         if not device_to_use_info:
-            device_to_use_info = available_devices[0]  # Default to first camera
+            device_to_use_info = available_devices[0]
             log.info(
                 "Using first available camera (last used not found or not specified)."
             )
@@ -453,7 +446,6 @@ class MainWindow(QMainWindow):
         camera_serial_number = getattr(device_to_use_info, "serial", "N/A")
         camera_unique_name = getattr(device_to_use_info, "unique_name", "")
 
-        # Prefer serial, then unique name, then model name for identification
         camera_identifier = (
             camera_serial_number
             if camera_serial_number and camera_serial_number != "N/A"
@@ -522,13 +514,8 @@ class MainWindow(QMainWindow):
                 QMessageBox.Yes,
             )
             if reply == QMessageBox.Yes:
-                self._on_stop_live_button_pressed()  # This should trigger UI updates via finished signal
-                # Wait for thread to stop before proceeding
-                # A QTimer is more robust here than a sleep, to avoid freezing UI.
-                # For simplicity, we'll assume the stop is quick or user retries if needed.
-                QTimer.singleShot(
-                    300, self._proceed_with_camera_setup_dialog
-                )  # Short delay
+                self._on_stop_live_button_pressed()
+                QTimer.singleShot(300, self._proceed_with_camera_setup_dialog)
             else:
                 log.info("Camera setup cancelled by user as stream is active.")
                 return
@@ -536,7 +523,6 @@ class MainWindow(QMainWindow):
             self._proceed_with_camera_setup_dialog()
 
     def _proceed_with_camera_setup_dialog(self):
-        """Actual logic to show a camera selection dialog if multiple cameras exist or to init first one."""
         log.info("Proceeding with camera setup dialog/initialization.")
         try:
             devices = ic4.DeviceEnum.devices()
@@ -566,7 +552,7 @@ class MainWindow(QMainWindow):
         if len(devices) == 1:
             log.info("Only one camera found, selecting it automatically for setup.")
             selected_device_info = devices[0]
-        else:  # Multiple devices
+        else:
             items = [
                 f"{dev.model_name} (SN: {dev.serial or 'N/A'}, ID: {dev.unique_name or 'N/A'})"
                 for dev in devices
@@ -582,7 +568,7 @@ class MainWindow(QMainWindow):
                 if self.camera_panel:
                     self.camera_panel.setEnabled(True)
                     self.camera_panel.start_btn.setEnabled(True)
-                return  # User cancelled
+                return
 
         if selected_device_info:
             cam_model = getattr(selected_device_info, "model_name", "Unknown")
@@ -600,11 +586,8 @@ class MainWindow(QMainWindow):
             )
             self.camera_settings["cameraModel"] = cam_model
             self.camera_settings["cameraSerial"] = cam_serial
-            self.camera_settings["cameraIdentifier"] = (
-                identifier_to_use  # Store the chosen one
-            )
+            self.camera_settings["cameraIdentifier"] = identifier_to_use
 
-            # Now, attempt to start this specific camera
             self._start_sdk_camera_thread(identifier_to_use, DEFAULT_FPS)
             save_app_setting(SETTING_LAST_CAMERA_SERIAL, identifier_to_use)
 
@@ -751,8 +734,7 @@ class MainWindow(QMainWindow):
             QAction(f"&About {APP_NAME}", self, triggered=self._show_about_dialog)
         )
 
-        # Corrected "About Qt" action
-        about_qt_action = QAction("About &Qt", self)  # 'self' is the parent QObject
+        about_qt_action = QAction("About &Qt", self)
         about_qt_action.triggered.connect(QApplication.instance().aboutQt)
         hm.addAction(about_qt_action)
 
@@ -779,8 +761,6 @@ class MainWindow(QMainWindow):
         if self.camera_thread and self.camera_thread.isRunning():
             log.info("Stopping existing camera thread before changing CTI file.")
             self._on_stop_live_button_pressed()
-            # A QTimer or waiting for the 'finished' signal is more robust here
-            # For now, this assumes stop is quick enough or user retries if CTI change fails.
             QTimer.singleShot(300, lambda: self._finalize_cti_change(cti_path))
         else:
             self._finalize_cti_change(cti_path)
@@ -789,7 +769,7 @@ class MainWindow(QMainWindow):
         try:
             if prim_app.IC4_LIBRARY_INITIALIZED:
                 log.info("Exiting IC4 library before re-initializing with new CTI...")
-                ic4.Library.exit()  # Ensure proper cleanup of old GenTL
+                ic4.Library.exit()
                 prim_app.IC4_LIBRARY_INITIALIZED = False
                 prim_app.IC4_GENTL_SYSTEM_CONFIGURED = False
 
@@ -805,8 +785,6 @@ class MainWindow(QMainWindow):
             )
 
             if is_ic4_fully_initialized():
-                # Instead of directly calling _initialize_camera_on_startup,
-                # call the setup function which handles device selection if needed.
                 QTimer.singleShot(0, self._run_camera_setup)
             else:
                 if self.camera_panel:
@@ -883,17 +861,15 @@ class MainWindow(QMainWindow):
             log.info("Camera is already running.")
             return
 
-        # Use the camera setup logic, which can handle selection or first device
-        self._run_camera_setup()  # This will eventually call _start_sdk_camera_thread if successful
+        self._run_camera_setup()
 
     def _on_stop_live_button_pressed(self):
         log.info("Stop Live button pressed from CameraControlPanel.")
         if self.camera_thread and self.camera_thread.isRunning():
-            self.camera_thread.stop()  # SDKCameraThread.stop() is blocking and handles its own cleanup.
-            # _handle_camera_thread_finished will update UI.
+            self.camera_thread.stop()
         else:
             log.info("Camera thread not running or does not exist to stop.")
-            if self.camera_panel:  # Ensure UI consistency
+            if self.camera_panel:
                 self.camera_panel.start_btn.setEnabled(True)
                 self.camera_panel.stop_btn.setEnabled(False)
                 if hasattr(self.camera_panel, "enable_adjustment_controls"):
@@ -1365,7 +1341,7 @@ class MainWindow(QMainWindow):
             f" (SDK Code: {code})"
             if code and code != "None" and code != type(None).__name__
             else ""
-        )  # Added check for type(None).__name__
+        )
         log.error(full_msg)
         QMessageBox.critical(self, "Camera Runtime Error", full_msg)
 
@@ -1373,7 +1349,6 @@ class MainWindow(QMainWindow):
             if self.camera_thread.isRunning():
                 log.info("Stopping camera thread due to reported error...")
                 self.camera_thread.stop()
-            # self.camera_thread will be set to None by _handle_camera_thread_finished
 
         if self.camera_panel:
             self.camera_panel.setEnabled(True)
@@ -1408,8 +1383,7 @@ class MainWindow(QMainWindow):
         if self.camera_thread and self.camera_thread.isRunning():
             log.info("Stopping CameraThread on application close...")
             self.camera_thread.stop()
-            # Wait for the thread to actually finish; stop() should block but give it a chance.
-            if not self.camera_thread.wait(2000):  # 2 seconds timeout
+            if not self.camera_thread.wait(2000):
                 log.warning(
                     "CameraThread did not stop gracefully during close, terminating."
                 )
@@ -1428,9 +1402,7 @@ class MainWindow(QMainWindow):
                 self._serial_thread.wait(500)
             self._serial_thread = None
 
-        if (
-            self._recording_worker and self._recording_worker.isRunning()
-        ):  # Should be stopped by now if was recording
+        if self._recording_worker and self._recording_worker.isRunning():
             log.warning(
                 "RecordingWorker still running during closeEvent. Forcing stop."
             )
