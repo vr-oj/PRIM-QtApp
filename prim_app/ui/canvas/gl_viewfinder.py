@@ -11,8 +11,8 @@ from PyQt5.QtGui import (
     QOpenGLTexture,
     QImage,
     QSurfaceFormat,
+    QOpenGLVertexArrayObject,
 )
-from PyQt5.QtOpenGL import QOpenGLVertexArrayObject  # IMPORTANT IMPORT
 from OpenGL import GL
 import logging
 
