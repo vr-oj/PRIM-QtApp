@@ -32,8 +32,8 @@ class CameraControlPanel(QWidget):
         self.setMinimumWidth(250)  # Adjusted minimum width slightly for tabs
         # Main layout for this panel will be vertical, holding the TabWidget and possibly buttons
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(2, 2, 2, 2)  # Reduced margins
-        main_layout.setSpacing(2)  # Reduced spacing
+        main_layout.setContentsMargins(1, 1, 1, 1)  # Reduced margins
+        main_layout.setSpacing(1)  # Reduced spacing
 
         self.tab_widget = QTabWidget()
         main_layout.addWidget(self.tab_widget)
@@ -41,8 +41,8 @@ class CameraControlPanel(QWidget):
         # --- Create Status Tab ---
         self.status_tab = QWidget()
         status_layout = QFormLayout(self.status_tab)
-        status_layout.setContentsMargins(2, 2, 2, 2)
-        status_layout.setSpacing(2)
+        status_layout.setContentsMargins(1, 1, 1, 1)
+        status_layout.setSpacing(1)
 
         self.cam_model_label = QLabel("N/A")
         self.cam_serial_label = QLabel("N/A")
@@ -63,8 +63,8 @@ class CameraControlPanel(QWidget):
         adjustments_main_layout = QVBoxLayout(
             self.adjustments_tab
         )  # Use QVBoxLayout to allow sections
-        adjustments_main_layout.setContentsMargins(2, 2, 2, 2)
-        adjustments_main_layout.setSpacing(3)
+        adjustments_main_layout.setContentsMargins(1, 1, 1, 1)
+        adjustments_main_layout.setSpacing(1)
 
         # We can use QFormLayout or QVBoxLayouts within this for better grouping if needed
         controls_layout = QFormLayout()  # Using QFormLayout for compactness of controls
