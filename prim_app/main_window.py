@@ -4,7 +4,7 @@ import sys
 import re
 import logging
 import csv
-import json  # Keep for other potential uses
+import json
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -39,7 +39,6 @@ from utils.app_settings import (
     load_app_setting,
     SETTING_CTI_PATH,
     SETTING_LAST_CAMERA_SERIAL,
-    save_app_setting,  # Ensure this was the fix for the import error
 )
 from utils.config import (
     DEFAULT_FPS,
@@ -50,7 +49,6 @@ from utils.config import (
     DEFAULT_VIDEO_EXTENSION,
     DEFAULT_VIDEO_CODEC,
     ABOUT_TEXT,
-    # CAMERA_HARDCODED_DEFAULTS, # Temporarily remove usage
 )
 
 from ui.control_panels.top_control_panel import TopControlPanel
@@ -58,7 +56,6 @@ from ui.control_panels.camera_control_panel import CameraControlPanel
 from ui.canvas.gl_viewfinder import GLViewfinder
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
 from threads.sdk_camera_thread import SDKCameraThread
-from camera.setup_wizard import CameraSetupWizard  # Will be simplified
 from threads.serial_thread import SerialThread
 from recording import RecordingWorker
 from utils.utils import list_serial_ports
@@ -81,11 +78,11 @@ class MainWindow(QMainWindow):
         self.camera_panel = None
         self.camera_view = None
         self.bottom_split = None
-        self.camera_settings = {}  # Still useful for storing basic info like serial
+        self.camera_settings = {}
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
-        self._build_central_widget_layout()  # camera_panel is created here
+        self._build_central_widget_layout()
         self._build_menus()
         self._build_main_toolbar()
         self._build_status_bar()
@@ -102,7 +99,6 @@ class MainWindow(QMainWindow):
         self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
 
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
-
         self._check_and_prompt_for_cti_on_startup()
         if is_ic4_fully_initialized():
             QTimer.singleShot(0, self._initialize_camera_on_startup)
@@ -113,7 +109,6 @@ class MainWindow(QMainWindow):
             if self.camera_panel:
                 self.camera_panel.setEnabled(True)
 
-        # self.showMaximized() # Already called later
         QTimer.singleShot(50, self._set_initial_splitter_sizes)
         self._set_initial_control_states()
         log.info("MainWindow initialized.")
@@ -176,112 +171,38 @@ class MainWindow(QMainWindow):
 
     def _connect_camera_signals(self):
         th = self.camera_thread
-        cp = self.camera_panel  # This is your tabbed CameraControlPanel
-
+        cp = self.camera_panel
         if not (th and self.camera_view and cp):
-            log.warning(
-                "Cannot connect camera signals: thread, view, or camera_panel missing."
-            )
+            log.warning("Cannot connect camera signals: missing components.")
             return True
 
-        # --- Disconnect ALL signals from th and cp first to prevent multiple connections ---
-        # (More robustly, check if connected before disconnecting, or use QObject.disconnect())
-        try:
-            th.frame_ready.disconnect(self.camera_view.update_frame)
-        except TypeError:
-            pass
-        try:
-            th.camera_error.disconnect(self._on_camera_error)
-        except TypeError:
-            pass
-
-        if hasattr(th, "camera_info_updated"):
+        # Disconnect any existing bindings
+        for sig, slot in [
+            (th.frame_ready, self.camera_view.update_frame),
+            (th.camera_error, self._on_camera_error),
+        ]:
             try:
-                th.camera_info_updated.disconnect(self._update_camera_status_tab)
+                sig.disconnect(slot)
             except TypeError:
                 pass
-        if hasattr(th, "exposure_params_updated"):
-            try:
-                th.exposure_params_updated.disconnect(
-                    self._update_camera_exposure_controls
-                )
-            except TypeError:
-                pass
-        # Add for gain later:
-        # if hasattr(th, 'gain_params_updated'):
-        # try: th.gain_params_updated.disconnect(self._update_camera_gain_controls)
-        # except TypeError: pass
 
-        # --- Connect SDKCameraThread signals to MainWindow/CameraPanel slots ---
+        # Connect live feed & errors
         th.frame_ready.connect(self.camera_view.update_frame)
         th.camera_error.connect(self._on_camera_error)
+        th.camera_info_updated.connect(self._update_camera_status_tab)
 
-        if hasattr(th, "camera_info_updated"):
-            th.camera_info_updated.connect(self._update_camera_status_tab)
-        if hasattr(th, "exposure_params_updated"):
-            th.exposure_params_updated.connect(self._update_camera_exposure_controls)
-        # Add for gain later:
-        # if hasattr(th, 'gain_params_updated'):
-        # th.gain_params_updated.connect(self._update_camera_gain_controls)
+        # *** DIRECT EXPOSURE WIRING ***
+        # Re-emit the full dict into the panel’s slot:
+        th.exposure_params_updated.connect(cp.set_exposure_params)
 
-        # --- Connect CameraControlPanel UI signals to MainWindow slots (for sending commands to thread) ---
-        # For Exposure
-        if hasattr(cp, "auto_exp_cb"):
-            try:
-                cp.auto_exp_cb.toggled.disconnect(
-                    self._on_auto_exposure_changed
-                )  # Use toggled for QCheckBox
-            except TypeError:
-                pass
-            cp.auto_exp_cb.toggled.connect(self._on_auto_exposure_changed)
+        # UI → Thread direct calls:
+        cp.auto_exp_cb.toggled.connect(
+            lambda chk, t=th: t.set_exposure_auto("Continuous" if chk else "Off")
+        )
+        cp.exp_spin.valueChanged.connect(th.set_exposure_time)
 
-        if hasattr(cp, "exp_spin"):
-            try:
-                cp.exp_spin.valueChanged.disconnect(self._on_exposure_time_changed)
-            except TypeError:
-                pass
-            cp.exp_spin.valueChanged.connect(self._on_exposure_time_changed)
-
-        # Add for Gain later
-        # if hasattr(cp, 'gain_spin'):
-        # try: cp.gain_spin.valueChanged.disconnect(self._on_gain_changed)
-        # except TypeError: pass
-        # cp.gain_spin.valueChanged.connect(self._on_gain_changed)
-
-        # Add for Resolution, PixelFormat, FPS later if re-enabled
-
-        log.info("Camera signals connected for live feed and initial controls.")
+        log.info("Camera signals connected for live feed and exposure controls.")
         return False
-
-    @pyqtSlot(bool)
-    def _on_auto_exposure_changed(self, checked: bool):
-        if self.camera_thread and self.camera_thread.isRunning():
-            exposure_auto_str = "Continuous" if checked else "Off"
-            log.debug(f"UI changed: ExposureAuto to {exposure_auto_str}")
-            self.camera_thread._attempt_set_property(
-                "ExposureAuto", exposure_auto_str, exposure_auto_str
-            )
-            # Re-query exposure params to update UI state (e.g., enable/disable manual exposure spinbox)
-            # This is a bit indirect; ideally, SDKCameraThread confirms the change and re-emits params.
-            # For now, let's assume the set was successful and update UI based on 'checked'.
-            if self.camera_panel and hasattr(self.camera_panel, "exp_spin"):
-                self.camera_panel.exp_spin.setEnabled(not checked)
-
-    @pyqtSlot(float)
-    def _on_exposure_time_changed(self, value_us: float):
-        if self.camera_thread and self.camera_thread.isRunning():
-            # Only set if auto exposure is off
-            if (
-                self.camera_panel
-                and hasattr(self.camera_panel, "auto_exp_cb")
-                and not self.camera_panel.auto_exp_cb.isChecked()
-            ):
-                log.debug(f"UI changed: ExposureTime to {value_us} µs")
-                self.camera_thread._attempt_set_property(
-                    "ExposureTime", value_us, f"{value_us}"
-                )
-
-    # Add _on_gain_changed etc. later
 
     # --- New SLOTS in MainWindow to update CameraControlPanel from SDKCameraThread signals ---
     @pyqtSlot(dict)
@@ -322,32 +243,25 @@ class MainWindow(QMainWindow):
     # Ensure it doesn't unconditionally disable camera_panel if it was enabled by _initialize_camera_on_startup.
     def _start_sdk_camera_thread(self, camera_identifier, fps, initial_settings=None):
         if self.camera_thread and self.camera_thread.isRunning():
-            log.info("Stopping existing camera thread...")
             self.camera_thread.stop()
             self.camera_thread.deleteLater()
             self.camera_thread = None
             QApplication.processEvents()
 
-        log.info(f"Creating SDKCameraThread for device: '{camera_identifier}'")
+        log.info(f"Creating SDKCameraThread for '{camera_identifier}'")
         self.camera_thread = SDKCameraThread(
             device_name=camera_identifier, fps=float(fps), parent=self
         )
         self.camera_settings["cameraSerialPattern"] = camera_identifier
 
-        if (
-            self._connect_camera_signals()
-        ):  # This connects frame_ready, error, and new status/param signals
-            log.error("Failed to connect camera signals for SDKCameraThread.")
-            if self.camera_panel:
-                self.camera_panel.setEnabled(True)
+        if self._connect_camera_signals():
+            log.error("Failed to connect camera signals.")
+            self.camera_panel.setEnabled(True)
             return
 
-        log.info(f"Starting SDKCameraThread for {camera_identifier}...")
         self.camera_thread.start()
-        # camera_panel should already be enabled by _initialize_camera_on_startup if IC4 is ready
         self.statusBar().showMessage(
-            f"Attempting basic live feed: {self.camera_settings.get('cameraModel', camera_identifier)}",
-            5000,
+            f"Attempting basic live feed: {camera_identifier}", 5000
         )
 
     def _initialize_camera_on_startup(self):  # Modified to update status tab

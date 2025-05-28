@@ -150,21 +150,30 @@ class CameraControlPanel(QWidget):
         self.cam_current_fps_label.setText(fps)
 
     # Methods to update adjustment control ranges/values (to be called from MainWindow)
-    def update_exposure_controls(
-        self,
-        enabled: bool,
-        is_auto: bool,
-        value_us: float,
-        min_us: float,
-        max_us: float,
-    ):
-        self.auto_exp_cb.setChecked(is_auto)
-        self.exp_spin.setRange(min_us, max_us)
-        self.exp_spin.setValue(value_us)
-        self.exp_spin.setEnabled(
-            enabled and not is_auto
-        )  # Only enable if manual exposure is active
-        self.auto_exp_cb.setEnabled(enabled)
+    @pyqtSlot(dict)
+    def set_exposure_params(self, params: dict):
+        # Receive full exposure params from the SDK thread and update the UI controls.
+        # Unpack
+        auto_curr = params.get("auto_current", "Off") or "Off"
+        auto_writable = params.get("auto_is_writable", False)
+        time_curr = params.get("time_current_us", 0.0) or 0.0
+        time_min = params.get("time_min_us", 0.0) or 0.0
+        time_max = params.get("time_max_us", time_curr or 1e6)
+        time_writable = params.get("time_is_writable", False)
+
+        # Auto-exposure checkbox
+        self.auto_exp_cb.blockSignals(True)
+        self.auto_exp_cb.setChecked(auto_curr != "Off")
+        self.auto_exp_cb.setEnabled(auto_writable)
+        self.auto_exp_cb.blockSignals(False)
+
+        # Manual exposure spinbox
+        self.exp_spin.blockSignals(True)
+        self.exp_spin.setRange(time_min, time_max)
+        self.exp_spin.setValue(time_curr)
+        # Only allow manual edits when auto is Off
+        self.exp_spin.setEnabled(time_writable and auto_curr == "Off")
+        self.exp_spin.blockSignals(False)
 
     def update_gain_controls(
         self, enabled: bool, value: float, min_val: float, max_val: float
