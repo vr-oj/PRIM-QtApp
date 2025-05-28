@@ -49,7 +49,7 @@ class SDKCameraThread(QThread):
 
     def __init__(self, device_name=None, fps=10, parent=None):
         super().__init__(parent)
-        self.device_identifier = device_name  # This is the string ID (e.g., serial)
+        self.device_identifier = device_name
         self.initial_target_fps = float(fps)
         self._stop_requested = False
         self.grabber = None
@@ -95,7 +95,9 @@ class SDKCameraThread(QThread):
 
         prop_item = None
         try:
-            prop_item = self.pm.find(prop_name)
+            prop_item = self.pm.find(
+                prop_name
+            )  # This find() can also raise GenICamFeatureNotFound
             if prop_item:
                 if self._is_property_writable(prop_item, prop_name):
                     log.info(f"Setting {prop_name} to {readable_value_for_log}...")
@@ -107,13 +109,15 @@ class SDKCameraThread(QThread):
                         f"Property {prop_name} is not writable (checked via flags/attributes)."
                     )
                     return False
-            else:
-                log.warning(f"Property {prop_name} not found in PropertyMap.")
+            else:  # Should not be reached if find() raises on not found
+                log.warning(
+                    f"Property {prop_name} not found in PropertyMap (find returned None)."
+                )
                 return False
         except ic4.IC4Exception as e_ic4:
             if e_ic4.code == ic4.ErrorCode.GenICamFeatureNotFound:
                 log.warning(
-                    f"Feature {prop_name} not found on this camera (GenICamFeatureNotFound)."
+                    f"Feature {prop_name} not found on this camera when attempting to set (GenICamFeatureNotFound)."
                 )
             else:
                 log.error(
@@ -168,11 +172,23 @@ class SDKCameraThread(QThread):
             ("fps", "AcquisitionFrameRate", False, 0.0),
         ]
         for key, name, is_str, default_val in cam_props_for_info:
-            prop = self.pm.find(name)
+            prop = None
+            try:
+                prop = self.pm.find(name)
+            except ic4.IC4Exception as e_find:  # Catch if find itself fails
+                if e_find.code == ic4.ErrorCode.GenICamFeatureNotFound:
+                    log.debug(
+                        f"Property '{name}' not found during query for camera info."
+                    )
+                else:
+                    log.warning(
+                        f"IC4Exception finding property '{name}' for info: {e_find}"
+                    )
             info[key] = self._safe_read_value(prop, as_str=is_str, default=default_val)
         self.camera_info_updated.emit(info)
         log.debug(f"Emitted camera_info_updated: {info}")
 
+        # Exposure Parameters
         exp_params = {
             "auto_options": [],
             "auto_current": "Off",
@@ -182,82 +198,122 @@ class SDKCameraThread(QThread):
             "time_max_us": 1000000.0,
             "time_is_writable": False,
         }
-        p_auto_exp = self.pm.find("ExposureAuto")
-        if p_auto_exp:
-            exp_params["auto_is_writable"] = self._is_property_writable(
-                p_auto_exp, "ExposureAuto"
-            )
-            exp_params["auto_current"] = self._safe_read_value(
-                p_auto_exp, as_str=True, default="Off"
-            )
-            available_entries = self._safe_get_attr(p_auto_exp, "available_entries", [])
-            exp_params["auto_options"] = [
-                entry.name for entry in available_entries if hasattr(entry, "name")
-            ]
+        try:
+            p_auto_exp = self.pm.find("ExposureAuto")
+            if p_auto_exp:
+                exp_params["auto_is_writable"] = self._is_property_writable(
+                    p_auto_exp, "ExposureAuto"
+                )
+                exp_params["auto_current"] = self._safe_read_value(
+                    p_auto_exp, as_str=True, default="Off"
+                )
+                available_entries = self._safe_get_attr(
+                    p_auto_exp, "available_entries", []
+                )
+                exp_params["auto_options"] = [
+                    entry.name for entry in available_entries if hasattr(entry, "name")
+                ]
+        except ic4.IC4Exception as e:
+            log.debug(f"ExposureAuto not found or error: {e}")
 
-        p_exp_time = self.pm.find("ExposureTime")
-        if p_exp_time:
-            exp_params["time_is_writable"] = self._is_property_writable(
-                p_exp_time, "ExposureTime"
-            )
-            if exp_params["auto_current"] != "Off" and exp_params["auto_is_writable"]:
-                exp_params["time_is_writable"] = False
-            exp_params["time_current_us"] = self._safe_read_value(
-                p_exp_time, default=0.0
-            )
-            exp_params["time_min_us"] = self._safe_get_attr(p_exp_time, "min", 1.0)
-            exp_params["time_max_us"] = self._safe_get_attr(
-                p_exp_time, "max", 1000000.0
-            )
+        try:
+            p_exp_time = self.pm.find("ExposureTime")
+            if p_exp_time:
+                exp_params["time_is_writable"] = self._is_property_writable(
+                    p_exp_time, "ExposureTime"
+                )
+                if (
+                    exp_params["auto_current"] != "Off"
+                    and exp_params["auto_is_writable"]
+                ):
+                    exp_params["time_is_writable"] = False
+                exp_params["time_current_us"] = self._safe_read_value(
+                    p_exp_time, default=0.0
+                )
+                exp_params["time_min_us"] = self._safe_get_attr(
+                    p_exp_time, "min", self._safe_get_attr(p_exp_time, "minimum", 1.0)
+                )
+                exp_params["time_max_us"] = self._safe_get_attr(
+                    p_exp_time,
+                    "max",
+                    self._safe_get_attr(p_exp_time, "maximum", 1000000.0),
+                )
+        except ic4.IC4Exception as e:
+            log.debug(f"ExposureTime not found or error: {e}")
         self.exposure_params_updated.emit(exp_params)
         log.debug(f"Emitted exposure_params_updated: {exp_params}")
 
+        # Gain Parameters
         gain_params = {
             "current_db": 0.0,
             "min_db": 0.0,
             "max_db": 48.0,
             "is_writable": False,
         }
-        p_gain = self.pm.find("Gain")
-        if p_gain:
-            gain_params["is_writable"] = self._is_property_writable(p_gain, "Gain")
-            gain_params["current_db"] = self._safe_read_value(p_gain, default=0.0)
-            gain_params["min_db"] = self._safe_get_attr(p_gain, "min", 0.0)
-            gain_params["max_db"] = self._safe_get_attr(p_gain, "max", 48.0)
+        try:
+            p_gain = self.pm.find("Gain")
+            if p_gain:
+                gain_params["is_writable"] = self._is_property_writable(p_gain, "Gain")
+                gain_params["current_db"] = self._safe_read_value(p_gain, default=0.0)
+                gain_params["min_db"] = self._safe_get_attr(
+                    p_gain, "min", self._safe_get_attr(p_gain, "minimum", 0.0)
+                )
+                gain_params["max_db"] = self._safe_get_attr(
+                    p_gain, "max", self._safe_get_attr(p_gain, "maximum", 48.0)
+                )
+        except ic4.IC4Exception as e:
+            log.debug(f"Gain not found or error: {e}")
         self.gain_params_updated.emit(gain_params)
         log.debug(f"Emitted gain_params_updated: {gain_params}")
 
+        # FPS Parameters
         fps_params = {
             "current_fps": 0.0,
             "min_fps": 0.1,
             "max_fps": 200.0,
             "is_writable": False,
         }
-        p_fps = self.pm.find("AcquisitionFrameRate")
-        if p_fps:
-            fps_params["is_writable"] = self._is_property_writable(
-                p_fps, "AcquisitionFrameRate"
-            )
-            fps_params["current_fps"] = self._safe_read_value(p_fps, default=0.0)
-            fps_params["min_fps"] = self._safe_get_attr(p_fps, "min", 0.1)
-            fps_params["max_fps"] = self._safe_get_attr(p_fps, "max", 200.0)
+        try:
+            p_fps = self.pm.find("AcquisitionFrameRate")
+            if p_fps:
+                fps_params["is_writable"] = self._is_property_writable(
+                    p_fps, "AcquisitionFrameRate"
+                )
+                fps_params["current_fps"] = self._safe_read_value(p_fps, default=0.0)
+                fps_params["min_fps"] = self._safe_get_attr(
+                    p_fps, "min", self._safe_get_attr(p_fps, "minimum", 0.1)
+                )
+                fps_params["max_fps"] = self._safe_get_attr(
+                    p_fps, "max", self._safe_get_attr(p_fps, "maximum", 200.0)
+                )
+        except ic4.IC4Exception as e:
+            log.debug(f"AcquisitionFrameRate not found or error: {e}")
         self.fps_params_updated.emit(fps_params)
         log.debug(f"Emitted fps_params_updated: {fps_params}")
 
+        # Pixel Format Options
         pf_options = []
         current_pf_str = "N/A"
-        p_pf = self.pm.find("PixelFormat")
-        if p_pf:
-            current_pf_str = self._safe_read_value(p_pf, as_str=True, default="N/A")
-            available_pf_entries = self._safe_get_attr(p_pf, "available_entries", [])
-            pf_options = [
-                entry.name for entry in available_pf_entries if hasattr(entry, "name")
-            ]
+        try:
+            p_pf = self.pm.find("PixelFormat")
+            if p_pf:
+                current_pf_str = self._safe_read_value(p_pf, as_str=True, default="N/A")
+                available_pf_entries = self._safe_get_attr(
+                    p_pf, "available_entries", []
+                )
+                pf_options = [
+                    entry.name
+                    for entry in available_pf_entries
+                    if hasattr(entry, "name")
+                ]
+        except ic4.IC4Exception as e:
+            log.debug(f"PixelFormat not found or error: {e}")
         self.pixel_format_options_updated.emit(pf_options, current_pf_str)
         log.debug(
             f"Emitted pixel_format_options_updated: {pf_options}, current: {current_pf_str}"
         )
 
+        # Resolution Parameters
         res_params = {
             "w_min": 0,
             "w_max": 4096,
@@ -270,20 +326,37 @@ class SDKCameraThread(QThread):
             "w_writable": False,
             "h_writable": False,
         }
-        p_width = self.pm.find("Width")
-        if p_width:
-            res_params["w_writable"] = self._is_property_writable(p_width, "Width")
-            res_params["w_curr"] = self._safe_read_value(p_width, default=0)
-            res_params["w_min"] = self._safe_get_attr(p_width, "min", 0)
-            res_params["w_max"] = self._safe_get_attr(p_width, "max", 4096)
-            res_params["w_inc"] = self._safe_get_attr(p_width, "increment", 4)
-        p_height = self.pm.find("Height")
-        if p_height:
-            res_params["h_writable"] = self._is_property_writable(p_height, "Height")
-            res_params["h_curr"] = self._safe_read_value(p_height, default=0)
-            res_params["h_min"] = self._safe_get_attr(p_height, "min", 0)
-            res_params["h_max"] = self._safe_get_attr(p_height, "max", 3000)
-            res_params["h_inc"] = self._safe_get_attr(p_height, "increment", 4)
+        try:
+            p_width = self.pm.find("Width")
+            if p_width:
+                res_params["w_writable"] = self._is_property_writable(p_width, "Width")
+                res_params["w_curr"] = self._safe_read_value(p_width, default=0)
+                res_params["w_min"] = self._safe_get_attr(
+                    p_width, "min", self._safe_get_attr(p_width, "minimum", 0)
+                )
+                res_params["w_max"] = self._safe_get_attr(
+                    p_width, "max", self._safe_get_attr(p_width, "maximum", 4096)
+                )
+                res_params["w_inc"] = self._safe_get_attr(p_width, "increment", 4)
+        except ic4.IC4Exception as e:
+            log.debug(f"Width property not found or error: {e}")
+
+        try:
+            p_height = self.pm.find("Height")
+            if p_height:
+                res_params["h_writable"] = self._is_property_writable(
+                    p_height, "Height"
+                )
+                res_params["h_curr"] = self._safe_read_value(p_height, default=0)
+                res_params["h_min"] = self._safe_get_attr(
+                    p_height, "min", self._safe_get_attr(p_height, "minimum", 0)
+                )
+                res_params["h_max"] = self._safe_get_attr(
+                    p_height, "max", self._safe_get_attr(p_height, "maximum", 3000)
+                )
+                res_params["h_inc"] = self._safe_get_attr(p_height, "increment", 4)
+        except ic4.IC4Exception as e:
+            log.debug(f"Height property not found or error: {e}")
         self.resolution_params_updated.emit(res_params)
         log.debug(f"Emitted resolution_params_updated: {res_params}")
 
@@ -314,15 +387,25 @@ class SDKCameraThread(QThread):
     @pyqtSlot(float)
     def set_fps(self, value_fps: float):
         if self.pm:
-            p_fps_enable = self.pm.find("AcquisitionFrameRateEnable")
-            if p_fps_enable and self._is_property_writable(
-                p_fps_enable, "AcquisitionFrameRateEnable"
-            ):
-                if not self._safe_read_value(p_fps_enable, default=False):
+            try:
+                p_fps_enable = self.pm.find("AcquisitionFrameRateEnable")
+                if p_fps_enable and self._is_property_writable(
+                    p_fps_enable, "AcquisitionFrameRateEnable"
+                ):
+                    if not self._safe_read_value(p_fps_enable, default=False):
+                        log.info(
+                            "Attempting to enable AcquisitionFrameRateEnable before setting FPS."
+                        )
+                        self._attempt_set_property("AcquisitionFrameRateEnable", True)
+            except ic4.IC4Exception as e_find_fps_enable:
+                if e_find_fps_enable.code == ic4.ErrorCode.GenICamFeatureNotFound:
                     log.info(
-                        "Attempting to enable AcquisitionFrameRateEnable before setting FPS."
+                        "'AcquisitionFrameRateEnable' not found when trying to set FPS. Will attempt to set FPS directly."
                     )
-                    self._attempt_set_property("AcquisitionFrameRateEnable", True)
+                else:  # Re-raise other IC4Exceptions from find
+                    log.warning(
+                        f"IC4Exception checking 'AcquisitionFrameRateEnable' in set_fps: {e_find_fps_enable}"
+                    )
 
             if self._attempt_set_property(
                 "AcquisitionFrameRate", float(value_fps), f"{value_fps}FPS"
@@ -354,7 +437,6 @@ class SDKCameraThread(QThread):
                 log.info(
                     f"Attempting to set Resolution to: {width}x{height}. This may require stream restart if active."
                 )
-
                 width_ok = self._attempt_set_property("Width", width, str(width))
                 height_ok = self._attempt_set_property("Height", height, str(height))
 
@@ -392,21 +474,17 @@ class SDKCameraThread(QThread):
             devices = ic4.DeviceEnum.devices()
             if not devices:
                 raise RuntimeError("No IC4 devices found.")
-            target_device = None
+            target_device = None  # This should be an ic4.DeviceInfo object
             if self.device_identifier:
-                for d_info in devices:  # d_info is an ic4.DeviceInfo object
-                    # Correctly access attributes from DeviceInfo object
+                for d_info in devices:
                     dev_model = getattr(d_info, "model_name", "")
-                    # Prefer 'serial_number', fallback to 'serial' if it exists from older bindings/conventions
                     dev_serial = getattr(
                         d_info, "serial_number", getattr(d_info, "serial", "")
                     )
                     dev_unique = getattr(d_info, "unique_name", "")
-
                     log.debug(
                         f"Checking available device: Model='{dev_model}', SN='{dev_serial}', Unique='{dev_unique}' against target '{self.device_identifier}'"
                     )
-
                     if (
                         self.device_identifier == dev_serial
                         or self.device_identifier == dev_unique
@@ -444,7 +522,7 @@ class SDKCameraThread(QThread):
                 )
 
             self.grabber = ic4.Grabber()
-            self.grabber.device_open(target_device)
+            self.grabber.device_open(target_device)  # Expects DeviceInfo object
             self.pm = self.grabber.device_property_map
             dev_display_name = getattr(
                 target_device,
@@ -461,28 +539,50 @@ class SDKCameraThread(QThread):
             )
             log.info(f"Device '{dev_display_name}' opened. PropertyMap acquired.")
 
+            # --- Initial Camera Configuration ---
             initial_configs = [
                 ("AcquisitionMode", "Continuous"),
                 ("TriggerMode", "Off"),
             ]
-            pf_prop = self.pm.find("PixelFormat")
-            if pf_prop:
-                available_pfs = [
-                    entry.name
-                    for entry in self._safe_get_attr(pf_prop, "available_entries", [])
-                    if hasattr(entry, "name")
-                ]
-                if "Mono8" in available_pfs:
-                    initial_configs.insert(0, ("PixelFormat", "Mono8"))
-                elif available_pfs:
-                    initial_configs.insert(0, ("PixelFormat", available_pfs[0]))
+            try:
+                pf_prop = self.pm.find("PixelFormat")
+                if pf_prop:
+                    available_pfs = [
+                        entry.name
+                        for entry in self._safe_get_attr(
+                            pf_prop, "available_entries", []
+                        )
+                        if hasattr(entry, "name")
+                    ]
+                    if "Mono8" in available_pfs:
+                        initial_configs.insert(0, ("PixelFormat", "Mono8"))
+                    elif available_pfs:
+                        initial_configs.insert(0, ("PixelFormat", available_pfs[0]))
+            except ic4.IC4Exception as e_find_pf:
+                if e_find_pf.code == ic4.ErrorCode.GenICamFeatureNotFound:
+                    log.info("PixelFormat property not found during initial config.")
+                else:
+                    log.warning(
+                        f"IC4Exception finding PixelFormat for initial config: {e_find_pf}"
+                    )
 
-            p_fps_enable = self.pm.find("AcquisitionFrameRateEnable")
-            if p_fps_enable and self._is_property_writable(
-                p_fps_enable, "AcquisitionFrameRateEnable"
-            ):
-                if not self._safe_read_value(p_fps_enable, default=False):
-                    self._attempt_set_property("AcquisitionFrameRateEnable", True)
+            try:
+                p_fps_enable = self.pm.find("AcquisitionFrameRateEnable")
+                if p_fps_enable and self._is_property_writable(
+                    p_fps_enable, "AcquisitionFrameRateEnable"
+                ):
+                    if not self._safe_read_value(p_fps_enable, default=False):
+                        self._attempt_set_property("AcquisitionFrameRateEnable", True)
+            except ic4.IC4Exception as e_find_fps_enable:
+                if e_find_fps_enable.code == ic4.ErrorCode.GenICamFeatureNotFound:
+                    log.info(
+                        "'AcquisitionFrameRateEnable' property not found during initial config. Will attempt to set FPS directly."
+                    )
+                else:
+                    log.warning(
+                        f"IC4Exception finding 'AcquisitionFrameRateEnable' for initial_config: {e_find_fps_enable}"
+                    )
+
             initial_configs.append(("AcquisitionFrameRate", self.initial_target_fps))
 
             for prop_name, val_to_set in initial_configs:
@@ -533,12 +633,14 @@ class SDKCameraThread(QThread):
                             f"Unsupported numpy array shape for QImage: {arr.shape}"
                         )
                     buf.release()
-                except ic4.IC4Exception as e:
+                except (
+                    ic4.IC4Exception
+                ) as e:  # Should be less frequent with try_pop_output_buffer
                     if (
                         e.code == ic4.ErrorCode.Timeout
                         or e.code == ic4.ErrorCode.NoData
                     ):
-                        QThread.msleep(10)
+                        QThread.msleep(10)  # Give a small pause
                         continue
                     log.error(
                         f"IC4Exception in frame processing loop: {e} (Code: {e.code})"
@@ -553,7 +655,7 @@ class SDKCameraThread(QThread):
         except RuntimeError as e_rt:
             log.error(f"RuntimeError during SDKCameraThread execution: {e_rt}")
             self.camera_error.emit(str(e_rt), type(e_rt).__name__)
-        except ic4.IC4Exception as e_ic4_setup:
+        except ic4.IC4Exception as e_ic4_setup:  # Catch exceptions from setup phase
             log.error(
                 f"IC4Exception during SDKCameraThread setup: {e_ic4_setup} (Code: {e_ic4_setup.code})"
             )
