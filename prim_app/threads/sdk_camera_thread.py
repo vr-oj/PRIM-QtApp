@@ -1,14 +1,8 @@
 import re
 import numpy as np
 import logging
-import imagingcontrol4 as ic4  # Ensure ic4 is imported
-from PyQt5.QtCore import (
-    QThread,
-    pyqtSignal,
-    pyqtSlot,
-    QMutex,
-    QWaitCondition,
-)  # Added QMutex, QWaitCondition for potential future use
+import imagingcontrol4 as ic4
+from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot, QMutex, QWaitCondition
 from PyQt5.QtGui import QImage
 
 log = logging.getLogger(__name__)
@@ -55,7 +49,7 @@ class SDKCameraThread(QThread):
 
     def __init__(self, device_name=None, fps=10, parent=None):
         super().__init__(parent)
-        self.device_identifier = device_name
+        self.device_identifier = device_name  # This is the string ID (e.g., serial)
         self.initial_target_fps = float(fps)
         self._stop_requested = False
         self.grabber = None
@@ -71,10 +65,9 @@ class SDKCameraThread(QThread):
         if not prop_item:
             return False
         try:
-            # Use flags to check for writability
             if hasattr(prop_item, "flags"):
                 return bool(prop_item.flags & ic4.PropFlags.IS_WRITABLE)
-            else:  # Fallback if flags attribute is somehow missing (should not happen)
+            else:
                 is_writable_attr = getattr(prop_item, "is_writable", None)
                 is_read_only_attr = getattr(prop_item, "is_read_only", None)
                 if is_writable_attr is not None:
@@ -147,18 +140,14 @@ class SDKCameraThread(QThread):
             return default
         try:
             if as_str:
-                if hasattr(
-                    prop_item, "string"
-                ):  # Prefer .string for string representation (common for enums)
+                if hasattr(prop_item, "string"):
                     return prop_item.string
-                else:  # Fallback for other types or if .string is not available
+                else:
                     return str(prop_item.value)
             return prop_item.value
         except Exception as e_val:
             prop_name_for_log = getattr(prop_item, "name", "property")
-            prop_type_for_log = getattr(
-                prop_item, "type_name", "N/A"
-            )  # type_name is an attribute of ic4.Property
+            prop_type_for_log = getattr(prop_item, "type_name", "N/A")
             log.debug(
                 f"Could not read value from {prop_name_for_log} (type: {prop_type_for_log}): {e_val}"
             )
@@ -211,12 +200,8 @@ class SDKCameraThread(QThread):
             exp_params["time_is_writable"] = self._is_property_writable(
                 p_exp_time, "ExposureTime"
             )
-            if (
-                exp_params["auto_current"] != "Off" and exp_params["auto_is_writable"]
-            ):  # If auto is on and writable...
-                exp_params["time_is_writable"] = (
-                    False  # ...manual time usually becomes read-only or ineffective
-                )
+            if exp_params["auto_current"] != "Off" and exp_params["auto_is_writable"]:
+                exp_params["time_is_writable"] = False
             exp_params["time_current_us"] = self._safe_read_value(
                 p_exp_time, default=0.0
             )
@@ -291,18 +276,14 @@ class SDKCameraThread(QThread):
             res_params["w_curr"] = self._safe_read_value(p_width, default=0)
             res_params["w_min"] = self._safe_get_attr(p_width, "min", 0)
             res_params["w_max"] = self._safe_get_attr(p_width, "max", 4096)
-            res_params["w_inc"] = self._safe_get_attr(
-                p_width, "increment", 4
-            )  # Default increment if not found
+            res_params["w_inc"] = self._safe_get_attr(p_width, "increment", 4)
         p_height = self.pm.find("Height")
         if p_height:
             res_params["h_writable"] = self._is_property_writable(p_height, "Height")
             res_params["h_curr"] = self._safe_read_value(p_height, default=0)
             res_params["h_min"] = self._safe_get_attr(p_height, "min", 0)
             res_params["h_max"] = self._safe_get_attr(p_height, "max", 3000)
-            res_params["h_inc"] = self._safe_get_attr(
-                p_height, "increment", 4
-            )  # Default increment
+            res_params["h_inc"] = self._safe_get_attr(p_height, "increment", 4)
         self.resolution_params_updated.emit(res_params)
         log.debug(f"Emitted resolution_params_updated: {res_params}")
 
@@ -333,14 +314,15 @@ class SDKCameraThread(QThread):
     @pyqtSlot(float)
     def set_fps(self, value_fps: float):
         if self.pm:
-            # Note: Changing AcquisitionFrameRate might also need AcquisitionFrameRateEnable to be true
-            # if that property exists and is false. For simplicity, we just try to set the rate.
             p_fps_enable = self.pm.find("AcquisitionFrameRateEnable")
-            if p_fps_enable and not self._safe_read_value(p_fps_enable, default=False):
-                log.info(
-                    "Attempting to enable AcquisitionFrameRateEnable before setting FPS."
-                )
-                self._attempt_set_property("AcquisitionFrameRateEnable", True)
+            if p_fps_enable and self._is_property_writable(
+                p_fps_enable, "AcquisitionFrameRateEnable"
+            ):
+                if not self._safe_read_value(p_fps_enable, default=False):
+                    log.info(
+                        "Attempting to enable AcquisitionFrameRateEnable before setting FPS."
+                    )
+                    self._attempt_set_property("AcquisitionFrameRateEnable", True)
 
             if self._attempt_set_property(
                 "AcquisitionFrameRate", float(value_fps), f"{value_fps}FPS"
@@ -373,8 +355,6 @@ class SDKCameraThread(QThread):
                     f"Attempting to set Resolution to: {width}x{height}. This may require stream restart if active."
                 )
 
-                # It might be better to stop stream, set W/H, then restart.
-                # For now, direct set attempt.
                 width_ok = self._attempt_set_property("Width", width, str(width))
                 height_ok = self._attempt_set_property("Height", height, str(height))
 
@@ -414,35 +394,70 @@ class SDKCameraThread(QThread):
                 raise RuntimeError("No IC4 devices found.")
             target_device = None
             if self.device_identifier:
-                for d_info in devices:
-                    dev_serial = self._safe_read_value(
-                        d_info, "serial", ""
-                    )  # device_info objects don't have .value
-                    dev_unique_name = self._safe_read_value(d_info, "unique_name", "")
-                    dev_model_name = self._safe_read_value(d_info, "model_name", "")
-                    if self.device_identifier in (
-                        dev_serial,
-                        dev_unique_name,
-                        dev_model_name,
+                for d_info in devices:  # d_info is an ic4.DeviceInfo object
+                    # Correctly access attributes from DeviceInfo object
+                    dev_model = getattr(d_info, "model_name", "")
+                    # Prefer 'serial_number', fallback to 'serial' if it exists from older bindings/conventions
+                    dev_serial = getattr(
+                        d_info, "serial_number", getattr(d_info, "serial", "")
+                    )
+                    dev_unique = getattr(d_info, "unique_name", "")
+
+                    log.debug(
+                        f"Checking available device: Model='{dev_model}', SN='{dev_serial}', Unique='{dev_unique}' against target '{self.device_identifier}'"
+                    )
+
+                    if (
+                        self.device_identifier == dev_serial
+                        or self.device_identifier == dev_unique
+                        or self.device_identifier == dev_model
                     ):
                         target_device = d_info
+                        log.info(
+                            f"Found matching device in SDKCameraThread: Model={dev_model}, SN={dev_serial}, ID={dev_unique}"
+                        )
                         break
                 if not target_device:
-                    raise RuntimeError(f"Camera '{self.device_identifier}' not found.")
+                    available_dev_strings = []
+                    for dev_idx, dev_item in enumerate(devices):
+                        m = getattr(dev_item, "model_name", "N/A")
+                        s = getattr(
+                            dev_item,
+                            "serial_number",
+                            getattr(dev_item, "serial", "N/A"),
+                        )
+                        u = getattr(dev_item, "unique_name", "N/A")
+                        available_dev_strings.append(
+                            f"  Dev{dev_idx}: Model='{m}', SN='{s}', Unique='{u}'"
+                        )
+                    log.error(
+                        f"Camera '{self.device_identifier}' not found in SDKCameraThread. Available devices:\n"
+                        + "\n".join(available_dev_strings)
+                    )
+                    raise RuntimeError(
+                        f"Camera '{self.device_identifier}' not found in SDKCameraThread."
+                    )
             else:
                 target_device = devices[0]
+                log.info(
+                    "No specific device_identifier given, using first available camera."
+                )
 
             self.grabber = ic4.Grabber()
             self.grabber.device_open(target_device)
             self.pm = self.grabber.device_property_map
-            dev_display_name = (
-                target_device.model_name
-                if hasattr(target_device, "model_name")
-                else (
-                    target_device.unique_name
-                    if hasattr(target_device, "unique_name")
-                    else self.device_identifier
-                )
+            dev_display_name = getattr(
+                target_device,
+                "model_name",
+                getattr(
+                    target_device,
+                    "unique_name",
+                    (
+                        self.device_identifier
+                        if self.device_identifier
+                        else "Unknown Device"
+                    ),
+                ),
             )
             log.info(f"Device '{dev_display_name}' opened. PropertyMap acquired.")
 
@@ -450,7 +465,6 @@ class SDKCameraThread(QThread):
                 ("AcquisitionMode", "Continuous"),
                 ("TriggerMode", "Off"),
             ]
-            # Try to set PixelFormat to Mono8 if available as a sensible default
             pf_prop = self.pm.find("PixelFormat")
             if pf_prop:
                 available_pfs = [
@@ -460,20 +474,15 @@ class SDKCameraThread(QThread):
                 ]
                 if "Mono8" in available_pfs:
                     initial_configs.insert(0, ("PixelFormat", "Mono8"))
-                elif available_pfs:  # If Mono8 not avail, pick first from list
+                elif available_pfs:
                     initial_configs.insert(0, ("PixelFormat", available_pfs[0]))
 
-            # Try to set target FPS
-            # Some cameras need AcquisitionFrameRateEnable=True if that property exists
             p_fps_enable = self.pm.find("AcquisitionFrameRateEnable")
             if p_fps_enable and self._is_property_writable(
                 p_fps_enable, "AcquisitionFrameRateEnable"
             ):
-                if not self._safe_read_value(
-                    p_fps_enable, default=False
-                ):  # If not already true
+                if not self._safe_read_value(p_fps_enable, default=False):
                     self._attempt_set_property("AcquisitionFrameRateEnable", True)
-
             initial_configs.append(("AcquisitionFrameRate", self.initial_target_fps))
 
             for prop_name, val_to_set in initial_configs:
@@ -491,15 +500,10 @@ class SDKCameraThread(QThread):
 
             while not self._stop_requested:
                 try:
-                    # Use try_pop_output_buffer for non-blocking call
                     buf = self.sink.try_pop_output_buffer()
-
-                    if not buf:  # No buffer available right now
-                        QThread.msleep(
-                            10
-                        )  # Prevent busy-waiting, adjust sleep time as needed
+                    if not buf:
+                        QThread.msleep(10)
                         continue
-
                     if not buf.is_valid:
                         log.warning("Received invalid buffer from sink.")
                         buf.release()
@@ -533,7 +537,7 @@ class SDKCameraThread(QThread):
                     if (
                         e.code == ic4.ErrorCode.Timeout
                         or e.code == ic4.ErrorCode.NoData
-                    ):  # Should not happen with try_pop
+                    ):
                         QThread.msleep(10)
                         continue
                     log.error(
