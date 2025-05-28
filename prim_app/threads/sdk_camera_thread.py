@@ -64,23 +64,39 @@ class SDKCameraThread(QThread):
     def _is_property_writable(self, prop_item, prop_name_for_log="Property"):
         if not prop_item:
             return False
+
+        # Prioritize direct boolean attributes as per ic4.Property documentation
+        is_writable_direct = getattr(prop_item, "is_writable", None)
+        if is_writable_direct is not None:
+            # log.debug(f"Property {prop_name_for_log}: is_writable attribute = {is_writable_direct}")
+            return is_writable_direct
+
+        is_read_only_direct = getattr(prop_item, "is_read_only", None)
+        if is_read_only_direct is not None:
+            # log.debug(f"Property {prop_name_for_log}: is_read_only attribute = {is_read_only_direct}, so writable = {not is_read_only_direct}")
+            return not is_read_only_direct
+
+        # Fallback to flags if direct attributes are inconclusive or missing
         try:
             if hasattr(prop_item, "flags"):
-                return bool(prop_item.flags & ic4.PropFlags.IS_WRITABLE)
+                # log.debug(f"Property {prop_name_for_log}: checking flags {prop_item.flags}")
+                is_writable_via_flag = bool(prop_item.flags & ic4.PropFlags.IS_WRITABLE)
+                # Check if IS_READ_ONLY is set, which would override IS_WRITABLE if both were somehow set
+                is_readonly_via_flag = bool(
+                    prop_item.flags & ic4.PropFlags.IS_READ_ONLY
+                )
+                if is_readonly_via_flag:
+                    return False  # Explicitly read-only by flag
+                return is_writable_via_flag  # Return based on writable flag
             else:
-                is_writable_attr = getattr(prop_item, "is_writable", None)
-                is_read_only_attr = getattr(prop_item, "is_read_only", None)
-                if is_writable_attr is not None:
-                    return is_writable_attr
-                elif is_read_only_attr is not None:
-                    return not is_read_only_attr
+                log.warning(f"Property {prop_name_for_log} has no 'flags' attribute.")
         except Exception as e:
             log.warning(
-                f"Error checking writability for {prop_name_for_log} using flags: {e}. Assuming not writable."
+                f"Error checking writability for {prop_name_for_log} using flags: {e}."
             )
 
         log.warning(
-            f"{prop_name_for_log} writability could not be determined via flags or direct attributes. Assuming not writable."
+            f"Writability for {prop_name_for_log} could not be reliably determined. Assuming not writable."
         )
         return False
 
@@ -95,9 +111,7 @@ class SDKCameraThread(QThread):
 
         prop_item = None
         try:
-            prop_item = self.pm.find(
-                prop_name
-            )  # This find() can also raise GenICamFeatureNotFound
+            prop_item = self.pm.find(prop_name)
             if prop_item:
                 if self._is_property_writable(prop_item, prop_name):
                     log.info(f"Setting {prop_name} to {readable_value_for_log}...")
@@ -106,10 +120,10 @@ class SDKCameraThread(QThread):
                     return True
                 else:
                     log.warning(
-                        f"Property {prop_name} is not writable (checked via flags/attributes)."
+                        f"Property {prop_name} is not writable (determined by helper)."
                     )
                     return False
-            else:  # Should not be reached if find() raises on not found
+            else:
                 log.warning(
                     f"Property {prop_name} not found in PropertyMap (find returned None)."
                 )
@@ -175,7 +189,7 @@ class SDKCameraThread(QThread):
             prop = None
             try:
                 prop = self.pm.find(name)
-            except ic4.IC4Exception as e_find:  # Catch if find itself fails
+            except ic4.IC4Exception as e_find:
                 if e_find.code == ic4.ErrorCode.GenICamFeatureNotFound:
                     log.debug(
                         f"Property '{name}' not found during query for camera info."
@@ -188,7 +202,6 @@ class SDKCameraThread(QThread):
         self.camera_info_updated.emit(info)
         log.debug(f"Emitted camera_info_updated: {info}")
 
-        # Exposure Parameters
         exp_params = {
             "auto_options": [],
             "auto_current": "Off",
@@ -243,7 +256,6 @@ class SDKCameraThread(QThread):
         self.exposure_params_updated.emit(exp_params)
         log.debug(f"Emitted exposure_params_updated: {exp_params}")
 
-        # Gain Parameters
         gain_params = {
             "current_db": 0.0,
             "min_db": 0.0,
@@ -266,7 +278,6 @@ class SDKCameraThread(QThread):
         self.gain_params_updated.emit(gain_params)
         log.debug(f"Emitted gain_params_updated: {gain_params}")
 
-        # FPS Parameters
         fps_params = {
             "current_fps": 0.0,
             "min_fps": 0.1,
@@ -291,7 +302,6 @@ class SDKCameraThread(QThread):
         self.fps_params_updated.emit(fps_params)
         log.debug(f"Emitted fps_params_updated: {fps_params}")
 
-        # Pixel Format Options
         pf_options = []
         current_pf_str = "N/A"
         try:
@@ -313,7 +323,6 @@ class SDKCameraThread(QThread):
             f"Emitted pixel_format_options_updated: {pf_options}, current: {current_pf_str}"
         )
 
-        # Resolution Parameters
         res_params = {
             "w_min": 0,
             "w_max": 4096,
@@ -402,7 +411,7 @@ class SDKCameraThread(QThread):
                     log.info(
                         "'AcquisitionFrameRateEnable' not found when trying to set FPS. Will attempt to set FPS directly."
                     )
-                else:  # Re-raise other IC4Exceptions from find
+                else:
                     log.warning(
                         f"IC4Exception checking 'AcquisitionFrameRateEnable' in set_fps: {e_find_fps_enable}"
                     )
@@ -474,7 +483,7 @@ class SDKCameraThread(QThread):
             devices = ic4.DeviceEnum.devices()
             if not devices:
                 raise RuntimeError("No IC4 devices found.")
-            target_device = None  # This should be an ic4.DeviceInfo object
+            target_device = None
             if self.device_identifier:
                 for d_info in devices:
                     dev_model = getattr(d_info, "model_name", "")
@@ -522,7 +531,7 @@ class SDKCameraThread(QThread):
                 )
 
             self.grabber = ic4.Grabber()
-            self.grabber.device_open(target_device)  # Expects DeviceInfo object
+            self.grabber.device_open(target_device)
             self.pm = self.grabber.device_property_map
             dev_display_name = getattr(
                 target_device,
@@ -539,7 +548,6 @@ class SDKCameraThread(QThread):
             )
             log.info(f"Device '{dev_display_name}' opened. PropertyMap acquired.")
 
-            # --- Initial Camera Configuration ---
             initial_configs = [
                 ("AcquisitionMode", "Continuous"),
                 ("TriggerMode", "Off"),
@@ -604,7 +612,9 @@ class SDKCameraThread(QThread):
                     if not buf:
                         QThread.msleep(10)
                         continue
-                    if not buf.is_valid:
+
+                    # Corrected: use is_valid() as a method
+                    if not buf.is_valid():
                         log.warning("Received invalid buffer from sink.")
                         buf.release()
                         continue
@@ -633,14 +643,12 @@ class SDKCameraThread(QThread):
                             f"Unsupported numpy array shape for QImage: {arr.shape}"
                         )
                     buf.release()
-                except (
-                    ic4.IC4Exception
-                ) as e:  # Should be less frequent with try_pop_output_buffer
+                except ic4.IC4Exception as e:
                     if (
                         e.code == ic4.ErrorCode.Timeout
                         or e.code == ic4.ErrorCode.NoData
                     ):
-                        QThread.msleep(10)  # Give a small pause
+                        QThread.msleep(10)
                         continue
                     log.error(
                         f"IC4Exception in frame processing loop: {e} (Code: {e.code})"
@@ -655,7 +663,7 @@ class SDKCameraThread(QThread):
         except RuntimeError as e_rt:
             log.error(f"RuntimeError during SDKCameraThread execution: {e_rt}")
             self.camera_error.emit(str(e_rt), type(e_rt).__name__)
-        except ic4.IC4Exception as e_ic4_setup:  # Catch exceptions from setup phase
+        except ic4.IC4Exception as e_ic4_setup:
             log.error(
                 f"IC4Exception during SDKCameraThread setup: {e_ic4_setup} (Code: {e_ic4_setup.code})"
             )
