@@ -12,6 +12,7 @@ from PyQt5.QtGui import (
     QImage,
     QSurfaceFormat,
 )
+from PyQt5.QtOpenGL import QOpenGLVertexArrayObject  # IMPORTANT IMPORT
 from OpenGL import GL
 import logging
 
@@ -22,8 +23,6 @@ class GLViewfinder(QOpenGLWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # Per-widget format request (belt-and-suspenders with global default)
-        # This helped confirm we get the right context.
         fmt = QSurfaceFormat()
         fmt.setVersion(3, 3)
         fmt.setProfile(QSurfaceFormat.CoreProfile)
@@ -32,6 +31,8 @@ class GLViewfinder(QOpenGLWidget):
         self.program = None
         self.texture = None
         self.vbo_quad = None
+        self.vao = None  # Initialize VAO member
+
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMinimumSize(320, 240)
         self.current_frame_width = 0
@@ -52,7 +53,6 @@ class GLViewfinder(QOpenGLWidget):
         self.texture = QOpenGLTexture(QOpenGLTexture.Target2D)
         self.program = QOpenGLShaderProgram(self.context())
 
-        # Modern GLSL 3.30 Shaders
         vert_src = b"""#version 330 core
 layout (location = 0) in vec2 position;
 layout (location = 1) in vec2 texcoord;
@@ -60,41 +60,31 @@ out vec2 v_texcoord;
 void main() {
     gl_Position = vec4(position, 0.0, 1.0);
     v_texcoord = texcoord;
-}
-"""
+}"""
         frag_src_mono = b"""#version 330 core
-uniform sampler2D tex_sampler; // Changed uniform name for clarity
+uniform sampler2D tex_sampler;
 in vec2 v_texcoord;
 out vec4 fragColor;
 void main() {
-    float intensity = texture(tex_sampler, v_texcoord).r; // Use modern texture()
+    float intensity = texture(tex_sampler, v_texcoord).r; 
     fragColor = vec4(intensity, intensity, intensity, 1.0);
-}
-"""
+}"""
 
         if not self.program.addShaderFromSourceCode(QOpenGLShader.Vertex, vert_src):
-            log.error(
-                f"GLViewfinder: Vertex shader (3.30) compilation error: {self.program.log()}"
-            )
+            log.error(f"Vertex shader compilation error: {self.program.log()}")
             self.program = None
             return
         if not self.program.addShaderFromSourceCode(
             QOpenGLShader.Fragment, frag_src_mono
         ):
-            log.error(
-                f"GLViewfinder: Fragment shader (3.30) compilation error: {self.program.log()}"
-            )
+            log.error(f"Fragment shader compilation error: {self.program.log()}")
             self.program = None
             return
-
-        # No need for bindAttributeLocation with GLSL 3.30 and layout qualifiers
-
         if not self.program.link():
-            log.error(f"GLViewfinder: Shader link error: {self.program.log()}")
+            log.error(f"Shader link error: {self.program.log()}")
             self.program = None
             return
-
-        log.info("GLViewfinder: GLSL 3.30 shaders compiled and linked successfully.")
+        log.info("GLSL 3.30 shaders compiled and linked successfully.")
 
         self.texture.setMinificationFilter(QOpenGLTexture.Linear)
         self.texture.setMagnificationFilter(QOpenGLTexture.Linear)
@@ -122,13 +112,44 @@ void main() {
             dtype=np.float32,
         )
 
-        self.makeCurrent()
+        self.makeCurrent()  # Ensure context is current
+
+        # --- VAO Setup ---
+        self.vao = QOpenGLVertexArrayObject()
+        self.vao.create()
+        self.vao.bind()  # Bind the VAO before configuring VBO and attribute pointers
+
         self.vbo_quad = GL.glGenBuffers(1)
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo_quad)
         GL.glBufferData(
             GL.GL_ARRAY_BUFFER, quad_verts.nbytes, quad_verts, GL.GL_STATIC_DRAW
         )
+
+        # Attribute pointers (state is stored in the bound VAO)
+        pos_loc = 0  # From shader: layout (location = 0)
+        tex_loc = 1  # From shader: layout (location = 1)
+        stride = 4 * np.dtype(np.float32).itemsize
+
+        GL.glEnableVertexAttribArray(pos_loc)
+        GL.glVertexAttribPointer(
+            pos_loc, 2, GL.GL_FLOAT, GL.GL_FALSE, stride, GL.ctypes.c_void_p(0)
+        )
+
+        GL.glEnableVertexAttribArray(tex_loc)
+        GL.glVertexAttribPointer(
+            tex_loc,
+            2,
+            GL.GL_FLOAT,
+            GL.GL_FALSE,
+            stride,
+            GL.ctypes.c_void_p(2 * np.dtype(np.float32).itemsize),
+        )
+
+        # Unbind VBO (optional here as VAO remembers it, but good practice)
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
+        self.vao.release()  # Unbind the VAO
+        # --- End VAO Setup ---
+
         self.doneCurrent()
 
     def resizeGL(self, w: int, h: int):
@@ -141,10 +162,11 @@ void main() {
             or not self.isValid()
             or self.program is None
             or self.texture is None
-        ):
-            if self.program is None or self.texture is None:
+            or self.vao is None
+        ):  # Added vao check
+            if self.program is None or self.texture is None or self.vao is None:
                 log.debug(
-                    "GLViewfinder: update_frame called but shaders or texture not initialized properly."
+                    "GLViewfinder: update_frame called but GL resources not fully initialized."
                 )
             return
         self.makeCurrent()
@@ -162,42 +184,30 @@ void main() {
                 self.texture.destroy()
             self.texture.create()
             self.texture.setSize(w, h)
-            internal_texture_format = QOpenGLTexture.R8_UNorm
-            self.texture.setFormat(internal_texture_format)
+            self.texture.setFormat(QOpenGLTexture.R8_UNorm)
             self.texture.allocateStorage()
             self.current_frame_width = w
             self.current_frame_height = h
             log.debug(
-                f"GLViewfinder: Texture re(allocated) for {w}x{h}, aspect: {self.frame_aspect_ratio:.2f}, format: {internal_texture_format}"
+                f"GLViewfinder: Texture re(allocated) for {w}x{h}, aspect: {self.frame_aspect_ratio:.2f}"
             )
-        data_for_texture = frame
-        source_pixel_format = QOpenGLTexture.Red
-        if channels == 1:
-            if frame.ndim == 3 and frame.shape[2] == 1:
-                data_for_texture = frame[:, :, 0].copy()
-            elif frame.ndim == 2:
-                data_for_texture = frame.copy()
-            else:
-                log.error(
-                    f"GLViewfinder: Frame has 1 channel but unexpected dimensions: {frame.shape}"
-                )
-                self.doneCurrent()
-                return
-        else:
+        data_for_texture = (
+            frame.copy()
+            if frame.ndim == 2
+            else frame[:, :, 0].copy() if (frame.ndim == 3 and channels == 1) else None
+        )
+        if data_for_texture is None:
             log.warning(
-                f"GLViewfinder: Unsupported channels ({channels}) for current setup (expected 1)."
+                f"Unsupported frame format/channels for texture: shape{frame.shape}"
             )
             self.doneCurrent()
             return
-        if data_for_texture is not None:
-            self.texture.bind()
-            self.texture.setData(
-                source_pixel_format, QOpenGLTexture.UInt8, data_for_texture.data
-            )
-            self.texture.release()
-            self.update()
-        else:
-            log.warning("GLViewfinder: data_for_texture became None unexpectedly.")
+        self.texture.bind()
+        self.texture.setData(
+            QOpenGLTexture.Red, QOpenGLTexture.UInt8, data_for_texture.data
+        )
+        self.texture.release()
+        self.update()
         self.doneCurrent()
 
     def paintGL(self):
@@ -207,6 +217,7 @@ void main() {
             or self.texture is None
             or not self.texture.isCreated()
             or self.vbo_quad is None
+            or self.vao is None  # Added vao check
             or self.current_frame_width == 0
             or self.current_frame_height == 0
         ):
@@ -238,34 +249,17 @@ void main() {
             GL.glViewport(0, 0, widget_w, widget_h)
             self.doneCurrent()
             return
+
+        self.vao.bind()  # Bind VAO before drawing
         GL.glActiveTexture(GL.GL_TEXTURE0)
         self.texture.bind()
-        # Ensure uniform name matches the one in the fragment shader
         self.program.setUniformValue("tex_sampler", 0)
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo_quad)
-        stride = 4 * np.dtype(np.float32).itemsize
+        # VBO is already associated with VAO's attribute pointers, no need to bind VBO explicitly here usually
+        # GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo_quad) # This line is not strictly necessary if VAO is setup correctly
 
-        # For GLSL 3.30 with layout(location=N), attribute locations are N
-        pos_loc = 0
-        tex_loc = 1
-
-        GL.glEnableVertexAttribArray(pos_loc)
-        GL.glVertexAttribPointer(
-            pos_loc, 2, GL.GL_FLOAT, GL.GL_FALSE, stride, GL.ctypes.c_void_p(0)
-        )
-        GL.glEnableVertexAttribArray(tex_loc)
-        GL.glVertexAttribPointer(
-            tex_loc,
-            2,
-            GL.GL_FLOAT,
-            GL.GL_FALSE,
-            stride,
-            GL.ctypes.c_void_p(2 * np.dtype(np.float32).itemsize),
-        )
         GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
-        GL.glDisableVertexAttribArray(pos_loc)
-        GL.glDisableVertexAttribArray(tex_loc)
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
+
+        self.vao.release()  # Unbind VAO
         self.texture.release()
         self.program.release()
         self.doneCurrent()
