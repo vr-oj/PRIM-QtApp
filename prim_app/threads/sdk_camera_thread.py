@@ -57,6 +57,7 @@ class SDKCameraThread(QThread):
             f"SDKCameraThread (Simplified) initialized for device_identifier: '{self.device_identifier}', target_fps (informational): {self.target_fps}"
         )
 
+    # Renamed for clarity to _attempt_set_property from previous version provided to user
     def _attempt_set_property(
         self, prop_name: str, value_to_set: any, readable_value_for_log: str = None
     ):
@@ -70,11 +71,10 @@ class SDKCameraThread(QThread):
             log.error(f"PropertyMap not available. Cannot set {prop_name}.")
             return
 
+        prop_item = None
         try:
             prop_item = self.pm.find(prop_name)
             if prop_item:
-                # Check writability on the Property object itself if available, otherwise just try
-                # For robust cross-version/property type, direct attempt with try-except is often best
                 log.info(
                     f"Attempting to set {prop_name} to {readable_value_for_log}..."
                 )
@@ -96,11 +96,9 @@ class SDKCameraThread(QThread):
             log.error(
                 f"IC4Exception while setting {prop_name} to {readable_value_for_log}: {e_prop} (Code: {e_prop.code})"
             )
-        except (
-            AttributeError
-        ) as ae:  # Catch if prop_item itself doesn't have expected attributes like is_writable (if we were checking it)
+        except AttributeError as ae:
             log.error(
-                f"AttributeError operating on {prop_name}: {ae}. PropItem was: {type(prop_item)}"
+                f"AttributeError operating on {prop_name} (prop_item type: {type(prop_item)}): {ae}"
             )
         except Exception as e_gen:
             log.error(
@@ -157,11 +155,10 @@ class SDKCameraThread(QThread):
             self._attempt_set_property("PixelFormat", ic4.PixelFormat.Mono8, "Mono8")
             self._attempt_set_property("Width", 640, "640")
             self._attempt_set_property("Height", 480, "480")
-            self._attempt_set_property(
-                "AcquisitionMode", ic4.AcquisitionMode.Continuous, "Continuous"
-            )
-            self._attempt_set_property("TriggerMode", ic4.TriggerMode.Off, "Off")
-            log.info("Finished camera property configuration attempt.")
+            # MODIFIED: Use string values for these GenICam standard enums
+            self._attempt_set_property("AcquisitionMode", "Continuous", "Continuous")
+            self._attempt_set_property("TriggerMode", "Off", "Off")
+            log.info("Finished attempt to configure camera properties.")
 
             self.sink = ic4.QueueSink(listener=self.sink_listener)
             log.info("QueueSink initialized.")
@@ -247,9 +244,7 @@ class SDKCameraThread(QThread):
                         try:
                             buf.release()
                         except Exception as e_rls:
-                            log.error(
-                                f"Err releasing buf after AttrErr: {e_rls}"
-                            )  # Corrected
+                            log.error(f"Err releasing buf after AttrErr: {e_rls}")
                     break
                 except Exception as e_loop:
                     log.exception(f"Generic exception in loop: {e_loop}")
@@ -258,9 +253,7 @@ class SDKCameraThread(QThread):
                         try:
                             buf.release()
                         except Exception as e_rls:
-                            log.error(
-                                f"Err releasing buf after GenExc: {e_rls}"
-                            )  # Corrected
+                            log.error(f"Err releasing buf after GenExc: {e_rls}")
                     break
             log.info("SDKCameraThread: Exited acquisition loop.")
 
