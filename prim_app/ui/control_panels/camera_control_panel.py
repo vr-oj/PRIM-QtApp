@@ -9,16 +9,15 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QPushButton,
+    QTabWidget,  # Added
+    QFormLayout,  # Added for the status tab
+    QSizePolicy,  # Added for a spacer
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 
 
 class CameraControlPanel(QWidget):
-    """
-    Panel for live camera settings: resolution, pixel format, auto exposure,
-    exposure time, gain, and frame rate.
-    """
-
+    # Signals remain the same
     resolution_changed = pyqtSignal(str)
     pixel_format_changed = pyqtSignal(str)
     auto_exposure_toggled = pyqtSignal(bool)
@@ -30,68 +29,103 @@ class CameraControlPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumWidth(220)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(3, 3, 3, 3)
-        layout.setSpacing(5)
+        self.setMinimumWidth(250)  # Adjusted minimum width slightly for tabs
+        # Main layout for this panel will be vertical, holding the TabWidget and possibly buttons
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(4, 4, 4, 4)  # Reduced margins
+        main_layout.setSpacing(4)  # Reduced spacing
 
-        # Title
-        title = QLabel("Camera Settings")
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
+        self.tab_widget = QTabWidget()
+        main_layout.addWidget(self.tab_widget)
+
+        # --- Create Status Tab ---
+        self.status_tab = QWidget()
+        status_layout = QFormLayout(self.status_tab)
+        status_layout.setContentsMargins(6, 6, 6, 6)
+        status_layout.setSpacing(5)
+
+        self.cam_model_label = QLabel("N/A")
+        self.cam_serial_label = QLabel("N/A")
+        self.cam_current_res_label = QLabel("N/A")
+        self.cam_current_pix_format_label = QLabel("N/A")
+        self.cam_current_fps_label = QLabel("N/A")
+
+        status_layout.addRow("Model:", self.cam_model_label)
+        status_layout.addRow("Serial:", self.cam_serial_label)
+        status_layout.addRow("Resolution:", self.cam_current_res_label)
+        status_layout.addRow("Pixel Format:", self.cam_current_pix_format_label)
+        status_layout.addRow("FPS:", self.cam_current_fps_label)
+
+        self.tab_widget.addTab(self.status_tab, "Status")
+
+        # --- Create Adjustments Tab ---
+        self.adjustments_tab = QWidget()
+        adjustments_main_layout = QVBoxLayout(
+            self.adjustments_tab
+        )  # Use QVBoxLayout to allow sections
+        adjustments_main_layout.setContentsMargins(6, 6, 6, 6)
+        adjustments_main_layout.setSpacing(8)
+
+        # We can use QFormLayout or QVBoxLayouts within this for better grouping if needed
+        controls_layout = QFormLayout()  # Using QFormLayout for compactness of controls
 
         # Resolution dropdown
-        layout.addWidget(QLabel("Resolution:"))
         self.res_combo = QComboBox()
+        self.res_combo.setToolTip("Target camera resolution (requires stream restart)")
         self.res_combo.currentTextChanged.connect(self.resolution_changed)
-        layout.addWidget(self.res_combo)
+        controls_layout.addRow("Resolution:", self.res_combo)
 
         # Pixel format dropdown
-        layout.addWidget(QLabel("Pixel Format:"))
         self.pix_combo = QComboBox()
+        self.pix_combo.setToolTip(
+            "Target camera pixel format (requires stream restart)"
+        )
         self.pix_combo.currentTextChanged.connect(self.pixel_format_changed)
-        layout.addWidget(self.pix_combo)
+        controls_layout.addRow("Pixel Format:", self.pix_combo)
 
         # Auto Exposure
         self.auto_exp_cb = QCheckBox("Auto Exposure")
         self.auto_exp_cb.stateChanged.connect(
             lambda state: self.auto_exposure_toggled.emit(state == Qt.Checked)
         )
-        layout.addWidget(self.auto_exp_cb)
+        controls_layout.addRow(self.auto_exp_cb)
 
         # Manual Exposure time
-        exp_layout = QHBoxLayout()
-        exp_layout.addWidget(QLabel("Exposure (ms):"))
         self.exp_spin = QDoubleSpinBox()
-        self.exp_spin.setRange(0.1, 60000)
-        self.exp_spin.setSingleStep(0.1)
+        self.exp_spin.setToolTip("Manual exposure time in microseconds (µs)")
+        self.exp_spin.setSuffix(" µs")  # More explicit suffix
+        self.exp_spin.setDecimals(1)  # Or more if needed
+        self.exp_spin.setRange(
+            10.0, 1000000.0
+        )  # Example range, will be updated from camera
+        self.exp_spin.setSingleStep(100.0)
         self.exp_spin.valueChanged.connect(self.exposure_changed)
-        exp_layout.addWidget(self.exp_spin)
-        layout.addLayout(exp_layout)
+        controls_layout.addRow("Exposure Time:", self.exp_spin)
 
-        # Gain slider
-        gain_layout = QVBoxLayout()
-        gain_label = QLabel("Gain:")
-        gain_layout.addWidget(gain_label)
-        self.gain_slider = QSlider(Qt.Horizontal)
-        self.gain_slider.setRange(0, 100)
-        self.gain_slider.setTickInterval(5)
-        self.gain_slider.setTickPosition(QSlider.TicksBelow)
-        self.gain_slider.valueChanged.connect(
-            lambda v: self.gain_changed.emit(float(v))
-        )
-        gain_layout.addWidget(self.gain_slider)
-        layout.addLayout(gain_layout)
+        # Gain (using QDoubleSpinBox for more precision than QSlider if gain is float)
+        self.gain_spin = QDoubleSpinBox()
+        self.gain_spin.setToolTip("Camera gain (dB or relative units)")
+        self.gain_spin.setSuffix(" dB")  # Example suffix
+        self.gain_spin.setDecimals(1)
+        self.gain_spin.setRange(0.0, 48.0)  # Example range, will be updated
+        self.gain_spin.valueChanged.connect(lambda v: self.gain_changed.emit(float(v)))
+        controls_layout.addRow("Gain:", self.gain_spin)
 
         # Frame rate
-        layout.addWidget(QLabel("Frame Rate (FPS):"))
         self.fps_spin = QDoubleSpinBox()
-        self.fps_spin.setRange(0.1, 240.0)
-        self.fps_spin.setSingleStep(0.1)
+        self.fps_spin.setToolTip("Target camera frame rate (FPS)")
+        self.fps_spin.setRange(0.1, 200.0)  # Example range, will be updated
+        self.fps_spin.setSingleStep(1.0)
+        self.fps_spin.setDecimals(1)
         self.fps_spin.valueChanged.connect(self.fps_changed)
-        layout.addWidget(self.fps_spin)
+        controls_layout.addRow("Frame Rate (FPS):", self.fps_spin)
 
-        # Start/Stop Live buttons
+        adjustments_main_layout.addLayout(controls_layout)
+        adjustments_main_layout.addStretch(1)  # Add stretch to push controls up
+
+        self.tab_widget.addTab(self.adjustments_tab, "Adjustments")
+
+        # Start/Stop Live buttons (can remain outside tabs or be moved into a tab)
         btn_layout = QHBoxLayout()
         self.start_btn = QPushButton("Start Live")
         self.start_btn.clicked.connect(self.start_stream)
@@ -99,6 +133,69 @@ class CameraControlPanel(QWidget):
         self.stop_btn.clicked.connect(self.stop_stream)
         btn_layout.addWidget(self.start_btn)
         btn_layout.addWidget(self.stop_btn)
-        layout.addLayout(btn_layout)
 
-        layout.addStretch()
+        main_layout.addLayout(btn_layout)  # Add buttons below the tab widget
+
+        # Initial state of controls (will be managed by MainWindow enabling/disabling CameraControlPanel)
+        # For now, individual controls are created but their actual functionality depends on MainWindow logic
+
+    # Methods to update status labels (to be called from MainWindow)
+    def update_status_info(
+        self, model="N/A", serial="N/A", resolution="N/A", pix_format="N/A", fps="N/A"
+    ):
+        self.cam_model_label.setText(model)
+        self.cam_serial_label.setText(serial)
+        self.cam_current_res_label.setText(resolution)
+        self.cam_current_pix_format_label.setText(pix_format)
+        self.cam_current_fps_label.setText(fps)
+
+    # Methods to update adjustment control ranges/values (to be called from MainWindow)
+    def update_exposure_controls(
+        self,
+        enabled: bool,
+        is_auto: bool,
+        value_us: float,
+        min_us: float,
+        max_us: float,
+    ):
+        self.auto_exp_cb.setChecked(is_auto)
+        self.exp_spin.setRange(min_us, max_us)
+        self.exp_spin.setValue(value_us)
+        self.exp_spin.setEnabled(
+            enabled and not is_auto
+        )  # Only enable if manual exposure is active
+        self.auto_exp_cb.setEnabled(enabled)
+
+    def update_gain_controls(
+        self, enabled: bool, value: float, min_val: float, max_val: float
+    ):
+        self.gain_spin.setRange(min_val, max_val)
+        self.gain_spin.setValue(value)
+        self.gain_spin.setEnabled(enabled)
+
+    def update_fps_controls(
+        self, enabled: bool, value: float, min_val: float, max_val: float
+    ):
+        self.fps_spin.setRange(min_val, max_val)
+        self.fps_spin.setValue(value)
+        self.fps_spin.setEnabled(enabled)
+
+    def populate_resolutions(self, resolutions: list, current_res_str: str = None):
+        self.res_combo.blockSignals(True)
+        self.res_combo.clear()
+        self.res_combo.addItems(resolutions)
+        if current_res_str:
+            idx = self.res_combo.findText(current_res_str)
+            if idx >= 0:
+                self.res_combo.setCurrentIndex(idx)
+        self.res_combo.blockSignals(False)
+
+    def populate_pixel_formats(self, formats: list, current_format_str: str = None):
+        self.pix_combo.blockSignals(True)
+        self.pix_combo.clear()
+        self.pix_combo.addItems(formats)
+        if current_format_str:
+            idx = self.pix_combo.findText(current_format_str)
+            if idx >= 0:
+                self.pix_combo.setCurrentIndex(idx)
+        self.pix_combo.blockSignals(False)

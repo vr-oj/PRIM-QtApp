@@ -120,12 +120,25 @@ class MainWindow(QMainWindow):
         self.showMaximized()
 
     def _set_initial_splitter_sizes(self):
-        if self.bottom_split:
+        if (
+            self.bottom_split and self.bottom_split.count() == 2
+        ):  # Ensure splitter has children
+            # Defer sizing slightly to allow the main window to fully show and report correct dimensions
+            QTimer.singleShot(100, self._perform_splitter_sizing)
+
+    def _perform_splitter_sizing(self):
+        """Actually sets the splitter sizes. Called by a QTimer."""
+        if self.bottom_split and self.bottom_split.count() == 2:
             w = self.bottom_split.width()
-            if w > 0:  # Ensure width is positive before calculating
-                self.bottom_split.setSizes([int(w * 0.6), int(w * 0.4)])
-            else:  # Fallback or retry if width is not yet available
-                QTimer.singleShot(100, self._set_initial_splitter_sizes)
+            h = self.bottom_split.height()
+            if w > 0 and h > 0:
+                # Example: Give ~65% width to viewfinder, ~35% to plot, or adjust as you like
+                self.bottom_split.setSizes([int(w * 0.65), int(w * 0.35)])
+                log.debug(f"Splitter sizes set for width {w}")
+            else:
+                # If still not sized, could retry once more or log a warning
+                log.warning("Bottom splitter not ready for sizing after delay.")
+                # QTimer.singleShot(200, self._perform_splitter_sizing) # Optional: one more retry
 
     def _check_and_prompt_for_cti_on_startup(self):
         if not is_ic4_fully_initialized() and prim_app.IC4_AVAILABLE:
@@ -163,14 +176,19 @@ class MainWindow(QMainWindow):
 
     def _connect_camera_signals(self):
         th = self.camera_thread
-        cp = (
-            self.camera_panel
-        )  # cp will be disabled, so its signals aren't essential now
-        if not (th and self.camera_view):  # cp not strictly needed for simplified view
-            log.warning("Cannot connect camera signals: thread or view missing.")
-            return True  # Indicate failure or inability to connect
+        # cp = self.camera_panel # cp is self.camera_panel
 
-        # Disconnect any existing signals to be safe (optional for this simplification if re-creating thread)
+        # We only connect essential signals for the simplified stream display for now.
+        # Connections to camera controls (exposure, gain etc.) will be added in Phase 2.
+        if not (
+            th and self.camera_view and self.camera_panel
+        ):  # Ensure camera_panel also exists
+            log.warning(
+                "Cannot connect camera signals: thread, view, or camera_panel missing."
+            )
+            return True
+
+        # Disconnect previous signals to be safe if re-connecting
         try:
             th.frame_ready.disconnect()
         except TypeError:
@@ -180,31 +198,21 @@ class MainWindow(QMainWindow):
         except TypeError:
             pass
 
-        # --- SIMPLIFIED CONNECTIONS ---
+        # This is for a future signal from SDKCameraThread that would carry dynamic camera info
+        # For now, we'll manually update status info once after camera starts.
+        # If SDKCameraThread later emits a signal like:
+        # camera_info_ready = pyqtSignal(dict) # e.g., dict with model, serial, res, pixfmt, fps
+        # you would connect it here:
+        # if hasattr(th, 'camera_info_ready') and hasattr(self.camera_panel, 'update_status_info_from_dict'):
+        #    th.camera_info_ready.connect(self.camera_panel.update_status_info_from_dict) # Assuming update_status_info_from_dict in CameraControlPanel
+
         th.frame_ready.connect(self.camera_view.update_frame)
         th.camera_error.connect(self._on_camera_error)
 
-        # Comment out or remove connections related to CameraControlPanel and detailed properties
-        # th.resolutions_updated.connect(lambda r: cp.res_combo.clear() or cp.res_combo.addItems(r or []))
-        # th.pixel_formats_updated.connect(lambda f: cp.pix_combo.clear() or cp.pix_combo.addItems(f or []))
-        # th.fps_range_updated.connect(lambda lo, hi: cp.fps_spin.setRange(lo, hi))
-        # th.exposure_range_updated.connect(lambda lo, hi: cp.exp_spin.setRange(lo, hi))
-        # th.gain_range_updated.connect(lambda lo, hi: cp.gain_slider.setRange(int(lo), int(hi)))
-        # th.auto_exposure_updated.connect(cp.auto_exp_cb.setChecked)
-        # th.properties_updated.connect(update_panel_from_props)
-
-        # cp.resolution_changed.connect(lambda r: r and th.apply_node_settings({"Width": int(r.split("x")[0]), "Height": int(r.split("x")[1])}))
-        # cp.pixel_format_changed.connect(lambda f: th.apply_node_settings({"PixelFormat": f}))
-        # cp.auto_exposure_toggled.connect(lambda on: th.apply_node_settings({"ExposureAuto": "Continuous" if on else "Off"}))
-        # cp.exposure_changed.connect(lambda v: th.apply_node_settings({"ExposureTime": v}))
-        # cp.gain_changed.connect(lambda v: th.apply_node_settings({"Gain": v}))
-        # cp.fps_changed.connect(lambda v: th.apply_node_settings({"AcquisitionFrameRate": v}))
-
-        # cp.start_stream.connect(th.start) # Thread will be started directly
-        # cp.stop_stream.connect(th.stop)   # Thread will be stopped directly if needed
-
-        log.info("Simplified camera signals connected (frame_ready, camera_error).")
-        return False  # Indicate success
+        log.info(
+            "Core camera signals connected (frame_ready, camera_error). Status tab updates handled separately for now."
+        )
+        return False
 
     def _start_sdk_camera_thread(
         self, camera_identifier, fps, initial_settings=None
@@ -262,15 +270,20 @@ class MainWindow(QMainWindow):
         if not is_ic4_fully_initialized():
             log.info("IC4 not fully initialized, cannot auto-configure camera.")
             self.statusBar().showMessage(
-                "IC4 SDK not configured. Use Camera > Change CTI File...", 5000
+                "IC4 SDK not configured. Use Camera menu...", 5000
             )
             if self.camera_panel:
                 self.camera_panel.setEnabled(False)
             return
 
         log.info("Attempting to get first available IC4 camera for basic live feed...")
-        if self.camera_panel:  # Ensure it's disabled before we start
-            self.camera_panel.setEnabled(False)
+        # Enable the camera panel now that IC4 is ready and we're trying to start a camera
+        if self.camera_panel:
+            self.camera_panel.setEnabled(True)
+            # If you have tabs and want to ensure "Status" is default or "Adjustments" is initially disabled:
+            # if hasattr(self.camera_panel, 'tab_widget'):
+            #     self.camera_panel.tab_widget.setCurrentIndex(0) # Ensure Status tab is shown
+            #     self.camera_panel.tab_widget.setTabEnabled(1, False) # Disable "Adjustments" tab initially
 
         available_devices = []
         try:
@@ -278,10 +291,14 @@ class MainWindow(QMainWindow):
             if not available_devices:
                 log.warning("No camera devices found by ic4.DeviceEnum.")
                 self.statusBar().showMessage("No camera devices found.", 5000)
-                return  # No devices, nothing to do
+                if self.camera_panel:
+                    self.camera_panel.setEnabled(False)
+                return
         except Exception as e:
             log.error(f"Error enumerating IC4 devices: {e}")
             self.statusBar().showMessage(f"Error enumerating devices: {e}", 5000)
+            if self.camera_panel:
+                self.camera_panel.setEnabled(False)
             return
 
         first_device_info = available_devices[0]
@@ -291,8 +308,12 @@ class MainWindow(QMainWindow):
             if hasattr(first_device_info, "model_name")
             else "Unknown Model"
         )
+        camera_serial_number = (
+            first_device_info.serial
+            if hasattr(first_device_info, "serial") and first_device_info.serial
+            else "N/A"
+        )
 
-        # Prefer serial number as identifier, then unique name, then model name as fallback
         if hasattr(first_device_info, "serial") and first_device_info.serial:
             camera_identifier = first_device_info.serial
         elif (
@@ -303,43 +324,65 @@ class MainWindow(QMainWindow):
                 f"Using unique_name as identifier for {camera_model_name}: {camera_identifier}"
             )
         else:
-            camera_identifier = camera_model_name  # Fallback
+            camera_identifier = camera_model_name
             log.warning(
-                f"Using model_name as identifier for {camera_model_name} (serial/unique_name not available/empty). This might be less reliable if multiple cameras of the same model are present."
+                f"Using model_name as identifier for {camera_model_name} (serial/unique_name not available/empty)."
             )
 
         if not camera_identifier:
             log.error(
-                f"Could not determine a unique identifier for the first detected camera: {camera_model_name}"
+                f"Could not determine identifier for first camera: {camera_model_name}"
             )
             self.statusBar().showMessage(
-                f"Could not identify {camera_model_name} uniquely.", 5000
+                f"Could not identify {camera_model_name}.", 5000
             )
+            if self.camera_panel:
+                self.camera_panel.setEnabled(False)
             return
 
         log.info(
-            f"Found first camera: {camera_model_name} (Identifier: {camera_identifier}). Attempting basic stream."
+            f"Found first camera: {camera_model_name} (ID: {camera_identifier}). Attempting stream."
         )
-        self.camera_settings["cameraModel"] = camera_model_name  # Store for display
+        # Store basic info for potential use in status tab
+        self.camera_settings["cameraModel"] = camera_model_name
+        self.camera_settings["cameraSerial"] = camera_serial_number
+        self.camera_settings["cameraIdentifier"] = camera_identifier
 
         try:
-            # Start with default FPS, initial_settings is None for simplified version
+            # DEFAULT_FPS is used here just as an informational target for SDKCameraThread,
+            # actual FPS will be camera's default or what SDK negotiates.
             self._start_sdk_camera_thread(
                 camera_identifier, DEFAULT_FPS, initial_settings=None
             )
-            save_app_setting(
-                SETTING_LAST_CAMERA_SERIAL, camera_identifier
-            )  # Still useful to remember the last attempted
+            save_app_setting(SETTING_LAST_CAMERA_SERIAL, camera_identifier)
+
+            # After starting thread, update status tab in CameraControlPanel
+            # This is an initial update. Dynamic updates would come from SDKCameraThread signals.
+            if self.camera_panel and hasattr(self.camera_panel, "update_status_info"):
+                # We know SDKCameraThread attempts to set 640x480 and Mono8
+                current_res_str = "640x480 (Target)"
+                current_pix_format_str = "Mono8 (Target)"
+                # Actual streaming FPS is not actively controlled or queried yet in simplified mode
+                # We can display the target_fps passed to the thread as an indication.
+                actual_fps_str = f"~{self.camera_thread.target_fps if self.camera_thread else DEFAULT_FPS} (Target)"
+
+                self.camera_panel.update_status_info(
+                    model=self.camera_settings.get("cameraModel", "N/A"),
+                    serial=self.camera_settings.get("cameraSerial", "N/A"),
+                    resolution=current_res_str,
+                    pix_format=current_pix_format_str,
+                    fps=actual_fps_str,
+                )
+                # Keep camera_panel enabled as stream attempt is underway
+                # self.camera_panel.setEnabled(True) # Already done above if IC4 is ready
+
         except Exception as e:
-            log.exception(
-                f"Failed to start basic live feed for camera '{camera_model_name}': {e}"
-            )
+            log.exception(f"Failed to start camera '{camera_model_name}': {e}")
             QMessageBox.critical(
-                self,
-                "Camera Start Error",
-                f"Could not start basic live feed for {camera_model_name}:\n{e}",
+                self, "Camera Start Error", f"Could not start {camera_model_name}:\n{e}"
             )
-        # Camera panel remains disabled in simplified mode
+            if self.camera_panel:
+                self.camera_panel.setEnabled(False)
 
     def _run_camera_setup(self):
         # Temporarily disable the camera setup wizard functionality
@@ -402,43 +445,59 @@ class MainWindow(QMainWindow):
 
     def _build_central_widget_layout(self):
         central = QWidget()
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(3)
-        top_row = QWidget()
-        top_layout = QHBoxLayout(top_row)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-        top_layout.setSpacing(5)
+        self.setCentralWidget(central)  # Set central widget first
 
+        main_v_layout = QVBoxLayout(
+            central
+        )  # Main vertical layout for the central widget
+        main_v_layout.setContentsMargins(2, 2, 2, 2)  # Minimal margins
+        main_v_layout.setSpacing(3)  # Minimal spacing
+
+        # --- Top Row for Control Panels ---
+        self.top_row_widget = QWidget()  # Explicit container for the top row
+        top_h_layout = QHBoxLayout(self.top_row_widget)
+        top_h_layout.setContentsMargins(0, 0, 0, 0)  # No margins for the layout itself
+        top_h_layout.setSpacing(4)  # Minimal spacing between panels
+
+        # Instantiate your (now tabbed) CameraControlPanel
         self.camera_panel = CameraControlPanel(self)
-        self.camera_panel.setEnabled(False)  # Disable camera panel for simplified mode
-        top_layout.addWidget(self.camera_panel)
+        # Initial enabled state will be handled by _set_initial_control_states
 
+        # Instantiate TopControlPanel (which internally contains PlotControlPanel)
         self.top_ctrl = TopControlPanel(self)
-        top_layout.addWidget(self.top_ctrl)
 
-        # Ensure plot_controls exists before trying to add it
-        if hasattr(self.top_ctrl, "plot_controls") and self.top_ctrl.plot_controls:
-            top_layout.addWidget(self.top_ctrl.plot_controls)
-        else:
-            log.error("self.top_ctrl.plot_controls not found during layout build.")
-            # You might want to create a placeholder or handle this error more gracefully
-            # For now, it will just not be added if missing.
+        # Add panels to the top horizontal layout
+        top_h_layout.addWidget(
+            self.camera_panel, 1
+        )  # Adjust stretch factor as needed (e.g., 1)
+        top_h_layout.addWidget(
+            self.top_ctrl, 2
+        )  # Adjust stretch factor (e.g., 2, giving it more width)
 
-        top_row.setSizePolicy(
-            QSizePolicy.Preferred, QSizePolicy.Minimum
-        )  # Make vertical policy Minimum
-        layout.addWidget(top_row)  # Add top_row to the main vertical layout
+        # Crucial for making the top row compact vertically:
+        self.top_row_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+
+        main_v_layout.addWidget(
+            self.top_row_widget, 0
+        )  # Stretch factor 0 for top row (take minimum height)
+
+        # --- Bottom Splitter for Viewfinder and Plot ---
         self.bottom_split = QSplitter(Qt.Horizontal)
         self.bottom_split.setChildrenCollapsible(False)  # Good practice
+
         self.camera_view = GLViewfinder(self)
-        self.bottom_split.addWidget(self.camera_view)
         self.pressure_plot_widget = PressurePlotWidget(self)
+
+        self.bottom_split.addWidget(self.camera_view)
         self.bottom_split.addWidget(self.pressure_plot_widget)
-        self.bottom_split.setStretchFactor(0, 1)  # Camera view
-        self.bottom_split.setStretchFactor(1, 1)  # Plot view
-        layout.addWidget(self.bottom_split, 1)  # Give it more stretch
-        self.setCentralWidget(central)
+
+        # Initial stretch factors for the splitter widgets (e.g., give more space to viewfinder)
+        self.bottom_split.setStretchFactor(0, 2)
+        self.bottom_split.setStretchFactor(1, 1)
+
+        main_v_layout.addWidget(
+            self.bottom_split, 1
+        )  # Stretch factor 1 for bottom area (take available space)
 
     def _build_menus(self):
         mb = self.menuBar()
@@ -651,10 +710,38 @@ class MainWindow(QMainWindow):
             self.start_recording_action.setEnabled(False)
         if hasattr(self, "stop_recording_action"):
             self.stop_recording_action.setEnabled(False)
-        if self.camera_panel:
+
+        if self.camera_panel:  # This is your new tabbed CameraControlPanel
             self.camera_panel.setEnabled(
                 False
-            )  # Ensure camera panel is initially disabled
+            )  # Start disabled; enable it in _initialize_camera_on_startup if IC4 is ready
+            # You might want to initially disable the "Adjustments" tab if its controls aren't active yet
+            if (
+                hasattr(self.camera_panel, "tab_widget")
+                and self.camera_panel.tab_widget.count() > 1
+            ):
+                self.camera_panel.tab_widget.setTabEnabled(
+                    1, False
+                )  # Index 1 for "Adjustments" tab
+
+    def _trigger_plot_reset_zoom_from_controls(self):
+        """Slot to handle reset zoom request specifically from PlotControlPanel's button."""
+        if (
+            hasattr(self, "pressure_plot_widget")
+            and self.pressure_plot_widget
+            and hasattr(self.top_ctrl, "plot_controls")
+            and self.top_ctrl.plot_controls
+        ):
+
+            auto_x = self.top_ctrl.plot_controls.auto_x_cb.isChecked()
+            auto_y = self.top_ctrl.plot_controls.auto_y_cb.isChecked()
+
+            self.pressure_plot_widget.reset_zoom(auto_x, auto_y)
+            log.debug(
+                f"Plot zoom reset triggered by button. AutoX: {auto_x}, AutoY: {auto_y}"
+            )
+        else:
+            log.warning("Cannot reset plot zoom, required UI components missing.")
 
     @pyqtSlot(str)
     def _handle_serial_status_change(self, status: str):
