@@ -206,7 +206,7 @@ class MainWindow(QMainWindow):
         th.resolution_params_updated.connect(self._update_camera_resolution_params)
 
         try:
-            cp.auto_exposure_toggled.disconnect()  # Disconnect all slots from this signal
+            cp.auto_exposure_toggled.disconnect()
             cp.exposure_changed.disconnect(th.set_exposure_time)
             cp.gain_changed.disconnect(th.set_gain)
             cp.fps_changed.disconnect(th.set_fps)
@@ -219,7 +219,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             log.error(f"Error during control signal disconnection: {e}")
 
-        # Corrected connection for auto_exposure_toggled
         cp.auto_exposure_toggled.connect(
             lambda checked: th.set_exposure_auto("Continuous" if checked else "Off")
         )
@@ -369,7 +368,8 @@ class MainWindow(QMainWindow):
                 self.camera_panel.stop_btn.setEnabled(False)
                 if hasattr(self.camera_panel, "enable_adjustment_controls"):
                     self.camera_panel.enable_adjustment_controls(False)
-                self.camera_panel.update_status_info()
+                # Corrected call to update_status_info
+                self.camera_panel.update_status_info({})  # Pass empty dict for defaults
 
             current_msg = self.statusBar().currentMessage()
             if current_msg.startswith("Attempting live feed") or (
@@ -1356,7 +1356,8 @@ class MainWindow(QMainWindow):
             self.camera_panel.stop_btn.setEnabled(False)
             if hasattr(self.camera_panel, "enable_adjustment_controls"):
                 self.camera_panel.enable_adjustment_controls(False)
-            self.camera_panel.update_status_info()
+            # Corrected call to update_status_info
+            self.camera_panel.update_status_info({})  # Pass empty dict for defaults
 
         self.statusBar().showMessage("Camera Error! Live feed stopped or failed.", 0)
 
