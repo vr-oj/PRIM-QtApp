@@ -111,7 +111,7 @@ class MainWindow(QMainWindow):
                 "IC4 SDK not fully configured. Use Camera > Setup...", 5000
             )
             if self.camera_panel:
-                self.camera_panel.setEnabled(False)
+                self.camera_panel.setEnabled(True)
 
         # self.showMaximized() # Already called later
         QTimer.singleShot(50, self._set_initial_splitter_sizes)
@@ -167,7 +167,7 @@ class MainWindow(QMainWindow):
                     "No CTI file selected. Camera functionality may be limited.", 5000
                 )
                 if self.camera_panel:
-                    self.camera_panel.setEnabled(False)
+                    self.camera_panel.setEnabled(True)
         elif is_ic4_fully_initialized():
             self.statusBar().showMessage(
                 f"IC4 initialized with CTI: {os.path.basename(load_app_setting(SETTING_CTI_PATH, ''))}",
@@ -339,7 +339,7 @@ class MainWindow(QMainWindow):
         ):  # This connects frame_ready, error, and new status/param signals
             log.error("Failed to connect camera signals for SDKCameraThread.")
             if self.camera_panel:
-                self.camera_panel.setEnabled(False)
+                self.camera_panel.setEnabled(True)
             return
 
         log.info(f"Starting SDKCameraThread for {camera_identifier}...")
@@ -357,7 +357,7 @@ class MainWindow(QMainWindow):
                 "IC4 SDK not configured. Use Camera menu...", 5000
             )
             if self.camera_panel:
-                self.camera_panel.setEnabled(False)
+                self.camera_panel.setEnabled(True)
             return
 
         log.info("Attempting to get first available IC4 camera...")
@@ -379,13 +379,13 @@ class MainWindow(QMainWindow):
                 log.warning("No IC4 devices found.")
                 self.statusBar().showMessage("No cameras found.", 5000)
                 if self.camera_panel:
-                    self.camera_panel.setEnabled(False)
+                    self.camera_panel.setEnabled(True)
                 return
         except Exception as e:
             log.error(f"Error enumerating IC4 devices: {e}")
             self.statusBar().showMessage(f"Error enumerating devices: {e}", 5000)
             if self.camera_panel:
-                self.camera_panel.setEnabled(False)
+                self.camera_panel.setEnabled(True)
             return
 
         first_device_info = available_devices[0]
@@ -414,7 +414,7 @@ class MainWindow(QMainWindow):
             log.error(f"Could not ID first camera: {camera_model_name}")
             self.statusBar().showMessage(f"Could not ID {camera_model_name}.", 5000)
             if self.camera_panel:
-                self.camera_panel.setEnabled(False)
+                self.camera_panel.setEnabled(True)
             return
 
         log.info(f"Found first camera: {camera_model_name} (ID: {camera_identifier}).")
@@ -443,7 +443,7 @@ class MainWindow(QMainWindow):
                 self, "Camera Start Error", f"Could not start {camera_model_name}:\n{e}"
             )
             if self.camera_panel:
-                self.camera_panel.setEnabled(False)
+                self.camera_panel.setEnabled(True)
 
     def _set_initial_control_states(self):  # Your existing method is mostly fine
         if self.top_ctrl:
@@ -454,7 +454,7 @@ class MainWindow(QMainWindow):
             self.stop_recording_action.setEnabled(False)
 
         if self.camera_panel:
-            self.camera_panel.setEnabled(False)  # Start disabled
+            self.camera_panel.setEnabled(True)  # Start disabled
             # Ensure the "Adjustments" tab controls are initially disabled if the panel itself is disabled.
             # Or, individual controls within CameraControlPanel can set their own initial enabled state.
             # For now, disabling the whole panel is sufficient at start.
@@ -685,7 +685,7 @@ class MainWindow(QMainWindow):
             self.camera_thread.deleteLater()
             self.camera_thread = None
             if self.camera_panel:
-                self.camera_panel.setEnabled(False)  # Ensure panel is disabled
+                self.camera_panel.setEnabled(True)  # Ensure panel is disabled
             QApplication.processEvents()  # Allow thread to clean up
             log.info("Existing camera thread stopped for CTI change.")
 
@@ -723,7 +723,7 @@ class MainWindow(QMainWindow):
                 )  # Try to get the camera running again
             else:
                 if self.camera_panel:
-                    self.camera_panel.setEnabled(False)
+                    self.camera_panel.setEnabled(True)
 
         except Exception as exc:
             log.exception(
@@ -1490,7 +1490,7 @@ class MainWindow(QMainWindow):
             self.camera_thread = None
 
         if self.camera_panel:
-            self.camera_panel.setEnabled(False)  # Disable controls
+            self.camera_panel.setEnabled(True)  # Disable controls
         self.statusBar().showMessage(
             "Camera Error! Live feed stopped or failed to start.",
             0,  # Persistent message
