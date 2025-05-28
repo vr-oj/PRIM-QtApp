@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QFormLayout,  # Added for the status tab
     QSizePolicy,  # Added for a spacer
 )
-from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot
 
 
 class CameraControlPanel(QWidget):
