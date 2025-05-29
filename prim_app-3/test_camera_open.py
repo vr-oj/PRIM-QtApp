@@ -1,9 +1,10 @@
-
 import imagingcontrol4 as ic4
+
 
 def test_camera_open():
     print("=== IC4 Camera Open Test ===")
     try:
+        ic4.Library.init()  # Required initialization
         devices = ic4.DeviceEnum.devices()
         if not devices:
             print("No devices found.")
@@ -27,8 +28,16 @@ def test_camera_open():
                 print(f"  - {prop.name}")
             grabber.device_close()
             print("Camera closed.")
+
     except Exception as e:
         print(f"Exception occurred: {e}")
+    finally:
+        try:
+            ic4.Library.exit()  # Clean up
+            print("Library exited cleanly.")
+        except:
+            pass
+
 
 if __name__ == "__main__":
     test_camera_open()
