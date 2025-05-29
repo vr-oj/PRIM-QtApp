@@ -172,6 +172,10 @@ class SDKCameraThread(QThread):
             self.grabber = ic4.Grabber()
             self.device = self.grabber.device_open(target_device_info)
             if not self.device:
+                log.debug(
+                    f"Attempting device_open() with: {target_device_info}, Serial: {target_device_info.serial}, Unique Name: {target_device_info.unique_name}"
+                )
+
                 raise RuntimeError("Device failed to open with grabber.device_open()")
             log.info(f"Device opened: {self.device}")
 
