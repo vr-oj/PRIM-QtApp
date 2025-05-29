@@ -9,8 +9,11 @@ link_directories(${IC4_DIR}/lib/x64)
 
 # Python and pybind11
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-include_directories(${pybind11_INCLUDE_DIR})
+include_directories("C:/Users/Tykocki Lab - PRIM/Documents/GitHub/PRIM-QtApp/.primenv/Lib/site-packages/pybind11/include")
 
 add_library(cambridge MODULE CameraManager.cpp bindings.cpp)
-target_link_libraries(cambridge PRIVATE pybind11::module ICImagingControl)
+
+# 🔥 REMOVE pybind11::module here 🔥
+target_link_libraries(cambridge PRIVATE ICImagingControl)
+
 set_target_properties(cambridge PROPERTIES PREFIX "" SUFFIX ".pyd")
