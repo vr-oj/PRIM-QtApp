@@ -119,6 +119,13 @@ class MainWindow(QMainWindow):
         log.info("MainWindow initialized.")
         self.showMaximized()
 
+        # Create and dock the camera control panel
+        self.camera_control_panel = CameraControlPanel(self)
+        self.camera_control_panel.camera_setting_changed.connect(
+            self.apply_camera_setting
+        )
+        self.addDockWidget(Qt.RightDockWidgetArea, self.camera_control_panel)
+
     def _set_initial_splitter_sizes(self):
         if self.bottom_split:
             w = self.bottom_split.width()
@@ -246,6 +253,15 @@ class MainWindow(QMainWindow):
 
         log.info(f"Starting simplified SDKCameraThread for {camera_identifier}...")
         self.camera_thread.start()
+
+        # TEMPORARY: Populate panel with hardcoded defaults until we fetch live ones
+        self.load_camera_info_to_panel(
+            model=self.camera_settings.get("cameraModel", "DMK 33UX250"),
+            pixel_format="Mono8",
+            width=640,
+            height=480,
+            fps=30,
+        )
 
         # Keep camera_panel disabled as we are not using its controls
         if self.camera_panel:
@@ -384,6 +400,21 @@ class MainWindow(QMainWindow):
         self.icon_recording_active = get_icon("recording_active.svg")
         self.icon_connect = get_icon("plug.svg")
         self.icon_disconnect = get_icon("plug_disconnect.svg")
+
+    def load_camera_info_to_panel(self, model, pixel_format, width, height, fps):
+        if hasattr(self, "camera_control_panel"):
+            self.camera_control_panel.load_camera_info(
+                model=model,
+                pix_fmt=pixel_format,
+                width=width,
+                height=height,
+                fps=fps,
+            )
+
+    def apply_camera_setting(self, name, value):
+        # Send property change to the camera thread
+        if hasattr(self, "camera_thread") and self.camera_thread:
+            self.camera_thread.set_camera_property(name, value)
 
     def _build_console_log_dock(self):
         self.dock_console = QDockWidget("Console Log", self)

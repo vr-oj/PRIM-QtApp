@@ -104,6 +104,30 @@ class SDKCameraThread(QThread):
                 f"Generic exception while setting {prop_name} to {readable_value_for_log}: {e_gen}"
             )
 
+    def set_camera_property(self, name, value):
+        if not hasattr(self, "device") or self.device is None:
+            log.warning(f"[SDKCameraThread] No active device to apply {name}")
+            return
+        if not hasattr(self, "grabber") or self.grabber is None:
+            log.warning("[SDKCameraThread] Grabber not initialized.")
+            return
+
+        try:
+            if name == "Resolution":
+                # Handle resolution in format "Width×Height"
+                w, h = map(int, value.split("×"))
+                self.device.set_property("Width", w)
+                self.device.set_property("Height", h)
+                log.info(f"[SDKCameraThread] Set resolution to {w}x{h}")
+            elif name == "FPS":
+                self.device.set_property("AcquisitionFrameRate", float(value))
+                log.info(f"[SDKCameraThread] Set FPS to {value}")
+            else:
+                self.device.set_property(name, value)
+                log.info(f"[SDKCameraThread] Set {name} to {value}")
+        except Exception as e:
+            log.warning(f"[SDKCameraThread] Failed to set {name}: {e}")
+
     def run(self):
         try:
             all_devices = ic4.DeviceEnum.devices()
@@ -147,6 +171,7 @@ class SDKCameraThread(QThread):
             log.info(f"SDKCameraThread opening: {target_device_info.model_name}")
             self.grabber = ic4.Grabber()
             self.grabber.device_open(target_device_info)
+            self.device = self.grabber.device
             self.pm = self.grabber.device_property_map
             log.info(f"Device {target_device_info.model_name} opened. PM acquired.")
 
