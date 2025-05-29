@@ -170,9 +170,9 @@ class SDKCameraThread(QThread):
 
             log.info(f"SDKCameraThread opening: {target_device_info.model_name}")
             self.grabber = ic4.Grabber()
-            self.grabber.device_open(target_device_info)
-            self.device = self.grabber.device()
-            self.pm = self.grabber.device_property_map
+            self.device = self.grabber.device_open(target_device_info)
+            self.pm = self.device.property_map
+
             log.info(f"Device {target_device_info.model_name} opened. PM acquired.")
 
             log.info("Attempting to configure camera properties...")
