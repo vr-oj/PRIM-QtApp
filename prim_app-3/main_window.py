@@ -124,11 +124,9 @@ class MainWindow(QMainWindow):
             self.apply_camera_setting
         )
 
-        dock = QDockWidget("Camera Controls", self)
-        dock.setWidget(self.camera_control_panel)
-        dock.setObjectName("CameraControlDock")  # For saving/restoring layout
-
-        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+        camera_dock = QDockWidget("Camera Controls", self)
+        camera_dock.setWidget(self.camera_control_panel)
+        camera_dock.setObjectName("CameraControlDock")
 
     def _set_initial_splitter_sizes(self):
         if self.bottom_split:
@@ -450,6 +448,12 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(self.camera_panel)
 
         self.top_ctrl = TopControlPanel(self)
+        self.camera_control_panel = CameraControlPanel(self)
+        self.camera_control_panel.camera_setting_changed.connect(
+            self.apply_camera_setting
+        )
+        top_layout.addWidget(self.camera_control_panel)
+
         top_layout.addWidget(self.top_ctrl)
 
         # Ensure plot_controls exists before trying to add it
