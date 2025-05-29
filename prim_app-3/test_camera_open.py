@@ -5,7 +5,7 @@ from imagingcontrol4.devenum import DeviceEnum
 
 print("=== Testing device_open() ===")
 Library.init(
-    "C:/Program Files/The Imaging Source Europe GmbH/IC4 GenTL Driver for USB3Vision Devices 1.4/bin/ic4-gentl-u3v_x64.cti"
+    "C:\Program Files\The Imaging Source Europe GmbH\IC4 GenTL Driver for USB3Vision Devices 1.4\bin\ic4-gentl-u3v_x64.cti"
 )
 
 devices = DeviceEnum.devices()
