@@ -3,17 +3,22 @@ project(cambridge)
 
 set(CMAKE_CXX_STANDARD 17)
 
+# IC4 SDK setup
 set(IC4_DIR "C:/Program Files/The Imaging Source Europe GmbH/ic4")
-include_directories(${IC4_DIR}/include)
-link_directories(${IC4_DIR}/lib/x64)
+include_directories("${IC4_DIR}/include")
+link_directories("${IC4_DIR}/lib/x64")
 
-# Python and pybind11
+# Python + pybind11 (now system-wide)
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-include_directories("C:/Users/Tykocki Lab - PRIM/Documents/GitHub/PRIM-QtApp/.primenv/Lib/site-packages/pybind11/include")
 
+# Direct include path to pybind11 headers
+include_directories("C:/Program Files/Python313/Lib/site-packages/pybind11/include")
+
+# Create the Python extension module
 add_library(cambridge MODULE CameraManager.cpp bindings.cpp)
 
-# 🔥 REMOVE pybind11::module here 🔥
+# Link with IC Imaging Control library
 target_link_libraries(cambridge PRIVATE ICImagingControl)
 
+# Output file format (.pyd on Windows)
 set_target_properties(cambridge PROPERTIES PREFIX "" SUFFIX ".pyd")

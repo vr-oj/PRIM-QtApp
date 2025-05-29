@@ -1,34 +1,44 @@
 // CameraManager.cpp
 #include "CameraManager.hpp"
-#include <ic4/ic4.h>
+#include <tisic4/tisic4.hpp>
 #include <iostream>
 
 class CameraManager::Impl
 {
 public:
-    ic4::Device device;
-    ic4::Sink sink;
-    ic4::Stream stream;
-    ic4::VideoFormat current_format;
+    tisic4::Device device;
+    std::shared_ptr<tisic4::Sink> sink;
+    tisic4::Stream stream;
+    tisic4::VideoFormat current_format;
     bool initialized = false;
 
     bool initialize(const std::string &model_hint)
     {
-        auto devices = ic4::Device::enumerate();
+        auto devices = tisic4::enumerateDevices();
         for (const auto &d : devices)
         {
-            if (model_hint.empty() || d.modelName.find(model_hint) != std::string::npos)
+            if (model_hint.empty() || d.modelName().find(model_hint) != std::string::npos)
             {
-                device = d.open();
-                current_format = device.videoFormats().front();
+                device = d.openDevice();
+                auto formats = device.availableVideoFormats();
+                if (formats.empty())
+                {
+                    std::cerr << "No video formats found!" << std::endl;
+                    return false;
+                }
+
+                current_format = formats.front();
                 device.setVideoFormat(current_format);
-                sink = device.sink();
-                stream = device.stream();
+
+                sink = tisic4::createSink(tisic4::SinkType::SystemMemory);
+                stream = device.createStream(sink);
                 stream.start();
+
                 initialized = true;
                 return true;
             }
         }
+        std::cerr << "No compatible device found.\n";
         return false;
     }
 
@@ -37,7 +47,8 @@ public:
         if (initialized)
         {
             stream.stop();
-            device.close();
+            device = tisic4::Device(); // release
+            sink.reset();
             initialized = false;
         }
     }
@@ -45,7 +56,7 @@ public:
     std::vector<std::string> list_formats()
     {
         std::vector<std::string> formats;
-        for (const auto &fmt : device.videoFormats())
+        for (const auto &fmt : device.availableVideoFormats())
         {
             formats.push_back(fmt.toString());
         }
@@ -54,12 +65,14 @@ public:
 
     std::vector<uint8_t> get_frame(int &width, int &height, int &channels)
     {
-        if (!initialized)
+        if (!initialized || !sink)
             return {};
-        auto buffer = sink.snap();
+
+        auto buffer = sink->snap();
         width = buffer.width();
         height = buffer.height();
         channels = buffer.pixelFormat().numChannels();
+
         return std::vector<uint8_t>(buffer.data(), buffer.data() + buffer.size());
     }
 };
