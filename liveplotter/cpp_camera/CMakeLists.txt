@@ -5,13 +5,15 @@ set(CMAKE_CXX_STANDARD 17)
 
 # IC4 SDK setup
 set(IC4_DIR "C:/Program Files/The Imaging Source Europe GmbH/ic4")
-include_directories("${IC4_DIR}/include")
+include_directories("C:/Program Files/The Imaging Source Europe GmbH/ic4/include/tisic4")
 link_directories("${IC4_DIR}/lib/x64")
 
 # Python + pybind11 (now system-wide)
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 
-# Direct include path to pybind11 headers
+# Python headers and pybind11
+include_directories("C:/Program Files/Python313/include")
+link_directories("C:/Program Files/Python313/libs")
 include_directories("C:/Program Files/Python313/Lib/site-packages/pybind11/include")
 
 # Create the Python extension module
