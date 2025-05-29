@@ -119,12 +119,16 @@ class MainWindow(QMainWindow):
         log.info("MainWindow initialized.")
         self.showMaximized()
 
-        # Create and dock the camera control panel
         self.camera_control_panel = CameraControlPanel(self)
         self.camera_control_panel.camera_setting_changed.connect(
             self.apply_camera_setting
         )
-        self.addDockWidget(Qt.RightDockWidgetArea, self.camera_control_panel)
+
+        dock = QDockWidget("Camera Controls", self)
+        dock.setWidget(self.camera_control_panel)
+        dock.setObjectName("CameraControlDock")  # For saving/restoring layout
+
+        self.addDockWidget(Qt.RightDockWidgetArea, dock)
 
     def _set_initial_splitter_sizes(self):
         if self.bottom_split:

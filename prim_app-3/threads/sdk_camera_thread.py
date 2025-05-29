@@ -171,7 +171,7 @@ class SDKCameraThread(QThread):
             log.info(f"SDKCameraThread opening: {target_device_info.model_name}")
             self.grabber = ic4.Grabber()
             self.grabber.device_open(target_device_info)
-            self.device = self.grabber.device
+            self.device = self.grabber.device_handle
             self.pm = self.grabber.device_property_map
             log.info(f"Device {target_device_info.model_name} opened. PM acquired.")
 
