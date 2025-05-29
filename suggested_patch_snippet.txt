@@ -1,0 +1,10 @@
+
+try:
+    self.device = self.grabber.device_open(target_device_info)
+    if not self.device:
+        log.error(f"device_open() returned None for: {target_device_info}")
+        raise RuntimeError(f"device_open() failed for {target_device_info.model_name} (SN: {target_device_info.serial})")
+except Exception as e_open:
+    log.exception(f"Exception during device_open: {e_open}")
+    self.camera_error.emit(str(e_open), "OPEN_FAIL")
+    return
