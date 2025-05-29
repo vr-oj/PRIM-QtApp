@@ -1,104 +1,137 @@
-# PRIM-QTAPP/prim_app/ui/control_panels/camera_control_panel.py
+import logging
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QLabel,
+    QFormLayout,
     QComboBox,
+    QSpinBox,
     QDoubleSpinBox,
-    QSlider,
-    QCheckBox,
+    QTabWidget,
+    QGroupBox,
     QHBoxLayout,
-    QPushButton,
 )
-from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtCore import pyqtSignal
+
+log = logging.getLogger(__name__)
 
 
 class CameraControlPanel(QWidget):
-    """
-    Panel for live camera settings: resolution, pixel format, auto exposure,
-    exposure time, gain, and frame rate.
-    """
-
-    resolution_changed = pyqtSignal(str)
-    pixel_format_changed = pyqtSignal(str)
-    auto_exposure_toggled = pyqtSignal(bool)
-    exposure_changed = pyqtSignal(float)
-    gain_changed = pyqtSignal(float)
-    fps_changed = pyqtSignal(float)
-    start_stream = pyqtSignal()
-    stop_stream = pyqtSignal()
+    # Signal emitted when user changes a camera setting
+    camera_setting_changed = pyqtSignal(str, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumWidth(220)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(3, 3, 3, 3)
-        layout.setSpacing(5)
+        self.device_model = None
+        self.controls = {}
+        self._build_ui()
 
-        # Title
-        title = QLabel("Camera Settings")
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
+    def _build_ui(self):
+        layout = QVBoxLayout()
+        self.tabs = QTabWidget()
 
-        # Resolution dropdown
-        layout.addWidget(QLabel("Resolution:"))
-        self.res_combo = QComboBox()
-        self.res_combo.currentTextChanged.connect(self.resolution_changed)
-        layout.addWidget(self.res_combo)
+        self.info_tab = QWidget()
+        self.settings_tab = QWidget()
 
-        # Pixel format dropdown
-        layout.addWidget(QLabel("Pixel Format:"))
-        self.pix_combo = QComboBox()
-        self.pix_combo.currentTextChanged.connect(self.pixel_format_changed)
-        layout.addWidget(self.pix_combo)
+        self._build_info_tab()
+        self._build_settings_tab()
+
+        self.tabs.addTab(self.info_tab, "Camera Info")
+        self.tabs.addTab(self.settings_tab, "Adjust Settings")
+
+        layout.addWidget(self.tabs)
+        self.setLayout(layout)
+
+    def _build_info_tab(self):
+        layout = QFormLayout()
+
+        self.label_model = QLabel("-")
+        self.label_pixel_format = QLabel("-")
+        self.label_resolution = QLabel("-")
+        self.label_fps = QLabel("-")
+
+        layout.addRow("Model:", self.label_model)
+        layout.addRow("Pixel Format:", self.label_pixel_format)
+        layout.addRow("Resolution:", self.label_resolution)
+        layout.addRow("FPS:", self.label_fps)
+
+        self.info_tab.setLayout(layout)
+
+    def _build_settings_tab(self):
+        layout = QVBoxLayout()
+        form = QFormLayout()
 
         # Auto Exposure
-        self.auto_exp_cb = QCheckBox("Auto Exposure")
-        self.auto_exp_cb.stateChanged.connect(
-            lambda state: self.auto_exposure_toggled.emit(state == Qt.Checked)
+        self.auto_exposure = QComboBox()
+        self.auto_exposure.addItems(["Off", "Continuous"])
+        self.auto_exposure.currentTextChanged.connect(
+            lambda val: self._emit_change("ExposureAuto", val)
         )
-        layout.addWidget(self.auto_exp_cb)
+        self.auto_exposure.currentTextChanged.connect(self._toggle_exposure_controls)
+        form.addRow("Auto Exposure:", self.auto_exposure)
+        self.controls["ExposureAuto"] = self.auto_exposure
 
-        # Manual Exposure time
-        exp_layout = QHBoxLayout()
-        exp_layout.addWidget(QLabel("Exposure (ms):"))
-        self.exp_spin = QDoubleSpinBox()
-        self.exp_spin.setRange(0.1, 60000)
-        self.exp_spin.setSingleStep(0.1)
-        self.exp_spin.valueChanged.connect(self.exposure_changed)
-        exp_layout.addWidget(self.exp_spin)
-        layout.addLayout(exp_layout)
+        # Gain (adjustable if auto exposure is off)
+        self.gain = QSpinBox()
+        self.gain.setRange(0, 100)
+        self.gain.setEnabled(False)
+        self.gain.valueChanged.connect(lambda val: self._emit_change("Gain", val))
+        form.addRow("Gain:", self.gain)
+        self.controls["Gain"] = self.gain
 
-        # Gain slider
-        gain_layout = QVBoxLayout()
-        gain_label = QLabel("Gain:")
-        gain_layout.addWidget(gain_label)
-        self.gain_slider = QSlider(Qt.Horizontal)
-        self.gain_slider.setRange(0, 100)
-        self.gain_slider.setTickInterval(5)
-        self.gain_slider.setTickPosition(QSlider.TicksBelow)
-        self.gain_slider.valueChanged.connect(
-            lambda v: self.gain_changed.emit(float(v))
+        # Brightness
+        self.brightness = QSpinBox()
+        self.brightness.setRange(0, 255)
+        self.brightness.setEnabled(False)
+        self.brightness.valueChanged.connect(
+            lambda val: self._emit_change("Brightness", val)
         )
-        gain_layout.addWidget(self.gain_slider)
-        layout.addLayout(gain_layout)
+        form.addRow("Brightness:", self.brightness)
+        self.controls["Brightness"] = self.brightness
 
-        # Frame rate
-        layout.addWidget(QLabel("Frame Rate (FPS):"))
-        self.fps_spin = QDoubleSpinBox()
-        self.fps_spin.setRange(0.1, 240.0)
-        self.fps_spin.setSingleStep(0.1)
-        self.fps_spin.valueChanged.connect(self.fps_changed)
-        layout.addWidget(self.fps_spin)
+        # Resolution
+        self.resolution = QComboBox()
+        self.resolution.currentTextChanged.connect(
+            lambda val: self._emit_change("Resolution", val)
+        )
+        form.addRow("Resolution:", self.resolution)
+        self.controls["Resolution"] = self.resolution
 
-        # Start/Stop Live buttons
-        btn_layout = QHBoxLayout()
-        self.start_btn = QPushButton("Start Live")
-        self.start_btn.clicked.connect(self.start_stream)
-        self.stop_btn = QPushButton("Stop Live")
-        self.stop_btn.clicked.connect(self.stop_stream)
-        btn_layout.addWidget(self.start_btn)
-        btn_layout.addWidget(self.stop_btn)
-        layout.addLayout(btn_layout)
+        # FPS
+        self.fps = QComboBox()
+        self.fps.addItems(["15", "30", "60"])
+        self.fps.currentTextChanged.connect(
+            lambda val: self._emit_change("FPS", int(val))
+        )
+        form.addRow("FPS:", self.fps)
+        self.controls["FPS"] = self.fps
 
-        layout.addStretch()
+        layout.addLayout(form)
+        self.settings_tab.setLayout(layout)
+
+    def _toggle_exposure_controls(self, mode):
+        is_manual = mode == "Off"
+        self.gain.setEnabled(is_manual)
+        self.brightness.setEnabled(is_manual)
+
+    def _emit_change(self, name, value):
+        log.debug(f"[CameraControlPanel] User changed {name} -> {value}")
+        self.camera_setting_changed.emit(name, value)
+
+    def load_camera_info(self, model, pix_fmt, width, height, fps):
+        self.device_model = model
+        self.label_model.setText(model)
+        self.label_pixel_format.setText(pix_fmt)
+        self.label_resolution.setText(f"{width} × {height}")
+        self.label_fps.setText(f"{fps:.1f} FPS")
+
+        # Populate resolution list if known
+        if model == "DMK 33UX250":
+            res_list = [f"{w}×{h}" for w, h in [(2448, 2048), (1280, 1024), (640, 480)]]
+        elif model == "DMK 33UP5000":
+            res_list = [f"{w}×{h}" for w, h in [(2592, 2048), (1280, 720), (640, 480)]]
+        else:
+            res_list = ["640×480"]
+
+        self.resolution.clear()
+        self.resolution.addItems(res_list)
