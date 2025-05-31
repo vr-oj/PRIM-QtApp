@@ -1304,8 +1304,8 @@ class MainWindow(QMainWindow):
         m, s = divmod(rem, 60)
         self.app_session_time_label.setText(f"Session: {h:02}:{m:02}:{s:02}")
 
-    @pyqtSlot(str, str)
-    def _on_camera_error(self, msg: str, code: str):
+    @pyqtSlot(str)
+    def _on_camera_error(self, msg):
         full_msg = f"Camera Error: {msg}" + (
             f" (SDK Code: {code})" if code and code != "None" else ""
         )
