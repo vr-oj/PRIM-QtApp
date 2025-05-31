@@ -34,7 +34,7 @@ class TopControlPanel(QWidget):
         # Layout
         layout = QHBoxLayout(self)
         layout.setContentsMargins(3, 1, 3, 1)
-        layout.setSpacing(4)
+        layout.setSpacing(5)
 
         # PRIM Device status box
         status_box = QGroupBox("PRIM Device Status")

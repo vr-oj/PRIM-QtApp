@@ -1,8 +1,9 @@
+# PRIM-QTAPP/prim_app/threads/sdk_camera_thread.py
 import re
 import numpy as np
 import logging
 import imagingcontrol4 as ic4
-from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot, QMutex, QWaitCondition
+from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 
 log = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class MinimalSinkListener(ic4.QueueSinkListener):
 
     def sink_disconnected(self, sink: ic4.QueueSink):
         log.debug(f"Listener '{self.owner_name}': Sink disconnected from {sink}.")
+        pass
 
     def sink_property_changed(
         self, sink: ic4.QueueSink, property_name: str, userdata: any
@@ -40,17 +42,11 @@ class MinimalSinkListener(ic4.QueueSinkListener):
 class SDKCameraThread(QThread):
     frame_ready = pyqtSignal(QImage, object)
     camera_error = pyqtSignal(str, str)
-    camera_info_updated = pyqtSignal(dict)
-    exposure_params_updated = pyqtSignal(dict)
-    gain_params_updated = pyqtSignal(dict)
-    fps_params_updated = pyqtSignal(dict)
-    pixel_format_options_updated = pyqtSignal(list, str)
-    resolution_params_updated = pyqtSignal(dict)
 
     def __init__(self, device_name=None, fps=10, parent=None):
         super().__init__(parent)
         self.device_identifier = device_name
-        self.initial_target_fps = float(fps)
+        self.target_fps = float(fps)
         self._stop_requested = False
         self.grabber = None
         self.pm = None
@@ -58,654 +54,250 @@ class SDKCameraThread(QThread):
             f"SDKThreadListener_{self.device_identifier or 'default'}"
         )
         log.info(
-            f"SDKCameraThread initialized for '{self.device_identifier}', initial_target_fps: {self.initial_target_fps}"
+            f"SDKCameraThread (Simplified) initialized for device_identifier: '{self.device_identifier}', target_fps (informational): {self.target_fps}"
         )
-
-    def _is_property_writable(self, prop_item, prop_name_for_log="Property"):
-        if not prop_item:
-            return False
-
-        # Prioritize direct boolean attributes as per ic4.Property documentation
-        is_writable_direct = getattr(prop_item, "is_writable", None)
-        if is_writable_direct is not None:
-            # log.debug(f"Property {prop_name_for_log}: is_writable attribute = {is_writable_direct}")
-            return is_writable_direct
-
-        is_read_only_direct = getattr(prop_item, "is_read_only", None)
-        if is_read_only_direct is not None:
-            # log.debug(f"Property {prop_name_for_log}: is_read_only attribute = {is_read_only_direct}, so writable = {not is_read_only_direct}")
-            return not is_read_only_direct
-
-        # Fallback to flags if direct attributes are inconclusive or missing
-        try:
-            if hasattr(prop_item, "flags"):
-                # log.debug(f"Property {prop_name_for_log}: checking flags {prop_item.flags}")
-                is_writable_via_flag = bool(prop_item.flags & ic4.PropFlags.IS_WRITABLE)
-                # Check if IS_READ_ONLY is set, which would override IS_WRITABLE if both were somehow set
-                is_readonly_via_flag = bool(
-                    prop_item.flags & ic4.PropFlags.IS_READ_ONLY
-                )
-                if is_readonly_via_flag:
-                    return False  # Explicitly read-only by flag
-                return is_writable_via_flag  # Return based on writable flag
-            else:
-                log.warning(f"Property {prop_name_for_log} has no 'flags' attribute.")
-        except Exception as e:
-            log.warning(
-                f"Error checking writability for {prop_name_for_log} using flags: {e}."
-            )
-
-        log.warning(
-            f"Writability for {prop_name_for_log} could not be reliably determined. Assuming not writable."
-        )
-        return False
 
     def _attempt_set_property(
         self, prop_name: str, value_to_set: any, readable_value_for_log: str = None
     ):
+        """
+        Attempts to set a camera property. Relies on exceptions for non-writable or invalid values.
+        """
         if readable_value_for_log is None:
             readable_value_for_log = str(value_to_set)
+
         if not self.pm:
             log.error(f"PropertyMap not available. Cannot set {prop_name}.")
-            return False
+            return
 
-        prop_item = None
+        prop_item = None  # Define for use in exception logging if find itself fails
         try:
             prop_item = self.pm.find(prop_name)
             if prop_item:
-                if self._is_property_writable(prop_item, prop_name):
-                    log.info(f"Setting {prop_name} to {readable_value_for_log}...")
-                    self.pm.set_value(prop_name, value_to_set)
-                    log.info(f"Property {prop_name} set successfully.")
-                    return True
-                else:
-                    log.warning(
-                        f"Property {prop_name} is not writable (determined by helper)."
-                    )
-                    return False
-            else:
-                log.warning(
-                    f"Property {prop_name} not found in PropertyMap (find returned None)."
-                )
-                return False
-        except ic4.IC4Exception as e_ic4:
-            if e_ic4.code == ic4.ErrorCode.GenICamFeatureNotFound:
-                log.warning(
-                    f"Feature {prop_name} not found on this camera when attempting to set (GenICamFeatureNotFound)."
-                )
-            else:
-                log.error(
-                    f"IC4Exception setting {prop_name} to {readable_value_for_log}: {e_ic4} (Code: {e_ic4.code})"
-                )
-        except Exception as e:
-            log.error(
-                f"Generic error setting {prop_name} to {readable_value_for_log}: {e}"
-            )
-        return False
-
-    def _safe_get_attr(self, prop_item, attr_name, default=None):
-        if prop_item and hasattr(prop_item, attr_name):
-            try:
-                return getattr(prop_item, attr_name)
-            except Exception as e_attr:
-                log.debug(
-                    f"Could not read attr {attr_name} from {prop_item.name if hasattr(prop_item,'name') else 'property'}: {e_attr}"
-                )
-        return default
-
-    def _safe_read_value(self, prop_item, as_str=False, default=None):
-        if not prop_item:
-            return default
-        try:
-            if as_str:
-                if hasattr(prop_item, "string"):
-                    return prop_item.string
-                else:
-                    return str(prop_item.value)
-            return prop_item.value
-        except Exception as e_val:
-            prop_name_for_log = getattr(prop_item, "name", "property")
-            prop_type_for_log = getattr(prop_item, "type_name", "N/A")
-            log.debug(
-                f"Could not read value from {prop_name_for_log} (type: {prop_type_for_log}): {e_val}"
-            )
-        return default
-
-    def _query_and_emit_camera_parameters(self):
-        if not self.pm:
-            log.warning("Cannot query camera parameters: PropertyMap not available.")
-            return
-
-        info = {}
-        cam_props_for_info = [
-            ("model", "DeviceModelName", True, "N/A"),
-            ("serial", "DeviceSerialNumber", True, "N/A"),
-            ("width", "Width", False, 0),
-            ("height", "Height", False, 0),
-            ("pixel_format", "PixelFormat", True, "N/A"),
-            ("fps", "AcquisitionFrameRate", False, 0.0),
-        ]
-        for key, name, is_str, default_val in cam_props_for_info:
-            prop = None
-            try:
-                prop = self.pm.find(name)
-            except ic4.IC4Exception as e_find:
-                if e_find.code == ic4.ErrorCode.GenICamFeatureNotFound:
-                    log.debug(
-                        f"Property '{name}' not found during query for camera info."
-                    )
-                else:
-                    log.warning(
-                        f"IC4Exception finding property '{name}' for info: {e_find}"
-                    )
-            info[key] = self._safe_read_value(prop, as_str=is_str, default=default_val)
-        self.camera_info_updated.emit(info)
-        log.debug(f"Emitted camera_info_updated: {info}")
-
-        exp_params = {
-            "auto_options": [],
-            "auto_current": "Off",
-            "auto_is_writable": False,
-            "time_current_us": 0.0,
-            "time_min_us": 1.0,
-            "time_max_us": 1000000.0,
-            "time_is_writable": False,
-        }
-        try:
-            p_auto_exp = self.pm.find("ExposureAuto")
-            if p_auto_exp:
-                exp_params["auto_is_writable"] = self._is_property_writable(
-                    p_auto_exp, "ExposureAuto"
-                )
-                exp_params["auto_current"] = self._safe_read_value(
-                    p_auto_exp, as_str=True, default="Off"
-                )
-                available_entries = self._safe_get_attr(
-                    p_auto_exp, "available_entries", []
-                )
-                exp_params["auto_options"] = [
-                    entry.name for entry in available_entries if hasattr(entry, "name")
-                ]
-        except ic4.IC4Exception as e:
-            log.debug(f"ExposureAuto not found or error: {e}")
-
-        try:
-            p_exp_time = self.pm.find("ExposureTime")
-            if p_exp_time:
-                exp_params["time_is_writable"] = self._is_property_writable(
-                    p_exp_time, "ExposureTime"
-                )
-                if (
-                    exp_params["auto_current"] != "Off"
-                    and exp_params["auto_is_writable"]
-                ):
-                    exp_params["time_is_writable"] = False
-                exp_params["time_current_us"] = self._safe_read_value(
-                    p_exp_time, default=0.0
-                )
-                exp_params["time_min_us"] = self._safe_get_attr(
-                    p_exp_time, "min", self._safe_get_attr(p_exp_time, "minimum", 1.0)
-                )
-                exp_params["time_max_us"] = self._safe_get_attr(
-                    p_exp_time,
-                    "max",
-                    self._safe_get_attr(p_exp_time, "maximum", 1000000.0),
-                )
-        except ic4.IC4Exception as e:
-            log.debug(f"ExposureTime not found or error: {e}")
-        self.exposure_params_updated.emit(exp_params)
-        log.debug(f"Emitted exposure_params_updated: {exp_params}")
-
-        gain_params = {
-            "current_db": 0.0,
-            "min_db": 0.0,
-            "max_db": 48.0,
-            "is_writable": False,
-        }
-        try:
-            p_gain = self.pm.find("Gain")
-            if p_gain:
-                gain_params["is_writable"] = self._is_property_writable(p_gain, "Gain")
-                gain_params["current_db"] = self._safe_read_value(p_gain, default=0.0)
-                gain_params["min_db"] = self._safe_get_attr(
-                    p_gain, "min", self._safe_get_attr(p_gain, "minimum", 0.0)
-                )
-                gain_params["max_db"] = self._safe_get_attr(
-                    p_gain, "max", self._safe_get_attr(p_gain, "maximum", 48.0)
-                )
-        except ic4.IC4Exception as e:
-            log.debug(f"Gain not found or error: {e}")
-        self.gain_params_updated.emit(gain_params)
-        log.debug(f"Emitted gain_params_updated: {gain_params}")
-
-        fps_params = {
-            "current_fps": 0.0,
-            "min_fps": 0.1,
-            "max_fps": 200.0,
-            "is_writable": False,
-        }
-        try:
-            p_fps = self.pm.find("AcquisitionFrameRate")
-            if p_fps:
-                fps_params["is_writable"] = self._is_property_writable(
-                    p_fps, "AcquisitionFrameRate"
-                )
-                fps_params["current_fps"] = self._safe_read_value(p_fps, default=0.0)
-                fps_params["min_fps"] = self._safe_get_attr(
-                    p_fps, "min", self._safe_get_attr(p_fps, "minimum", 0.1)
-                )
-                fps_params["max_fps"] = self._safe_get_attr(
-                    p_fps, "max", self._safe_get_attr(p_fps, "maximum", 200.0)
-                )
-        except ic4.IC4Exception as e:
-            log.debug(f"AcquisitionFrameRate not found or error: {e}")
-        self.fps_params_updated.emit(fps_params)
-        log.debug(f"Emitted fps_params_updated: {fps_params}")
-
-        pf_options = []
-        current_pf_str = "N/A"
-        try:
-            p_pf = self.pm.find("PixelFormat")
-            if p_pf:
-                current_pf_str = self._safe_read_value(p_pf, as_str=True, default="N/A")
-                available_pf_entries = self._safe_get_attr(
-                    p_pf, "available_entries", []
-                )
-                pf_options = [
-                    entry.name
-                    for entry in available_pf_entries
-                    if hasattr(entry, "name")
-                ]
-        except ic4.IC4Exception as e:
-            log.debug(f"PixelFormat not found or error: {e}")
-        self.pixel_format_options_updated.emit(pf_options, current_pf_str)
-        log.debug(
-            f"Emitted pixel_format_options_updated: {pf_options}, current: {current_pf_str}"
-        )
-
-        res_params = {
-            "w_min": 0,
-            "w_max": 4096,
-            "w_curr": 0,
-            "w_inc": 1,
-            "h_min": 0,
-            "h_max": 3000,
-            "h_curr": 0,
-            "h_inc": 1,
-            "w_writable": False,
-            "h_writable": False,
-        }
-        try:
-            p_width = self.pm.find("Width")
-            if p_width:
-                res_params["w_writable"] = self._is_property_writable(p_width, "Width")
-                res_params["w_curr"] = self._safe_read_value(p_width, default=0)
-                res_params["w_min"] = self._safe_get_attr(
-                    p_width, "min", self._safe_get_attr(p_width, "minimum", 0)
-                )
-                res_params["w_max"] = self._safe_get_attr(
-                    p_width, "max", self._safe_get_attr(p_width, "maximum", 4096)
-                )
-                res_params["w_inc"] = self._safe_get_attr(p_width, "increment", 4)
-        except ic4.IC4Exception as e:
-            log.debug(f"Width property not found or error: {e}")
-
-        try:
-            p_height = self.pm.find("Height")
-            if p_height:
-                res_params["h_writable"] = self._is_property_writable(
-                    p_height, "Height"
-                )
-                res_params["h_curr"] = self._safe_read_value(p_height, default=0)
-                res_params["h_min"] = self._safe_get_attr(
-                    p_height, "min", self._safe_get_attr(p_height, "minimum", 0)
-                )
-                res_params["h_max"] = self._safe_get_attr(
-                    p_height, "max", self._safe_get_attr(p_height, "maximum", 3000)
-                )
-                res_params["h_inc"] = self._safe_get_attr(p_height, "increment", 4)
-        except ic4.IC4Exception as e:
-            log.debug(f"Height property not found or error: {e}")
-        self.resolution_params_updated.emit(res_params)
-        log.debug(f"Emitted resolution_params_updated: {res_params}")
-
-    @pyqtSlot(str)
-    def set_exposure_auto(self, mode: str):
-        if self.pm:
-            if self._attempt_set_property("ExposureAuto", mode, mode):
-                self._query_and_emit_camera_parameters()
-        else:
-            log.warning("ExposureAuto property unavailable or PM not initialized.")
-
-    @pyqtSlot(float)
-    def set_exposure_time(self, us: float):
-        if self.pm:
-            if self._attempt_set_property("ExposureTime", float(us), f"{us}µs"):
-                self._query_and_emit_camera_parameters()
-        else:
-            log.warning("ExposureTime property unavailable or PM not initialized.")
-
-    @pyqtSlot(float)
-    def set_gain(self, value_db: float):
-        if self.pm:
-            if self._attempt_set_property("Gain", float(value_db), f"{value_db}dB"):
-                self._query_and_emit_camera_parameters()
-        else:
-            log.warning("Gain property unavailable or PM not initialized.")
-
-    @pyqtSlot(float)
-    def set_fps(self, value_fps: float):
-        if self.pm:
-            try:
-                p_fps_enable = self.pm.find("AcquisitionFrameRateEnable")
-                if p_fps_enable and self._is_property_writable(
-                    p_fps_enable, "AcquisitionFrameRateEnable"
-                ):
-                    if not self._safe_read_value(p_fps_enable, default=False):
-                        log.info(
-                            "Attempting to enable AcquisitionFrameRateEnable before setting FPS."
-                        )
-                        self._attempt_set_property("AcquisitionFrameRateEnable", True)
-            except ic4.IC4Exception as e_find_fps_enable:
-                if e_find_fps_enable.code == ic4.ErrorCode.GenICamFeatureNotFound:
-                    log.info(
-                        "'AcquisitionFrameRateEnable' not found when trying to set FPS. Will attempt to set FPS directly."
-                    )
-                else:
-                    log.warning(
-                        f"IC4Exception checking 'AcquisitionFrameRateEnable' in set_fps: {e_find_fps_enable}"
-                    )
-
-            if self._attempt_set_property(
-                "AcquisitionFrameRate", float(value_fps), f"{value_fps}FPS"
-            ):
-                self._query_and_emit_camera_parameters()
-        else:
-            log.warning(
-                "AcquisitionFrameRate property unavailable or PM not initialized."
-            )
-
-    @pyqtSlot(str)
-    def set_pixel_format(self, format_str: str):
-        if self.pm:
-            log.info(
-                f"Attempting to set PixelFormat to: {format_str}. This may require stream restart if active."
-            )
-            if self._attempt_set_property("PixelFormat", format_str, format_str):
-                self._query_and_emit_camera_parameters()
-        else:
-            log.warning("PixelFormat property unavailable or PM not initialized.")
-
-    @pyqtSlot(str)
-    def set_resolution_from_string(self, res_str: str):
-        if self.pm:
-            try:
-                w_str, h_str = res_str.lower().split("x")
-                width = int(w_str)
-                height = int(h_str)
                 log.info(
-                    f"Attempting to set Resolution to: {width}x{height}. This may require stream restart if active."
+                    f"Attempting to set {prop_name} to {readable_value_for_log}..."
                 )
-                width_ok = self._attempt_set_property("Width", width, str(width))
-                height_ok = self._attempt_set_property("Height", height, str(height))
+                self.pm.set_value(prop_name, value_to_set)
 
-                if width_ok or height_ok:
-                    self._query_and_emit_camera_parameters()
-            except ValueError:
-                log.error(f"Could not parse resolution string: {res_str}")
-            except Exception as e:
-                log.error(f"Error setting resolution from string '{res_str}': {e}")
-        else:
-            log.warning(
-                "Resolution properties (Width/Height) unavailable or PM not initialized."
+                read_back_value_str = "(readback N/A)"
+                try:
+                    read_back_value_str = self.pm.get_value_str(prop_name)
+                except Exception as e_rb:
+                    log.warning(
+                        f"Set {prop_name}, but failed to read back string value: {e_rb}"
+                    )
+                log.info(
+                    f"Successfully set {prop_name}. Read back: {read_back_value_str}"
+                )
+            else:
+                log.warning(f"{prop_name} property not found on camera.")
+        except ic4.IC4Exception as e_prop:
+            log.error(
+                f"IC4Exception while setting {prop_name} to {readable_value_for_log}: {e_prop} (Code: {e_prop.code})"
             )
-
-    @pyqtSlot(int)
-    def set_width(self, width: int):
-        if self.pm:
-            log.info(
-                f"Attempting to set Width to: {width}. This may require stream restart if active."
+        except AttributeError as ae:
+            log.error(
+                f"AttributeError operating on {prop_name} (prop_item type: {type(prop_item)}): {ae}"
             )
-            if self._attempt_set_property("Width", width, str(width)):
-                self._query_and_emit_camera_parameters()
-
-    @pyqtSlot(int)
-    def set_height(self, height: int):
-        if self.pm:
-            log.info(
-                f"Attempting to set Height to: {height}. This may require stream restart if active."
+        except Exception as e_gen:
+            log.error(
+                f"Generic exception while setting {prop_name} to {readable_value_for_log}: {e_gen}"
             )
-            if self._attempt_set_property("Height", height, str(height)):
-                self._query_and_emit_camera_parameters()
 
     def run(self):
         try:
-            devices = ic4.DeviceEnum.devices()
-            if not devices:
-                raise RuntimeError("No IC4 devices found.")
-            target_device = None
+            all_devices = ic4.DeviceEnum.devices()
+            if not all_devices:
+                raise RuntimeError("No camera devices found by IC4 DeviceEnum")
+
+            target_device_info = None
             if self.device_identifier:
-                for d_info in devices:
-                    dev_model = getattr(d_info, "model_name", "")
-                    dev_serial = getattr(
-                        d_info, "serial_number", getattr(d_info, "serial", "")
+                for dev_info in all_devices:
+                    current_serial = (
+                        dev_info.serial
+                        if hasattr(dev_info, "serial") and dev_info.serial
+                        else ""
                     )
-                    dev_unique = getattr(d_info, "unique_name", "")
-                    log.debug(
-                        f"Checking available device: Model='{dev_model}', SN='{dev_serial}', Unique='{dev_unique}' against target '{self.device_identifier}'"
+                    current_unique_name = (
+                        dev_info.unique_name
+                        if hasattr(dev_info, "unique_name") and dev_info.unique_name
+                        else ""
+                    )
+                    current_model_name = (
+                        dev_info.model_name if hasattr(dev_info, "model_name") else ""
                     )
                     if (
-                        self.device_identifier == dev_serial
-                        or self.device_identifier == dev_unique
-                        or self.device_identifier == dev_model
+                        self.device_identifier == current_serial
+                        or self.device_identifier == current_unique_name
+                        or self.device_identifier == current_model_name
                     ):
-                        target_device = d_info
+                        target_device_info = dev_info
                         log.info(
-                            f"Found matching device in SDKCameraThread: Model={dev_model}, SN={dev_serial}, ID={dev_unique}"
+                            f"Found device: {current_model_name}, SN:{current_serial}, Unique:{current_unique_name}"
                         )
                         break
-                if not target_device:
-                    available_dev_strings = []
-                    for dev_idx, dev_item in enumerate(devices):
-                        m = getattr(dev_item, "model_name", "N/A")
-                        s = getattr(
-                            dev_item,
-                            "serial_number",
-                            getattr(dev_item, "serial", "N/A"),
-                        )
-                        u = getattr(dev_item, "unique_name", "N/A")
-                        available_dev_strings.append(
-                            f"  Dev{dev_idx}: Model='{m}', SN='{s}', Unique='{u}'"
-                        )
-                    log.error(
-                        f"Camera '{self.device_identifier}' not found in SDKCameraThread. Available devices:\n"
-                        + "\n".join(available_dev_strings)
-                    )
-                    raise RuntimeError(
-                        f"Camera '{self.device_identifier}' not found in SDKCameraThread."
-                    )
+                if not target_device_info:
+                    raise RuntimeError(f"Camera '{self.device_identifier}' not found.")
+            elif all_devices:
+                target_device_info = all_devices[0]
+                log.info(f"Using first device: {target_device_info.model_name}")
             else:
-                target_device = devices[0]
-                log.info(
-                    "No specific device_identifier given, using first available camera."
-                )
+                raise RuntimeError("No devices available.")
 
+            log.info(f"SDKCameraThread opening: {target_device_info.model_name}")
             self.grabber = ic4.Grabber()
-            self.grabber.device_open(target_device)
+            self.grabber.device_open(target_device_info)
             self.pm = self.grabber.device_property_map
-            dev_display_name = getattr(
-                target_device,
-                "model_name",
-                getattr(
-                    target_device,
-                    "unique_name",
-                    (
-                        self.device_identifier
-                        if self.device_identifier
-                        else "Unknown Device"
-                    ),
-                ),
-            )
-            log.info(f"Device '{dev_display_name}' opened. PropertyMap acquired.")
+            log.info(f"Device {target_device_info.model_name} opened. PM acquired.")
 
-            initial_configs = [
-                ("AcquisitionMode", "Continuous"),
-                ("TriggerMode", "Off"),
-            ]
-            try:
-                pf_prop = self.pm.find("PixelFormat")
-                if pf_prop:
-                    available_pfs = [
-                        entry.name
-                        for entry in self._safe_get_attr(
-                            pf_prop, "available_entries", []
-                        )
-                        if hasattr(entry, "name")
-                    ]
-                    if "Mono8" in available_pfs:
-                        initial_configs.insert(0, ("PixelFormat", "Mono8"))
-                    elif available_pfs:
-                        initial_configs.insert(0, ("PixelFormat", available_pfs[0]))
-            except ic4.IC4Exception as e_find_pf:
-                if e_find_pf.code == ic4.ErrorCode.GenICamFeatureNotFound:
-                    log.info("PixelFormat property not found during initial config.")
-                else:
-                    log.warning(
-                        f"IC4Exception finding PixelFormat for initial config: {e_find_pf}"
-                    )
-
-            try:
-                p_fps_enable = self.pm.find("AcquisitionFrameRateEnable")
-                if p_fps_enable and self._is_property_writable(
-                    p_fps_enable, "AcquisitionFrameRateEnable"
-                ):
-                    if not self._safe_read_value(p_fps_enable, default=False):
-                        self._attempt_set_property("AcquisitionFrameRateEnable", True)
-            except ic4.IC4Exception as e_find_fps_enable:
-                if e_find_fps_enable.code == ic4.ErrorCode.GenICamFeatureNotFound:
-                    log.info(
-                        "'AcquisitionFrameRateEnable' property not found during initial config. Will attempt to set FPS directly."
-                    )
-                else:
-                    log.warning(
-                        f"IC4Exception finding 'AcquisitionFrameRateEnable' for initial_config: {e_find_fps_enable}"
-                    )
-
-            initial_configs.append(("AcquisitionFrameRate", self.initial_target_fps))
-
-            for prop_name, val_to_set in initial_configs:
-                self._attempt_set_property(prop_name, val_to_set)
-
-            self._query_and_emit_camera_parameters()
+            log.info("Attempting to configure camera properties...")
+            self._attempt_set_property("PixelFormat", ic4.PixelFormat.Mono8, "Mono8")
+            self._attempt_set_property("Width", 640, "640")
+            self._attempt_set_property("Height", 480, "480")
+            self._attempt_set_property("AcquisitionMode", "Continuous", "Continuous")
+            self._attempt_set_property("TriggerMode", "Off", "Off")
+            log.info("Finished attempt to configure camera properties.")
 
             self.sink = ic4.QueueSink(listener=self.sink_listener)
+            log.info("QueueSink initialized.")
+            log.debug("Calling stream_setup...")
             self.grabber.stream_setup(self.sink)
-            log.info("Stream setup complete.")
+            log.info("stream_setup completed.")
 
             if not self.grabber.is_acquisition_active:
+                log.warning(
+                    "Acquisition NOT active post stream_setup. Attempting explicit start..."
+                )
                 self.grabber.acquisition_start()
-                log.info("Acquisition started.")
+                if not self.grabber.is_acquisition_active:
+                    log.error("Explicit acquisition_start FAILED.")
+                    raise RuntimeError("Camera acquisition failed to start.")
+                else:
+                    log.info("Explicit acquisition_start SUCCEEDED.")
+            else:
+                log.info("Acquisition IS active post stream_setup.")
+
+            log.info("Stream active. Pausing briefly...")
+            QThread.msleep(250)
+            log.info("Pause complete. Entering frame loop...")
 
             while not self._stop_requested:
+                buf = None
                 try:
-                    buf = self.sink.try_pop_output_buffer()
-                    if not buf:
-                        QThread.msleep(10)
-                        continue
-
-                    # Corrected: use is_valid() as a method
-                    if not buf.is_valid():
-                        log.warning("Received invalid buffer from sink.")
+                    buf = self.sink.pop_output_buffer()
+                    if buf:
+                        # log.debug(f"Popped buffer: {type(buf)}") # Reduce log spam
+                        arr = buf.numpy_wrap()
+                        q_image_format = QImage.Format_Grayscale8
+                        if arr.ndim == 3 and arr.shape[2] == 3:
+                            q_image_format = QImage.Format_BGR888
+                        elif arr.ndim == 2 or (arr.ndim == 3 and arr.shape[2] == 1):
+                            q_image_format = QImage.Format_Grayscale8
+                        else:
+                            log.warning(f"Unsupported arr shape: {arr.shape}. Skip.")
+                            if buf:
+                                buf.release()  # Ensure release if skipping
+                            continue
+                        final_arr = (
+                            arr[..., 0]
+                            if (
+                                arr.ndim == 3
+                                and q_image_format == QImage.Format_Grayscale8
+                                and arr.shape[2] == 1
+                            )
+                            else arr
+                        )
+                        q_image = QImage(
+                            final_arr.data,
+                            final_arr.shape[1],
+                            final_arr.shape[0],
+                            final_arr.strides[0],
+                            q_image_format,
+                        )
+                        self.frame_ready.emit(q_image.copy(), arr.copy())
                         buf.release()
-                        continue
-
-                    arr = buf.numpy_wrap()
-                    img_format = QImage.Format_Invalid
-                    if arr.ndim == 2:
-                        img_format = QImage.Format_Grayscale8
-                    elif arr.ndim == 3 and arr.shape[2] == 3:
-                        img_format = QImage.Format_BGR888
-                    elif arr.ndim == 3 and arr.shape[2] == 1:
-                        img_format = QImage.Format_Grayscale8
-                        arr = arr.squeeze(axis=2)
-
-                    if img_format != QImage.Format_Invalid:
-                        qimg = QImage(
-                            arr.data,
-                            arr.shape[1],
-                            arr.shape[0],
-                            arr.strides[0],
-                            img_format,
-                        )
-                        self.frame_ready.emit(qimg.copy(), arr.copy())
                     else:
-                        log.warning(
-                            f"Unsupported numpy array shape for QImage: {arr.shape}"
-                        )
-                    buf.release()
-                except ic4.IC4Exception as e:
-                    if (
-                        e.code == ic4.ErrorCode.Timeout
-                        or e.code == ic4.ErrorCode.NoData
-                    ):
+                        # pop_output_buffer returned None or falsy
+                        # log.debug("pop_output_buffer returned None/falsy. Checking stop.") # Reduce log spam
+                        if self._stop_requested:
+                            log.debug("Stop requested, buffer None, exit loop.")
+                            break
                         QThread.msleep(10)
+                        continue  # Brief pause if no data
+                except ic4.IC4Exception as e:
+                    # log.warning(f"IC4Exception in loop: {e} (Code: {e.code})") # Reduce log spam
+                    if e.code in [ic4.ErrorCode.Timeout, ic4.ErrorCode.NoData]:
+                        if self._stop_requested:
+                            break
+                        QThread.msleep(5 if e.code == ic4.ErrorCode.NoData else 1)
                         continue
-                    log.error(
-                        f"IC4Exception in frame processing loop: {e} (Code: {e.code})"
-                    )
-                    self.camera_error.emit(str(e), str(e.code))
+                    else:
+                        log.error(
+                            f"Unhandled IC4Exception in loop: {e} (Code:{e.code}), breaking."
+                        )
+                        self.camera_error.emit(str(e), str(e.code))
+                        break
+                except AttributeError as ae:
+                    log.error(f"AttributeError in loop: {ae}")
+                    self.camera_error.emit(str(ae), "ATTR_ERR_BUF")
+                    if buf and hasattr(buf, "release"):
+                        try:
+                            buf.release()
+                        except Exception as e_rls:
+                            log.error(f"Err releasing buf after AttrErr: {e_rls}")
                     break
                 except Exception as e_loop:
-                    log.exception(f"Generic error in frame processing loop: {e_loop}")
-                    self.camera_error.emit(str(e_loop), type(e_loop).__name__)
+                    log.exception(f"Generic exception in loop: {e_loop}")
+                    self.camera_error.emit(str(e_loop), "LOOP_ERR")
+                    if buf and hasattr(buf, "release"):
+                        try:
+                            buf.release()
+                        except Exception as e_rls:
+                            log.error(f"Err releasing buf after GenExc: {e_rls}")
                     break
-            log.info("Exited frame processing loop.")
+            log.info("SDKCameraThread: Exited acquisition loop.")
+
         except RuntimeError as e_rt:
-            log.error(f"RuntimeError during SDKCameraThread execution: {e_rt}")
-            self.camera_error.emit(str(e_rt), type(e_rt).__name__)
+            log.error(f"RuntimeError in SDKCameraThread.run: {e_rt}")
+            self.camera_error.emit(str(e_rt), "RUNTIME_SETUP_ERROR")
         except ic4.IC4Exception as e_ic4_setup:
             log.error(
-                f"IC4Exception during SDKCameraThread setup: {e_ic4_setup} (Code: {e_ic4_setup.code})"
-            )
+                f"IC4Exception during setup phase: {e_ic4_setup} (Code:{e_ic4_setup.code})"
+            )  # Corrected line number in log analysis
             self.camera_error.emit(str(e_ic4_setup), str(e_ic4_setup.code))
-        except Exception as e_setup:
-            log.exception(f"Unexpected error during SDKCameraThread setup: {e_setup}")
-            self.camera_error.emit(str(e_setup), type(e_setup).__name__)
+        except Exception as ex_outer:
+            log.exception(f"Outer unhandled exception in run: {ex_outer}")
+            self.camera_error.emit(str(ex_outer), type(ex_outer).__name__)
         finally:
-            log.info("SDKCameraThread.run() is finishing. Cleaning up...")
-            try:
-                if self.grabber:
-                    if (
-                        hasattr(self.grabber, "is_acquisition_active")
-                        and self.grabber.is_acquisition_active
-                    ):
-                        log.info("Stopping acquisition...")
+            log.debug("SDKCameraThread.run() finally block.")
+            if self.grabber:
+                try:
+                    if self.grabber.is_acquisition_active:
+                        log.debug("Stopping acquisition (finally)...")
                         self.grabber.acquisition_stop()
-                    if (
-                        hasattr(self.grabber, "is_device_open")
-                        and self.grabber.is_device_open
-                    ):
-                        log.info("Closing device...")
+                except Exception as e:
+                    log.error(f"Finally: Error stopping acquisition: {e}")
+                try:
+                    if self.grabber.is_device_open:
+                        log.debug("Closing device (finally)...")
                         self.grabber.device_close()
-            except Exception as e_cleanup:
-                log.error(f"Error during grabber cleanup: {e_cleanup}")
-
+                except Exception as e:
+                    log.error(f"Finally: Error closing device: {e}")
             self.grabber = None
             self.pm = None
-            log.info("SDKCameraThread cleanup complete. Thread finished.")
+            log.info("SDKCameraThread: run method finished cleanup.")
 
     def stop(self):
-        log.info(f"Stop requested for SDKCameraThread ({self.device_identifier}).")
+        log.info(f"SDKCameraThread.stop() for {self.device_identifier}.")
         self._stop_requested = True
         if self.isRunning():
+            log.debug(f"Waiting for {self.device_identifier} to finish...")
             if not self.wait(3000):
-                log.warning(
-                    "SDKCameraThread did not stop in time (3s), attempting terminate."
-                )
+                log.warning(f"{self.device_identifier} unresponsive, terminating.")
                 self.terminate()
-                if not self.wait(500):
-                    log.error("SDKCameraThread failed to terminate.")
+                self.wait(500)
             else:
-                log.info("SDKCameraThread stopped gracefully.")
+                log.info(f"{self.device_identifier} finished gracefully.")
         else:
-            log.info("SDKCameraThread was not running when stop was called.")
+            log.info(f"{self.device_identifier} not running when stop called.")
+        log.info(f"SDKCameraThread.stop() completed for {self.device_identifier}.")
