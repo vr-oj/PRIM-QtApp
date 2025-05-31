@@ -35,8 +35,7 @@ import prim_app
 from utils.app_settings import (
     save_app_setting,
     load_app_setting,
-    SETTING_CTI_PATH,
-    SETTING_LAST_CAMERA_SERIAL,
+    SETTING_LAST_CAMERA_INDEX,
     save_app_setting,  # Ensure this was the fix for the import error
 )
 from utils.config import (
@@ -129,8 +128,8 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
 
-        # self.showMaximized() # Already called later
         QTimer.singleShot(50, self._set_initial_splitter_sizes)
+        QTimer.singleShot(100, self._start_opencv_camera_thread)
         self._set_initial_control_states()
         log.info("MainWindow initialized.")
         self.showMaximized()
@@ -166,36 +165,28 @@ class MainWindow(QMainWindow):
         log.info("OpenCV camera signals connected (frame_ready, camera_error).")
         return False  # Indicate success
 
-    def _start_opencv_camera_thread(
-        self, camera_index=0
-    ):  # camera_index can be from config or UI
-        if self.camera_thread and self.camera_thread.isRunning():
-            log.info("Stopping existing camera thread before starting new one.")
+    def _start_opencv_camera_thread(self, camera_index=0):
+        if self.camera_thread:
             self.camera_thread.stop()
-            # self.camera_thread.deleteLater() # OpenCVThread might not need deleteLater if managed well
-            self.camera_thread = None
-            QApplication.processEvents()
+            self.camera_thread.wait()
 
-        log.info(f"Creating OpenCVCameraThread for device index: {camera_index}")
-        self.camera_thread = OpenCVCameraThread(device_index=camera_index, parent=self)
-
-        if self._connect_camera_signals():  # Ensure this is adapted for OpenCV
-            log.error("Failed to connect OpenCV camera signals.")
-            # if self.camera_thread: self.camera_thread.deleteLater() # Cleanup
-            self.camera_thread = None
-            # if self.camera_panel: self.camera_panel.setEnabled(False) # If using camera_panel
-            return
-
-        log.info(f"Starting OpenCVCameraThread for device index {camera_index}...")
-        self.camera_thread.start()
-
-        # self.camera_control_panel.setEnabled(False) # Or based on what OpenCV supports
-        # if self.camera_panel: self.camera_panel.setEnabled(False) # Keep disabled if not used
-
-        self.statusBar().showMessage(
-            f"Attempting to start live feed from OpenCV camera index: {camera_index}",
-            5000,
+        self.camera_thread = OpenCVCameraThread(camera_index)
+        self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
+        self.camera_thread.camera_properties_updated.connect(
+            self.camera_control_panel.update_camera_properties
         )
+        self.camera_control_panel.property_changed.connect(
+            self.camera_thread.set_camera_property
+        )
+        self.camera_thread.camera_info_reported.connect(self._report_camera_info_to_log)
+
+        self.camera_thread.start()
+        self.camera_control_panel.setEnabled(True)
+        log.info("OpenCV camera thread started.")
+
+    def _report_camera_info_to_log(self, info_dict):
+        for key, val in info_dict.items():
+            log.info(f"[OpenCV Camera Info] {key}: {val}")
 
     def _initialize_opencv_camera(self):  # New or renamed method
         log.info("Attempting to initialize OpenCV camera...")
@@ -1087,7 +1078,7 @@ class MainWindow(QMainWindow):
             if self.camera_thread.isRunning():
                 try:
                     log.info("Stopping camera thread due to reported error...")
-                    self.camera_thread.stop()  # stop() in SDKCameraThread includes wait()
+                    self.camera_thread.stop()
                 except Exception as e_stop_cam_err:
                     log.error(
                         f"Error trying to stop camera thread after it reported an error: {e_stop_cam_err}"
@@ -1119,22 +1110,19 @@ class MainWindow(QMainWindow):
                 "Confirm Exit While Recording",
                 "A recording session is currently active. Are you sure you want to stop recording and exit?",
                 QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,  # Default to No
+                QMessageBox.No,
             )
             if reply == QMessageBox.Yes:
                 log.info("User chose to stop recording and exit.")
-                self._trigger_stop_recording()  # This will attempt to save data and clean up the worker
-                # Wait for the recording worker to actually finish after _trigger_stop_recording
-                if self._recording_worker and not self._recording_worker.wait(
-                    5000
-                ):  # Give it time
-                    log.warning(
-                        "Recording worker did not finish cleanly during app close. Forcing cleanup."
-                    )
-                    # _trigger_stop_recording should have set self._recording_worker to None if successful
+                self._trigger_stop_recording()
+                if self._recording_worker and hasattr(self._recording_worker, "wait"):
+                    if not self._recording_worker.wait(5000):
+                        log.warning(
+                            "Recording worker did not finish cleanly. Forcing cleanup."
+                        )
             else:
                 log.info("User cancelled exit due to active recording.")
-                event.ignore()  # Prevent window from closing
+                event.ignore()
                 return
 
         # Gracefully stop all threads
@@ -1142,64 +1130,54 @@ class MainWindow(QMainWindow):
             (
                 "CameraThread",
                 self.camera_thread,
-                (
-                    getattr(self.camera_thread, "stop", None)
-                    if self.camera_thread
-                    else None
-                ),
+                getattr(self.camera_thread, "stop", None),
             ),
             (
                 "SerialThread",
                 self._serial_thread,
-                (
-                    getattr(self._serial_thread, "stop", None)
-                    if self._serial_thread
-                    else None
-                ),
+                getattr(self._serial_thread, "stop", None),
             ),
-            # Recording worker should have been handled by the block above if recording was active.
-            # If it wasn't active, or if _trigger_stop_recording failed to nullify it, handle here.
             (
                 "RecordingWorker",
                 self._recording_worker,
-                (
-                    getattr(self._recording_worker, "stop_worker", None)
-                    if self._recording_worker
-                    else None
-                ),
+                getattr(self._recording_worker, "stop_worker", None),
             ),
         ]
 
         for name, thread_instance, stop_method in threads_to_clean:
-            if thread_instance:  # Check if instance exists
-                if thread_instance.isRunning():
+            if thread_instance:
+                if (
+                    hasattr(thread_instance, "isRunning")
+                    and thread_instance.isRunning()
+                ):
                     log.info(
-                        f"Stopping {name} ({thread_instance.__class__.__name__}) on application close..."
+                        f"Stopping {name} ({thread_instance.__class__.__name__})..."
                     )
-                    if stop_method:
-                        try:
+                    try:
+                        if stop_method:
                             stop_method()
-                            # Wait for the thread to finish. Adjust timeout as necessary.
-                            wait_timeout = 3000 if name == "RecordingWorker" else 1500
-                            if not thread_instance.wait(wait_timeout):
-                                log.warning(
-                                    f"{name} ({thread_instance.__class__.__name__}) did not stop gracefully, terminating."
-                                )
-                                thread_instance.terminate()  # Force terminate if unresponsive
-                                thread_instance.wait(500)  # Brief wait for termination
-                        except Exception as e_stop_final:
-                            log.error(
-                                f"Exception while stopping {name} during close: {e_stop_final}"
+                        else:
+                            log.warning(
+                                f"No stop method for {name}, attempting terminate."
                             )
-                    else:  # No stop method, or it's None
-                        log.warning(
-                            f"No standard stop method found for {name}, attempting terminate if running."
-                        )
-                        thread_instance.terminate()
-                        thread_instance.wait(500)
 
-                thread_instance.deleteLater()  # Schedule for Qt's event loop to delete
-                # Set the attribute to None to reflect cleanup
+                        timeout = 3000 if name == "RecordingWorker" else 1500
+                        if hasattr(
+                            thread_instance, "wait"
+                        ) and not thread_instance.wait(timeout):
+                            log.warning(
+                                f"{name} did not stop gracefully, forcing terminate."
+                            )
+                            if hasattr(thread_instance, "terminate"):
+                                thread_instance.terminate()
+                                thread_instance.wait(500)
+                    except Exception as e:
+                        log.error(f"Exception while stopping {name}: {e}")
+
+                if hasattr(thread_instance, "deleteLater"):
+                    thread_instance.deleteLater()
+
+                # Nullify
                 if name == "CameraThread":
                     self.camera_thread = None
                 elif name == "SerialThread":
@@ -1207,11 +1185,8 @@ class MainWindow(QMainWindow):
                 elif name == "RecordingWorker":
                     self._recording_worker = None
             else:
-                log.debug(f"Thread {name} was already None or cleaned up.")
+                log.debug(f"{name} was already None.")
 
-        QApplication.processEvents()  # Allow Qt to process deleteLater events
-
-        log.info(
-            "All threads processed for cleanup. Proceeding with application close."
-        )
+        QApplication.processEvents()
+        log.info("All threads cleaned up. Proceeding with close.")
         super().closeEvent(event)
