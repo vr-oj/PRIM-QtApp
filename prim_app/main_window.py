@@ -81,11 +81,50 @@ class MainWindow(QMainWindow):
         self.camera_panel = None
         self.camera_view = None
         self.bottom_split = None
-        self.camera_settings = {}  # Still useful for storing basic info like serial
+        self.camera_settings = {}
+        self.camera_control_panel = CameraControlPanel()  # NEW
+        self.camera_control_panel.setEnabled(False)
+
+        self._init_paths_and_icons()
+        self._build_console_log_dock()
+        self._build_central_widget_layout()
+        self._build_menus()
+        self._build_main_toolbar()
+        self._build_status_bar()
+
+        self.top_ctrl.x_axis_limits_changed.connect(
+            self.pressure_plot_widget.set_manual_x_limits
+        )
+        self.top_ctrl.y_axis_limits_changed.connect(
+            self.pressure_plot_widget.set_manual_y_limits
+        )
+        self.top_ctrl.export_plot_image_requested.connect(
+            self.pressure_plot_widget.export_as_image
+        )
+        self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
+
+        self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
+
+        self._check_and_prompt_for_cti_on_startup()
+        if is_ic4_fully_initialized():
+            QTimer.singleShot(0, self._initialize_camera_on_startup)
+        else:
+            self.statusBar().showMessage(
+                "IC4 SDK not fully configured. Use Camera > Setup...", 5000
+            )
+            if self.camera_panel:
+                self.camera_panel.setEnabled(False)
+
+        QTimer.singleShot(50, self._set_initial_splitter_sizes)
+        self._set_initial_control_states()
+        log.info("MainWindow initialized.")
+        self.showMaximized()
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
         self._build_central_widget_layout()  # camera_panel is created here
+        self.camera_control_panel.setEnabled(False)
+        self.main_splitter.addWidget(self.camera_control_panel)
         self._build_menus()
         self._build_main_toolbar()
         self._build_status_bar()
@@ -206,15 +245,49 @@ class MainWindow(QMainWindow):
         log.info("Simplified camera signals connected (frame_ready, camera_error).")
         return False  # Indicate success
 
-    def _start_sdk_camera_thread(
-        self, camera_identifier, fps, initial_settings=None
-    ):  # initial_settings will be None
+    def _start_sdk_camera_thread(self, camera_identifier, fps, initial_settings=None):
         if self.camera_thread and self.camera_thread.isRunning():
             log.info("Stopping existing camera thread before starting new one.")
-            self.camera_thread.stop()  # stop() should handle waiting
+            self.camera_thread.stop()
             self.camera_thread.deleteLater()
             self.camera_thread = None
-            QApplication.processEvents()  # Allow deletion to process
+            QApplication.processEvents()
+
+        log.info(
+            f"Creating SDKCameraThread for device: '{camera_identifier}', Target FPS: {fps}"
+        )
+        self.camera_thread = SDKCameraThread(
+            device_serial=camera_identifier, parent=self
+        )
+        self.camera_settings["cameraSerialPattern"] = camera_identifier
+
+        if self._connect_camera_signals():
+            log.error(
+                "Failed to connect simplified camera signals for SDKCameraThread."
+            )
+            self.camera_thread.deleteLater()
+            self.camera_thread = None
+            if self.camera_panel:
+                self.camera_panel.setEnabled(False)
+            return
+
+        self.camera_thread.camera_properties_updated.connect(
+            self.camera_control_panel.update_camera_properties
+        )
+        self.camera_control_panel.property_changed.connect(
+            self.camera_thread.set_camera_property
+        )
+
+        log.info(f"Starting SDKCameraThread for {camera_identifier}...")
+        self.camera_thread.start()
+
+        if self.camera_panel:
+            self.camera_panel.setEnabled(False)
+
+        model_display = self.camera_settings.get("cameraModel", camera_identifier)
+        self.statusBar().showMessage(
+            f"Attempting to start basic live feed: {model_display}", 5000
+        )
 
         log.info(
             f"Creating SDKCameraThread for device: '{camera_identifier}', Target FPS: {fps} (FPS setting will be ignored by simplified thread)"
@@ -451,10 +524,10 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
         fm = mb.addMenu("&File")
         exp_data_act = QAction(
-            "Export Plot &Data (CSV)…", self, triggered=self._export_plot_data_as_csv
+            "Export Plot &Data (CSV)â¦", self, triggered=self._export_plot_data_as_csv
         )
         fm.addAction(exp_data_act)
-        exp_img_act = QAction("Export Plot &Image…", self)
+        exp_img_act = QAction("Export Plot &Imageâ¦", self)
         if hasattr(self, "pressure_plot_widget") and self.pressure_plot_widget:
             exp_img_act.triggered.connect(self.pressure_plot_widget.export_as_image)
         fm.addAction(exp_img_act)
@@ -522,7 +595,7 @@ class MainWindow(QMainWindow):
 
         cam_menu = mb.addMenu("&Camera")
         setup_cam_act = QAction(
-            "Setup Camera… (Simplified)", self, triggered=self._run_camera_setup
+            "Setup Cameraâ¦ (Simplified)", self, triggered=self._run_camera_setup
         )
         cam_menu.addAction(setup_cam_act)
         change_cti_act = QAction(
@@ -620,7 +693,7 @@ class MainWindow(QMainWindow):
         self.serial_port_combobox.setToolTip("Select Serial Port")
         self.serial_port_combobox.setMinimumWidth(200)
         self.serial_port_combobox.addItem(
-            "🔌 Simulated Data", QVariant()
+            "ð Simulated Data", QVariant()
         )  # Ensure QVariant for None/empty
         ports = list_serial_ports()
         if ports:
@@ -1068,7 +1141,7 @@ class MainWindow(QMainWindow):
                 self.pressure_plot_widget.clear_plot()  # Clear plot for new recording session
 
             self.statusBar().showMessage(
-                f"🔴 REC: {session_name_safe}", 0  # Persistent message (0 timeout)
+                f"ð´ REC: {session_name_safe}", 0  # Persistent message (0 timeout)
             )
             log.info(f"Recording started successfully for session: {session_name_safe}")
 
@@ -1089,7 +1162,7 @@ class MainWindow(QMainWindow):
                 self._recording_worker = None
             self._is_recording = False
             self._update_recording_actions_enable_state()  # Reset UI
-            if self.statusBar().currentMessage().startswith("🔴 REC:"):
+            if self.statusBar().currentMessage().startswith("ð´ REC:"):
                 self.statusBar().clearMessage()
             return
 
@@ -1101,7 +1174,7 @@ class MainWindow(QMainWindow):
             if self._is_recording:  # If flag is somehow true without worker, reset it
                 self._is_recording = False
             self._update_recording_actions_enable_state()
-            if self.statusBar().currentMessage().startswith("🔴 REC:"):
+            if self.statusBar().currentMessage().startswith("ð´ REC:"):
                 self.statusBar().clearMessage()
             return
 
@@ -1201,7 +1274,7 @@ class MainWindow(QMainWindow):
 
             self._update_recording_actions_enable_state()  # Update UI button states
 
-            if self.statusBar().currentMessage().startswith("🔴 REC:"):
+            if self.statusBar().currentMessage().startswith("ð´ REC:"):
                 self.statusBar().clearMessage()  # Clear persistent recording message
             log.info("Recording fully stopped and UI updated.")
 
