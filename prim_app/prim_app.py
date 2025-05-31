@@ -7,6 +7,7 @@ import logging
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication, QLoggingCategory
 from PyQt5.QtGui import QIcon, QSurfaceFormat
+from utils.config import APP_NAME, APP_VERSION as CONFIG_APP_VERSION
 
 import logging
 
@@ -67,11 +68,6 @@ def load_processed_qss(path):
 
 
 def main_app_entry():
-    # Initial log before any major operations
-    log.info(
-        f"Application starting... Name: {APP_NAME}, Version: {CONFIG_APP_VERSION if 'CONFIG_APP_VERSION' in globals() else 'N/A'}"
-    )
-
     # --- SET DEFAULT OPENGL SURFACE FORMAT ---
     # This should be done BEFORE the QApplication instance is created.
     fmt = QSurfaceFormat()
