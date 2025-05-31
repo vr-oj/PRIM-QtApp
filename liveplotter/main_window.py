@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QLabel,
     QVBoxLayout,
+    QHBoxLayout,
     QWidget,
     QSplitter,
     QSizePolicy,
