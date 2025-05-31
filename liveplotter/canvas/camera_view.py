@@ -1,9 +1,9 @@
 # camera_view.py
 
+from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout
+from PyQt5.QtGui import QPixmap, QImage
+import numpy as np
 import logging
-from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy
-from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtCore import Qt, pyqtSlot
 
 log = logging.getLogger(__name__)
 
@@ -11,25 +11,24 @@ log = logging.getLogger(__name__)
 class CameraView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.label = QLabel("Camera Feed")
+        self.label.setStyleSheet("background-color: black;")
+        self.label.setScaledContents(True)
 
-        self.label = QLabel("Camera View", self)
-        self.label.setAlignment(Qt.AlignCenter)
-        self.label.setStyleSheet("background-color: black; color: white;")
-        self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout = QVBoxLayout()
         layout.addWidget(self.label)
         self.setLayout(layout)
 
-    @pyqtSlot(QImage)
-    def set_frame(self, image: QImage):
-        if not image or image.isNull():
-            log.warning("Received null image in CameraView.")
+    def set_frame(self, frame: np.ndarray):
+        """Called by the camera thread to update the displayed image."""
+        if frame.ndim == 2:
+            fmt = QImage.Format_Grayscale8
+        elif frame.shape[2] == 3:
+            fmt = QImage.Format_RGB888
+        else:
+            log.warning("Unsupported frame format.")
             return
-        pixmap = QPixmap.fromImage(image)
-        self.label.setPixmap(
-            pixmap.scaled(
-                self.label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-        )
+
+        h, w = frame.shape[:2]
+        image = QImage(frame.data, w, h, frame.strides[0], fmt)
+        self.label.setPixmap(QPixmap.fromImage(image))

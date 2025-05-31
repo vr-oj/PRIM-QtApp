@@ -1,94 +1,65 @@
 # camera_control_panel.py
 
-import logging
 from PyQt5.QtWidgets import (
     QWidget,
+    QVBoxLayout,
     QLabel,
     QComboBox,
-    QSlider,
-    QVBoxLayout,
     QHBoxLayout,
-    QTabWidget,
-    QCheckBox,
-    QFormLayout,
+    QPushButton,
 )
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import pyqtSignal
+import logging
 
 log = logging.getLogger(__name__)
 
 
 class CameraControlPanel(QWidget):
-    resolution_changed = pyqtSignal(str)
-    fps_changed = pyqtSignal(float)
-    auto_exposure_toggled = pyqtSignal(bool)
-    gain_changed = pyqtSignal(int)
-    brightness_changed = pyqtSignal(int)
+    device_selected = pyqtSignal(str)
+    resolution_selected = pyqtSignal(str)
+    trigger_start_stream = pyqtSignal()
+    trigger_stop_stream = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.init_ui()
 
-    def init_ui(self):
-        layout = QVBoxLayout(self)
-        tabs = QTabWidget()
+        self.device_selector = QComboBox()
+        self.res_selector = QComboBox()
+        self.start_button = QPushButton("Start")
+        self.stop_button = QPushButton("Stop")
 
-        tabs.addTab(self._create_format_tab(), "Format")
-        tabs.addTab(self._create_exposure_tab(), "Exposure")
-        tabs.addTab(self._create_gain_tab(), "Gain/Brightness")
+        layout = QVBoxLayout()
+        layout.setSpacing(4)
+        layout.setContentsMargins(4, 4, 4, 4)
 
-        layout.addWidget(tabs)
+        device_layout = QHBoxLayout()
+        device_layout.addWidget(QLabel("Camera:"))
+        device_layout.addWidget(self.device_selector)
+        layout.addLayout(device_layout)
+
+        res_layout = QHBoxLayout()
+        res_layout.addWidget(QLabel("Resolution:"))
+        res_layout.addWidget(self.res_selector)
+        layout.addLayout(res_layout)
+
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.start_button)
+        button_layout.addWidget(self.stop_button)
+        layout.addLayout(button_layout)
+
         self.setLayout(layout)
 
-    def _create_format_tab(self):
-        widget = QWidget()
-        form = QFormLayout()
+        self.device_selector.currentTextChanged.connect(self.device_selected.emit)
+        self.res_selector.currentTextChanged.connect(self.resolution_selected.emit)
+        self.start_button.clicked.connect(self.trigger_start_stream.emit)
+        self.stop_button.clicked.connect(self.trigger_stop_stream.emit)
 
-        self.resolution_combo = QComboBox()
-        self.resolution_combo.currentTextChanged.connect(self.resolution_changed.emit)
-        form.addRow(QLabel("Resolution:"), self.resolution_combo)
+    def set_devices(self, devices: list[str]):
+        self.device_selector.clear()
+        self.device_selector.addItems(devices)
+        log.debug(f"Device list updated: {devices}")
 
-        self.fps_combo = QComboBox()
-        self.fps_combo.addItems(["15", "30", "60", "120"])
-        self.fps_combo.currentTextChanged.connect(
-            lambda val: self.fps_changed.emit(float(val))
-        )
-        form.addRow(QLabel("FPS:"), self.fps_combo)
-
-        widget.setLayout(form)
-        return widget
-
-    def _create_exposure_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout()
-
-        self.auto_exposure_checkbox = QCheckBox("Auto Exposure")
-        self.auto_exposure_checkbox.stateChanged.connect(
-            lambda state: self.auto_exposure_toggled.emit(state == Qt.Checked)
-        )
-        layout.addWidget(self.auto_exposure_checkbox)
-        layout.addStretch()
-        widget.setLayout(layout)
-        return widget
-
-    def _create_gain_tab(self):
-        widget = QWidget()
-        form = QFormLayout()
-
-        self.gain_slider = QSlider(Qt.Horizontal)
-        self.gain_slider.setMinimum(0)
-        self.gain_slider.setMaximum(100)
-        self.gain_slider.valueChanged.connect(self.gain_changed.emit)
-        form.addRow(QLabel("Gain:"), self.gain_slider)
-
-        self.brightness_slider = QSlider(Qt.Horizontal)
-        self.brightness_slider.setMinimum(0)
-        self.brightness_slider.setMaximum(100)
-        self.brightness_slider.valueChanged.connect(self.brightness_changed.emit)
-        form.addRow(QLabel("Brightness:"), self.brightness_slider)
-
-        widget.setLayout(form)
-        return widget
-
-    def update_resolutions(self, resolutions: list[str]):
-        self.resolution_combo.clear()
-        self.resolution_combo.addItems(resolutions)
+    def set_resolutions(self, resolutions: list[str]):
+        self.res_selector.clear()
+        self.res_selector.addItems(resolutions)
+        log.debug(f"Resolution list updated: {resolutions}")

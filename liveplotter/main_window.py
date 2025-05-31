@@ -62,28 +62,28 @@ class MainWindow(QMainWindow):
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
-        # _build_central_widget_layout creates self.top_ctrl and self.pressure_plot_widget
-        self._build_central_widget_layout()
+        self._build_central_widget_layout()  # ← Defines self.camera_view
         self._build_menus()
         self._build_main_toolbar()
         self._build_status_bar()
 
-        # --- Connect signals for plot controls ---
+        self._camera_thread = SDKCameraThread()
+        self._camera_thread.frame_ready.connect(
+            self.camera_view.set_frame
+        )  # ← Moved after camera_view exists
+
+        self._setup_camera_controls()  # ← Add this here to initialize dock panel
+
         if hasattr(self, "top_ctrl") and hasattr(self, "pressure_plot_widget"):
-            # Connect manual X and Y axis limit changes
             self.top_ctrl.x_axis_limits_changed.connect(
                 self.pressure_plot_widget.set_manual_x_limits
             )
             self.top_ctrl.y_axis_limits_changed.connect(
                 self.pressure_plot_widget.set_manual_y_limits
             )
-
-            # Connect export plot image request (already present in your TopControlPanel)
             self.top_ctrl.export_plot_image_requested.connect(
                 self.pressure_plot_widget.export_as_image
             )
-
-            # Connect clear plot request (added in the previous step)
             self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
         else:
             log.error(
@@ -92,9 +92,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION or '1.0'}")
         self.showMaximized()
-        self._camera_thread = SDKCameraThread()
-        self._camera_thread.frame_ready.connect(self.camera_view.set_frame)
-        self._camera_thread.start()
+
         self.statusBar().showMessage("Ready. Select camera and serial port.", 5000)
 
         QTimer.singleShot(0, self._set_initial_splitter_sizes)
@@ -442,6 +440,46 @@ class MainWindow(QMainWindow):
                     "CSV queue error. Stopping recording.", 5000
                 )
                 self._trigger_stop_recording()
+
+    def _setup_camera_controls(self):
+        """Initialize and connect the CameraControlPanel."""
+        self.camera_control_panel = CameraControlPanel()
+        self.camera_controls_dock = QDockWidget("Camera Controls")
+        self.camera_controls_dock.setWidget(self.camera_control_panel)
+        self.camera_controls_dock.setAllowedAreas(Qt.TopDockWidgetArea)
+        self.addDockWidget(Qt.TopDockWidgetArea, self.camera_controls_dock)
+
+        # Connect signals
+        self.camera_control_panel.device_selected.connect(
+            self._on_camera_device_selected
+        )
+        self.camera_control_panel.resolution_selected.connect(
+            self._on_camera_resolution_selected
+        )
+        self.camera_control_panel.trigger_start_stream.connect(
+            self._start_camera_stream
+        )
+        self.camera_control_panel.trigger_stop_stream.connect(self._stop_camera_stream)
+
+    def _on_camera_device_selected(self, device_name: str):
+        if not self._camera_thread:
+            return
+        self._camera_thread.select_device_by_name(device_name)
+
+    def _on_camera_resolution_selected(self, resolution_str: str):
+        if not self._camera_thread:
+            return
+        self._camera_thread.select_resolution_by_string(resolution_str)
+
+    def _start_camera_stream(self):
+        if self._camera_thread and not self._camera_thread.isRunning():
+            self._camera_thread.start()
+            log.info("Camera stream started.")
+
+    def _stop_camera_stream(self):
+        if self._camera_thread and self._camera_thread.isRunning():
+            self._camera_thread.stop_stream()
+            log.info("Camera stream stopped.")
 
     def _initialize_camera_on_startup(self):
         try:
