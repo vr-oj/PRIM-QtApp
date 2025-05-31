@@ -6,7 +6,16 @@ import traceback
 import logging
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication, QLoggingCategory
-from PyQt5.QtGui import QIcon, QSurfaceFormat  # ADDED QSurfaceFormat
+from PyQt5.QtGui import QIcon, QSurfaceFormat
+
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s [%(name)s:%(lineno)d] - %(message)s",
+)
+log = logging.getLogger(__name__)
 
 # === Module-level logger for setup ===
 module_log = logging.getLogger("prim_app.setup")
