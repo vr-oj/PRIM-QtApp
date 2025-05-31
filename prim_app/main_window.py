@@ -124,7 +124,7 @@ class MainWindow(QMainWindow):
         self._build_console_log_dock()
         self._build_central_widget_layout()  # camera_panel is created here
         self.camera_control_panel.setEnabled(False)
-        self.main_splitter.addWidget(self.camera_control_panel)
+        # self.main_splitter.addWidget(self.camera_control_panel)
         self._build_menus()
         self._build_main_toolbar()
         self._build_status_bar()
@@ -1379,11 +1379,8 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str)
     def _on_camera_error(self, msg):
-        full_msg = f"Camera Error: {msg}" + (
-            f" (SDK Code: {code})" if code and code != "None" else ""
-        )
-        log.error(full_msg)
-        QMessageBox.critical(self, "Camera Runtime Error", full_msg)
+        log.error(f"Camera error occurred: {msg}")
+        QMessageBox.critical(self, "Camera Error", msg)
 
         # Stop and clean up the camera thread if it exists and is running
         if self.camera_thread:

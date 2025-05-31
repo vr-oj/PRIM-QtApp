@@ -54,9 +54,13 @@ class SDKCameraThread(QThread):
             self.device = None
 
     def _open_device(self, serial):
-        for dev in ic4.Device.enumerate():
-            if dev.serial == serial:
-                return dev.open()
+        try:
+            device_list = ic4.DeviceEnum.devices()
+            for dev_info in device_list:
+                if hasattr(dev_info, "serial") and dev_info.serial == serial:
+                    return dev_info.open()
+        except Exception as e:
+            log.error(f"Error during device enumeration: {e}")
         return None
 
     def _emit_current_properties(self):
