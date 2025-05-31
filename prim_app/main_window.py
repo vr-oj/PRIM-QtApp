@@ -244,6 +244,13 @@ class MainWindow(QMainWindow):
                 "Simplified mode: 'initial_settings' will be ignored by SDKCameraThread."
             )
 
+        self.camera_thread.camera_properties_updated.connect(
+            self.camera_control_panel.update_camera_properties
+        )
+        self.camera_control_panel.property_changed.connect(
+            self.camera_thread.set_camera_property
+        )
+
         log.info(f"Starting simplified SDKCameraThread for {camera_identifier}...")
         self.camera_thread.start()
 
