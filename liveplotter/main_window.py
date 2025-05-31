@@ -71,8 +71,7 @@ class MainWindow(QMainWindow):
         self._camera_thread.frame_ready.connect(
             self.camera_view.set_frame
         )  # ← Moved after camera_view exists
-
-        self._setup_camera_controls()  # ← Add this here to initialize dock panel
+        self._camera_thread.start()
 
         if hasattr(self, "top_ctrl") and hasattr(self, "pressure_plot_widget"):
             self.top_ctrl.x_axis_limits_changed.connect(
