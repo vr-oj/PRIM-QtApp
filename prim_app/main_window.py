@@ -220,7 +220,7 @@ class MainWindow(QMainWindow):
             f"Creating SDKCameraThread for device: '{camera_identifier}', Target FPS: {fps} (FPS setting will be ignored by simplified thread)"
         )
         self.camera_thread = SDKCameraThread(
-            device_name=camera_identifier, fps=float(fps), parent=self
+            device_identifier=camera_identifier, fps=float(fps), parent=self
         )
 
         # Store basic identifier, could be serial or model name if serial not available
