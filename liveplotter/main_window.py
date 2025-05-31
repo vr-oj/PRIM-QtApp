@@ -35,6 +35,7 @@ from canvas.camera_view import CameraView
 from control_panels.top_control_panel import TopControlPanel
 from canvas.pressure_plot_widget import PressurePlotWidget
 from threads.serial_thread import SerialThread
+from threads.sdk_camera_thread import SDKCameraThread
 from recording import TrialRecorder, RecordingWorker
 from utils import list_serial_ports
 from config import (
@@ -91,6 +92,9 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION or '1.0'}")
         self.showMaximized()
+        self._camera_thread = SDKCameraThread()
+        self._camera_thread.frame_ready.connect(self.camera_view.set_frame)
+        self._camera_thread.start()
         self.statusBar().showMessage("Ready. Select camera and serial port.", 5000)
 
         QTimer.singleShot(0, self._set_initial_splitter_sizes)
@@ -724,9 +728,9 @@ class MainWindow(QMainWindow):
         self.app_session_time_label.setText(f"Session: {h:02}:{m:02}:{s:02}")
 
     def closeEvent(self, event):
-
         log.info(f"Close event received. Recording active: {self._is_recording}")
-        # 2) Handle in-flight recording
+
+        # 1) Handle in-flight recording
         if self._is_recording:
             reply = QMessageBox.question(
                 self,
@@ -742,7 +746,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
 
-        # 3) Clean up recording worker if still around
+        # 2) Clean up recording worker if still around
         if self._recording_worker:
             log.info("Cleaning up recording worker on application exit...")
             if self._recording_worker.isRunning():
@@ -755,7 +759,7 @@ class MainWindow(QMainWindow):
             self._recording_worker.deleteLater()
             self._recording_worker = None
 
-        # 4) Stop serial thread
+        # 3) Stop serial thread
         if self._serial_thread and self._serial_thread.isRunning():
             log.info("Stopping serial thread on application exit...")
             self._serial_thread.stop()
@@ -764,10 +768,20 @@ class MainWindow(QMainWindow):
                     "Serial thread did not stop gracefully on exit, terminating."
                 )
                 self._serial_thread.terminate()
-                if not self._serial_thread.wait(500):  # Wait after terminate
+                if not self._serial_thread.wait(500):
                     log.error("Serial thread failed to terminate.")
             self._serial_thread.deleteLater()
             self._serial_thread = None
 
+        # 4) Stop camera thread
+        if (
+            hasattr(self, "_camera_thread")
+            and self._camera_thread
+            and self._camera_thread.isRunning()
+        ):
+            log.info("Stopping camera thread on application exit...")
+            self._camera_thread.stop()
+
+        # 5) Final cleanup
         log.info("Exiting application.")
         super().closeEvent(event)
