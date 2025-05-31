@@ -1,70 +1,70 @@
-# sdk_camera_thread.py
-
+# threads/sdk_camera_thread.py
 import logging
 import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal
-
-try:
-    import imagingcontrol4 as ic4
-
-    IC4_AVAILABLE = True
-except ImportError:
-    IC4_AVAILABLE = False
+import imagingcontrol4 as ic4
 
 log = logging.getLogger(__name__)
 
 
 class SDKCameraThread(QThread):
     frame_ready = pyqtSignal(np.ndarray)
+    camera_properties_updated = pyqtSignal(dict)
+    camera_error = pyqtSignal(str)
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.running = False
+    def __init__(self, model_hint=None, resolution_hint=None):
+        super().__init__()
+        self.model_hint = model_hint
+        self.resolution_hint = resolution_hint
+        self._stop = False
         self.device = None
         self.stream = None
-        self.sink = None
-        self.selected_device_name = None  # Could be used for multiple camera support
 
     def run(self):
         log.info("Camera thread started.")
-        if not IC4_AVAILABLE:
-            log.error("imagingcontrol4 module not available.")
-            return
-
         try:
-            devices = ic4.Device.enumerate()
+            ic4.DeviceManager.initialize()
+            devices = ic4.DeviceManager.devices
             if not devices:
-                raise RuntimeError("No IC Imaging Source devices found.")
+                raise RuntimeError("No IC4 devices found.")
 
-            self.device = devices[0].open()
-            fmt = self.device.videoFormats()[0]
-            self.device.setVideoFormat(fmt)
-            self.sink = self.device.sink()
-            self.stream = self.device.stream()
-            self.running = True
+            selected = devices[0]
+            if self.model_hint:
+                for d in devices:
+                    if self.model_hint in d.name:
+                        selected = d
+                        break
+
+            self.device = ic4.Device(selected)
+            fmt = self.device.video_formats[0]  # fallback default
+            if self.resolution_hint:
+                for f in self.device.video_formats:
+                    if self.resolution_hint in f.name:
+                        fmt = f
+                        break
+
+            self.device.video_format = fmt
+            self.stream = self.device.stream
             self.stream.start()
 
-            while self.running:
-                frame = self.sink.snap()
-                if frame:
-                    array = np.array(frame, copy=True)
-                    self.frame_ready.emit(array)
+            while not self._stop:
+                buffer = self.stream.wait_for_frame(1000)
+                if buffer:
+                    img = buffer.convert_to_ndarray()
+                    self.frame_ready.emit(img)
 
         except Exception as e:
             log.error(f"Camera thread failed: {e}", exc_info=True)
+            self.camera_error.emit(str(e))
         finally:
-            self.cleanup()
+            self.stop_stream()
+            log.info("Camera thread exited.")
 
-    def stop(self):
+    def stop_stream(self):
         log.info("Stopping camera stream.")
-        self.running = False
-
-    def cleanup(self):
-        try:
-            if self.stream:
-                self.stream.stop()
-            if self.device:
-                self.device.close()
-        except Exception as e:
-            log.warning(f"Error during camera cleanup: {e}")
-        log.info("Camera thread exited.")
+        if self.stream:
+            self.stream.stop()
+        if self.device:
+            self.device.dispose()
+        ic4.DeviceManager.dispose()
+        self._stop = True
