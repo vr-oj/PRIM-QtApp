@@ -52,6 +52,5 @@ def load_app_settings():
 
 
 # --- Constants for setting keys ---
-SETTING_CTI_PATH = "cti_path"
-SETTING_LAST_CAMERA_SERIAL = "last_camera_serial"
+SETTING_LAST_CAMERA_INDEX = "last_camera_index"
 SETTING_LAST_PROFILE_NAME = "last_profile_name"

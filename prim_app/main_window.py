@@ -31,8 +31,6 @@ from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize
 from PyQt5.QtGui import QIcon, QKeySequence
 
 import prim_app
-from prim_app import initialize_ic4_with_cti, is_ic4_fully_initialized
-import imagingcontrol4 as ic4
 
 from utils.app_settings import (
     save_app_setting,
@@ -57,8 +55,7 @@ from ui.control_panels.top_control_panel import TopControlPanel
 from ui.control_panels.camera_control_panel import CameraControlPanel
 from ui.canvas.gl_viewfinder import GLViewfinder
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
-from threads.sdk_camera_thread import SDKCameraThread
-from camera.setup_wizard import CameraSetupWizard  # Will be simplified
+from threads.opencv_camera_thread import OpenCVCameraThread
 from threads.serial_thread import SerialThread
 from recording import RecordingWorker
 from utils.utils import list_serial_ports
@@ -105,16 +102,6 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
 
-        self._check_and_prompt_for_cti_on_startup()
-        if is_ic4_fully_initialized():
-            QTimer.singleShot(0, self._initialize_camera_on_startup)
-        else:
-            self.statusBar().showMessage(
-                "IC4 SDK not fully configured. Use Camera > Setup...", 5000
-            )
-            if self.camera_panel:
-                self.camera_panel.setEnabled(False)
-
         QTimer.singleShot(50, self._set_initial_splitter_sizes)
         self._set_initial_control_states()
         log.info("MainWindow initialized.")
@@ -142,16 +129,6 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
 
-        self._check_and_prompt_for_cti_on_startup()
-        if is_ic4_fully_initialized():
-            QTimer.singleShot(0, self._initialize_camera_on_startup)
-        else:
-            self.statusBar().showMessage(
-                "IC4 SDK not fully configured. Use Camera > Setup...", 5000
-            )
-            if self.camera_panel:
-                self.camera_panel.setEnabled(False)
-
         # self.showMaximized() # Already called later
         QTimer.singleShot(50, self._set_initial_splitter_sizes)
         self._set_initial_control_states()
@@ -166,45 +143,8 @@ class MainWindow(QMainWindow):
             else:  # Fallback or retry if width is not yet available
                 QTimer.singleShot(100, self._set_initial_splitter_sizes)
 
-    def _check_and_prompt_for_cti_on_startup(self):
-        if not is_ic4_fully_initialized() and prim_app.IC4_AVAILABLE:
-            QMessageBox.information(
-                self,
-                "Camera SDK Setup Required",
-                "Select the GenTL Producer file (.cti) for your camera.",
-            )
-            cti_dir = os.path.dirname(load_app_setting(SETTING_CTI_PATH, "")) or ""
-            cti, _ = QFileDialog.getOpenFileName(
-                self, "Select .cti", cti_dir, "CTI Files (*.cti)"
-            )
-            if cti and os.path.exists(cti):
-                try:
-                    initialize_ic4_with_cti(cti)
-                    # The save_app_setting was confirmed to be the fix for the import error
-                    save_app_setting(SETTING_CTI_PATH, cti)
-                    QMessageBox.information(
-                        self, "CTI Loaded", f"Loaded: {os.path.basename(cti)}"
-                    )
-                    self.statusBar().showMessage(f"CTI: {os.path.basename(cti)}", 5000)
-                except Exception as e:
-                    QMessageBox.critical(self, "CTI Error", str(e))
-            else:
-                self.statusBar().showMessage(
-                    "No CTI file selected. Camera functionality may be limited.", 5000
-                )
-                if self.camera_panel:
-                    self.camera_panel.setEnabled(False)
-        elif is_ic4_fully_initialized():
-            self.statusBar().showMessage(
-                f"IC4 initialized with CTI: {os.path.basename(load_app_setting(SETTING_CTI_PATH, ''))}",
-                5000,
-            )
-
     def _connect_camera_signals(self):
         th = self.camera_thread
-        cp = (
-            self.camera_panel
-        )  # cp will be disabled, so its signals aren't essential now
         if not (th and self.camera_view):  # cp not strictly needed for simplified view
             log.warning("Cannot connect camera signals: thread or view missing.")
             return True  # Indicate failure or inability to connect
@@ -223,216 +163,59 @@ class MainWindow(QMainWindow):
         th.frame_ready.connect(self.camera_view.update_frame)
         th.camera_error.connect(self._on_camera_error)
 
-        # Comment out or remove connections related to CameraControlPanel and detailed properties
-        # th.resolutions_updated.connect(lambda r: cp.res_combo.clear() or cp.res_combo.addItems(r or []))
-        # th.pixel_formats_updated.connect(lambda f: cp.pix_combo.clear() or cp.pix_combo.addItems(f or []))
-        # th.fps_range_updated.connect(lambda lo, hi: cp.fps_spin.setRange(lo, hi))
-        # th.exposure_range_updated.connect(lambda lo, hi: cp.exp_spin.setRange(lo, hi))
-        # th.gain_range_updated.connect(lambda lo, hi: cp.gain_slider.setRange(int(lo), int(hi)))
-        # th.auto_exposure_updated.connect(cp.auto_exp_cb.setChecked)
-        # th.properties_updated.connect(update_panel_from_props)
-
-        # cp.resolution_changed.connect(lambda r: r and th.apply_node_settings({"Width": int(r.split("x")[0]), "Height": int(r.split("x")[1])}))
-        # cp.pixel_format_changed.connect(lambda f: th.apply_node_settings({"PixelFormat": f}))
-        # cp.auto_exposure_toggled.connect(lambda on: th.apply_node_settings({"ExposureAuto": "Continuous" if on else "Off"}))
-        # cp.exposure_changed.connect(lambda v: th.apply_node_settings({"ExposureTime": v}))
-        # cp.gain_changed.connect(lambda v: th.apply_node_settings({"Gain": v}))
-        # cp.fps_changed.connect(lambda v: th.apply_node_settings({"AcquisitionFrameRate": v}))
-
-        # cp.start_stream.connect(th.start) # Thread will be started directly
-        # cp.stop_stream.connect(th.stop)   # Thread will be stopped directly if needed
-
-        log.info("Simplified camera signals connected (frame_ready, camera_error).")
+        log.info("OpenCV camera signals connected (frame_ready, camera_error).")
         return False  # Indicate success
 
-    def _start_sdk_camera_thread(self, camera_identifier, fps, initial_settings=None):
+    def _start_opencv_camera_thread(
+        self, camera_index=0
+    ):  # camera_index can be from config or UI
         if self.camera_thread and self.camera_thread.isRunning():
             log.info("Stopping existing camera thread before starting new one.")
             self.camera_thread.stop()
-            self.camera_thread.deleteLater()
+            # self.camera_thread.deleteLater() # OpenCVThread might not need deleteLater if managed well
             self.camera_thread = None
             QApplication.processEvents()
 
-        log.info(
-            f"Creating SDKCameraThread for device: '{camera_identifier}', Target FPS: {fps}"
-        )
-        self.camera_thread = SDKCameraThread(
-            device_serial=camera_identifier, parent=self
-        )
-        self.camera_settings["cameraSerialPattern"] = camera_identifier
+        log.info(f"Creating OpenCVCameraThread for device index: {camera_index}")
+        self.camera_thread = OpenCVCameraThread(device_index=camera_index, parent=self)
 
-        if self._connect_camera_signals():
-            log.error(
-                "Failed to connect simplified camera signals for SDKCameraThread."
-            )
-            self.camera_thread.deleteLater()
+        if self._connect_camera_signals():  # Ensure this is adapted for OpenCV
+            log.error("Failed to connect OpenCV camera signals.")
+            # if self.camera_thread: self.camera_thread.deleteLater() # Cleanup
             self.camera_thread = None
-            if self.camera_panel:
-                self.camera_panel.setEnabled(False)
+            # if self.camera_panel: self.camera_panel.setEnabled(False) # If using camera_panel
             return
 
-        self.camera_thread.camera_properties_updated.connect(
-            self.camera_control_panel.update_camera_properties
-        )
-        self.camera_control_panel.property_changed.connect(
-            self.camera_thread.set_camera_property
-        )
-
-        log.info(f"Starting SDKCameraThread for {camera_identifier}...")
+        log.info(f"Starting OpenCVCameraThread for device index {camera_index}...")
         self.camera_thread.start()
 
-        if self.camera_panel:
-            self.camera_panel.setEnabled(False)
+        # self.camera_control_panel.setEnabled(False) # Or based on what OpenCV supports
+        # if self.camera_panel: self.camera_panel.setEnabled(False) # Keep disabled if not used
 
-        model_display = self.camera_settings.get("cameraModel", camera_identifier)
         self.statusBar().showMessage(
-            f"Attempting to start basic live feed: {model_display}", 5000
+            f"Attempting to start live feed from OpenCV camera index: {camera_index}",
+            5000,
         )
 
-        log.info(
-            f"Creating SDKCameraThread for device: '{camera_identifier}', Target FPS: {fps} (FPS setting will be ignored by simplified thread)"
-        )
-        self.camera_thread = SDKCameraThread(
-            device_serial=camera_identifier, parent=self
-        )
+    def _initialize_opencv_camera(self):  # New or renamed method
+        log.info("Attempting to initialize OpenCV camera...")
+        # if self.camera_panel: self.camera_panel.setEnabled(False) # If using camera_panel
 
-        # Store basic identifier, could be serial or model name if serial not available
-        self.camera_settings["cameraSerialPattern"] = camera_identifier
-
-        if (
-            self._connect_camera_signals()
-        ):  # This will now connect only essential signals
-            log.error(
-                "Failed to connect simplified camera signals for new SDKCameraThread."
-            )
-            self.camera_thread.deleteLater()
-            self.camera_thread = None
-            if self.camera_panel:
-                self.camera_panel.setEnabled(False)
-            return
-
-        # No initial_settings application in simplified version
-        if initial_settings:
-            log.warning(
-                "Simplified mode: 'initial_settings' will be ignored by SDKCameraThread."
-            )
-
-        self.camera_thread.camera_properties_updated.connect(
-            self.camera_control_panel.update_camera_properties
-        )
-        self.camera_control_panel.property_changed.connect(
-            self.camera_thread.set_camera_property
-        )
-
-        log.info(f"Starting simplified SDKCameraThread for {camera_identifier}...")
-        self.camera_thread.start()
-
-        # Keep camera_panel disabled as we are not using its controls
-        if self.camera_panel:
-            self.camera_panel.setEnabled(False)
-
-        current_model_display = self.camera_settings.get(
-            "cameraModel", camera_identifier
-        )
-        self.statusBar().showMessage(
-            f"Attempting to start basic live feed: {current_model_display}", 5000
-        )
-
-    def _initialize_camera_on_startup(self):
-        if not is_ic4_fully_initialized():
-            log.info("IC4 not fully initialized, cannot auto-configure camera.")
-            self.statusBar().showMessage(
-                "IC4 SDK not configured. Use Camera > Change CTI File...", 5000
-            )
-            if self.camera_panel:
-                self.camera_panel.setEnabled(False)
-            return
-
-        log.info("Attempting to get first available IC4 camera for basic live feed...")
-        if self.camera_panel:  # Ensure it's disabled before we start
-            self.camera_panel.setEnabled(False)
-
-        available_devices = []
+        # Use a default camera index, e.g., from your config file
+        # from utils.config import DEFAULT_CAMERA_INDEX (ensure this exists)
+        default_camera_idx = 0  # Or load from config
         try:
-            available_devices = ic4.DeviceEnum.devices()
-            if not available_devices:
-                log.warning("No camera devices found by ic4.DeviceEnum.")
-                self.statusBar().showMessage("No camera devices found.", 5000)
-                return  # No devices, nothing to do
-        except Exception as e:
-            log.error(f"Error enumerating IC4 devices: {e}")
-            self.statusBar().showMessage(f"Error enumerating devices: {e}", 5000)
-            return
-
-        first_device_info = available_devices[0]
-        camera_identifier = None
-        camera_model_name = (
-            first_device_info.model_name
-            if hasattr(first_device_info, "model_name")
-            else "Unknown Model"
-        )
-
-        # Prefer serial number as identifier, then unique name, then model name as fallback
-        if hasattr(first_device_info, "serial") and first_device_info.serial:
-            camera_identifier = first_device_info.serial
-        elif (
-            hasattr(first_device_info, "unique_name") and first_device_info.unique_name
-        ):
-            camera_identifier = first_device_info.unique_name
-            log.info(
-                f"Using unique_name as identifier for {camera_model_name}: {camera_identifier}"
-            )
-        else:
-            camera_identifier = camera_model_name  # Fallback
-            log.warning(
-                f"Using model_name as identifier for {camera_model_name} (serial/unique_name not available/empty). This might be less reliable if multiple cameras of the same model are present."
-            )
-
-        if not camera_identifier:
-            log.error(
-                f"Could not determine a unique identifier for the first detected camera: {camera_model_name}"
-            )
-            self.statusBar().showMessage(
-                f"Could not identify {camera_model_name} uniquely.", 5000
-            )
-            return
-
-        log.info(
-            f"Found first camera: {camera_model_name} (Identifier: {camera_identifier}). Attempting basic stream."
-        )
-        self.camera_settings["cameraModel"] = camera_model_name  # Store for display
-
-        try:
-            # Start with default FPS, initial_settings is None for simplified version
-            self._start_sdk_camera_thread(
-                camera_identifier, DEFAULT_FPS, initial_settings=None
-            )
-            save_app_setting(
-                SETTING_LAST_CAMERA_SERIAL, camera_identifier
-            )  # Still useful to remember the last attempted
+            self._start_opencv_camera_thread(default_camera_idx)
+            # save_app_setting(SETTING_LAST_CAMERA_INDEX, default_camera_idx) # If you store this
         except Exception as e:
             log.exception(
-                f"Failed to start basic live feed for camera '{camera_model_name}': {e}"
+                f"Failed to start live feed for OpenCV camera index '{default_camera_idx}': {e}"
             )
             QMessageBox.critical(
                 self,
                 "Camera Start Error",
-                f"Could not start basic live feed for {camera_model_name}:\n{e}",
+                f"Could not start live feed for OpenCV camera index {default_camera_idx}:\n{e}",
             )
-        # Camera panel remains disabled in simplified mode
-
-    def _run_camera_setup(self):
-        # Temporarily disable the camera setup wizard functionality
-        log.info("Camera Setup Wizard is temporarily disabled for simplified testing.")
-        QMessageBox.information(
-            self,
-            "Camera Setup",
-            "Camera setup is temporarily simplified. The application will attempt to use the first detected camera.",
-        )
-        # Optionally, you could trigger a re-scan/re-init of the simplified camera startup
-        # if is_ic4_fully_initialized():
-        #     self._initialize_camera_on_startup()
-        pass
 
     def _init_paths_and_icons(self):
         base = os.path.dirname(os.path.abspath(__file__))
@@ -592,89 +375,6 @@ class MainWindow(QMainWindow):
         )
         hm.addAction(about_act)
         hm.addAction("About &Qt", QApplication.instance().aboutQt)
-
-        cam_menu = mb.addMenu("&Camera")
-        setup_cam_act = QAction(
-            "Setup Cameraâ¦ (Simplified)", self, triggered=self._run_camera_setup
-        )
-        cam_menu.addAction(setup_cam_act)
-        change_cti_act = QAction(
-            "Change CTI File...", self, triggered=self._change_cti_file
-        )
-        cam_menu.addAction(change_cti_act)
-
-    def _change_cti_file(self):
-        # Prompt user for CTI file
-        current_cti_path = load_app_setting(SETTING_CTI_PATH, "")
-        cti_dir = os.path.dirname(current_cti_path) if current_cti_path else ""
-
-        cti_path, _ = QFileDialog.getOpenFileName(
-            self, "Select GenTL Producer File (.cti)", cti_dir, "*.cti"
-        )
-        if not cti_path or not os.path.exists(cti_path):
-            log.info("No CTI file selected or file does not exist.")
-            return
-
-        # Stop existing camera thread if running
-        if self.camera_thread and self.camera_thread.isRunning():
-            log.info("Stopping existing camera thread before changing CTI file.")
-            self.camera_thread.stop()
-            self.camera_thread.deleteLater()
-            self.camera_thread = None
-            if self.camera_panel:
-                self.camera_panel.setEnabled(False)  # Ensure panel is disabled
-            QApplication.processEvents()  # Allow thread to clean up
-            log.info("Existing camera thread stopped for CTI change.")
-
-        try:
-            # Re-initialize IC4 with the new CTI path.
-            # The prim_app.initialize_ic4_with_cti function should handle os.environ and ic4.Library.init()
-            # It might also need to handle ic4.Library.exit() if it was already initialized.
-            # For simplicity here, assuming initialize_ic4_with_cti manages this.
-            # If not, we might need to explicitly call ic4.Library.exit() before re-initializing.
-            if prim_app.IC4_LIBRARY_INITIALIZED:  # Check if library was init before
-                log.info("Exiting IC4 library before re-initializing with new CTI...")
-                ic4.Library.exit()
-                prim_app.IC4_LIBRARY_INITIALIZED = False  # Reset flag
-                prim_app.IC4_GENTL_SYSTEM_CONFIGURED = False
-
-            initialize_ic4_with_cti(
-                cti_path
-            )  # This will set GENICAM_GENTL64_PATH and ic4.Library.init()
-            save_app_setting(SETTING_CTI_PATH, cti_path)  # Persist the new CTI path
-
-            QMessageBox.information(
-                self,
-                "CTI Changed",
-                f"Successfully loaded new CTI file:\n{os.path.basename(cti_path)}\n\nPlease restart the application for changes to fully take effect if issues persist, or attempt to re-initialize camera via menu.",
-            )
-            self.statusBar().showMessage(
-                f"CTI changed to: {os.path.basename(cti_path)}. Restart or re-init camera.",
-                7000,
-            )
-
-            # Attempt to re-initialize the camera with the new CTI settings
-            if is_ic4_fully_initialized():
-                QTimer.singleShot(
-                    0, self._initialize_camera_on_startup
-                )  # Try to get the camera running again
-            else:
-                if self.camera_panel:
-                    self.camera_panel.setEnabled(False)
-
-        except Exception as exc:
-            log.exception(
-                f"Failed to change and initialize with new CTI file '{cti_path}': {exc}"
-            )
-            QMessageBox.critical(
-                self,
-                "CTI Change Error",
-                f"Could not load or initialize with new CTI file:\n{exc}",
-            )
-            if self.camera_panel:
-                self.camera_panel.setEnabled(
-                    False
-                )  # Ensure panel remains disabled on error
 
     def _build_main_toolbar(self):
         tb = QToolBar("Main Controls")
