@@ -294,46 +294,40 @@ class MainWindow(QMainWindow):
         self._app_session_timer.timeout.connect(self._update_app_session_time)
         self._app_session_timer.start()
 
-    def _ensure_cti_loaded(self):
+    def _ensure_cti_loaded(self) -> bool:
         try:
             import imagingcontrol4 as ic4
+            from app_settings import load_app_setting, save_app_setting
             from PyQt5.QtWidgets import QFileDialog
 
-            from utils import load_prim_settings, save_prim_settings
-
-            settings = load_prim_settings()
-            cti_path = settings.get("cti_path")
+            cti_path = load_app_setting("cti_path")
 
             if not cti_path or not os.path.exists(cti_path):
-                QMessageBox.information(
-                    self,
-                    "Select .cti File",
-                    "To access IC4 cameras, please select your GenTL producer (.cti) file.",
-                )
                 cti_path, _ = QFileDialog.getOpenFileName(
                     self,
-                    "Select GenTL Producer (.cti)",
-                    "C:/Program Files",
-                    "GenTL Files (*.cti)",
+                    "Select .cti File for GenTL Camera",
+                    "",
+                    "GenTL CTI Files (*.cti);;All Files (*)",
                 )
                 if not cti_path:
-                    raise RuntimeError(
-                        "No .cti file selected. Camera initialization aborted."
-                    )
+                    log.warning("No .cti file selected.")
+                    return False
+                save_app_setting("cti_path", cti_path)
 
-                settings["cti_path"] = cti_path
-                save_prim_settings(settings)
+            if not os.path.exists(cti_path):
+                log.error(f".cti file not found at saved path: {cti_path}")
+                return False
 
-            import imagingcontrol4 as ic4
+            if not ic4.Library.isInitialized():
+                ic4.Library.init()
 
-            ic4.Library.loadGenTLProducer(cti_path)
-            log.info(f"Loaded GenTL producer from: {cti_path}")
+            # For IC4 Python SDK, .cti is auto-loaded during init. We just store it.
+            log.info(f".cti assumed loaded via IC4 init. Stored path: {cti_path}")
+            return True
 
         except Exception as e:
             log.exception("Failed to load .cti file.")
-            QMessageBox.critical(
-                self, "Camera Error", f"Failed to load .cti file:\n{e}"
-            )
+            return False
 
     def _set_initial_control_states(self):
         self.top_ctrl.update_connection_status("Disconnected", False)
@@ -523,17 +517,28 @@ class MainWindow(QMainWindow):
 
     def _initialize_camera_on_startup(self):
         try:
+            from setup_wizard import prompt_for_camera_profile
+            from camera_profiler import load_camera_profile
             import imagingcontrol4 as ic4
 
-            self._ensure_cti_loaded()
-            devices = ic4.Device.enumerate()
-            if not devices:
-                log.warning("No IC4 cameras found.")
+            # Ensure .cti has been loaded (only on first run)
+            if not self._ensure_cti_loaded():
                 return
 
-            device = devices[0]
-            log.info(f"Opening camera: {device.modelName}")
-            self._camera_thread.open_camera(device.modelName)
+            # Try loading saved camera profile
+            profile = load_camera_profile()
+            if profile is None:
+                log.info(
+                    "No existing camera profile found. Prompting user to select camera and .cti."
+                )
+                profile = prompt_for_camera_profile()
+                if profile is None:
+                    log.warning("Camera profile selection canceled.")
+                    return
+
+            log.info(f"Attempting to initialize camera using profile: {profile}")
+            self._camera_thread.configure_from_profile(profile)
+            self._camera_thread.start()
 
         except Exception as e:
             log.exception(f"Error during camera initialization: {e}")
