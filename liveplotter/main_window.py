@@ -294,6 +294,47 @@ class MainWindow(QMainWindow):
         self._app_session_timer.timeout.connect(self._update_app_session_time)
         self._app_session_timer.start()
 
+    def _ensure_cti_loaded(self):
+        try:
+            import imagingcontrol4 as ic4
+            from PyQt5.QtWidgets import QFileDialog
+
+            from utils import load_prim_settings, save_prim_settings
+
+            settings = load_prim_settings()
+            cti_path = settings.get("cti_path")
+
+            if not cti_path or not os.path.exists(cti_path):
+                QMessageBox.information(
+                    self,
+                    "Select .cti File",
+                    "To access IC4 cameras, please select your GenTL producer (.cti) file.",
+                )
+                cti_path, _ = QFileDialog.getOpenFileName(
+                    self,
+                    "Select GenTL Producer (.cti)",
+                    "C:/Program Files",
+                    "GenTL Files (*.cti)",
+                )
+                if not cti_path:
+                    raise RuntimeError(
+                        "No .cti file selected. Camera initialization aborted."
+                    )
+
+                settings["cti_path"] = cti_path
+                save_prim_settings(settings)
+
+            import imagingcontrol4 as ic4
+
+            ic4.Library.loadGenTLProducer(cti_path)
+            log.info(f"Loaded GenTL producer from: {cti_path}")
+
+        except Exception as e:
+            log.exception("Failed to load .cti file.")
+            QMessageBox.critical(
+                self, "Camera Error", f"Failed to load .cti file:\n{e}"
+            )
+
     def _set_initial_control_states(self):
         self.top_ctrl.update_connection_status("Disconnected", False)
         self.start_recording_action.setEnabled(False)
@@ -484,6 +525,7 @@ class MainWindow(QMainWindow):
         try:
             import imagingcontrol4 as ic4
 
+            self._ensure_cti_loaded()
             devices = ic4.Device.enumerate()
             if not devices:
                 log.warning("No IC4 cameras found.")
