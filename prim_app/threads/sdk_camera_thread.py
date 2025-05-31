@@ -58,7 +58,9 @@ class SDKCameraThread(QThread):
             device_list = ic4.DeviceEnum.devices()
             for dev_info in device_list:
                 if hasattr(dev_info, "serial") and dev_info.serial == serial:
-                    return dev_info.open()
+                    return ic4.Device(
+                        dev_info
+                    )  # ✅ This opens the device using DeviceInfo
         except Exception as e:
             log.error(f"Error during device enumeration: {e}")
         return None
