@@ -142,28 +142,40 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(2, 2, 2, 2)
         outer.setSpacing(3)
 
-        # Ribbon layout: camera controls + PRIM control + plot settings
+        # ─── Top Control Ribbon ─────────────────────────────────────
         ribbon = QWidget()
         ribbon_layout = QHBoxLayout(ribbon)
         ribbon_layout.setContentsMargins(0, 0, 0, 0)
-        ribbon_layout.setSpacing(8)
+        ribbon_layout.setSpacing(6)
 
+        # 1. Camera Controls
         self.camera_ctrl_panel = CameraControlPanel(self)
-        ribbon_layout.addWidget(self.camera_ctrl_panel)
+        self.camera_ctrl_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        ribbon_layout.addWidget(self.camera_ctrl_panel, 1)
 
+        # 2. PRIM Serial + Status Controls
         self.top_ctrl = TopControlPanel(self)
-        ribbon_layout.addWidget(self.top_ctrl, stretch=1)
+        self.top_ctrl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        ribbon_layout.addWidget(self.top_ctrl, 1)
+
+        # 3. Plot Controls
+        self.top_ctrl.plot_controls.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Fixed
+        )
+        ribbon_layout.addWidget(self.top_ctrl.plot_controls, 1)
 
         outer.addWidget(ribbon)
 
-        # Main layout: camera viewfinder on left, live plot on right
+        # ─── Main Display Splitter ───────────────────────────────────
         self.main_splitter = QSplitter(Qt.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
 
+        # Left: Camera feed view
         self.camera_view = CameraView(self)
-        self.pressure_plot_widget = PressurePlotWidget(self)
-
         self.main_splitter.addWidget(self.camera_view)
+
+        # Right: Live pressure plot
+        self.pressure_plot_widget = PressurePlotWidget(self)
         self.main_splitter.addWidget(self.pressure_plot_widget)
 
         self.main_splitter.setStretchFactor(0, 1)
