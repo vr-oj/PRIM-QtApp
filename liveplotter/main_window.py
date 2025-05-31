@@ -29,7 +29,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize, QThread
 from PyQt5.QtGui import QIcon, QKeySequence, QImage
 
-
+from control_panels.camera_control_panel import CameraControlPanel
+from canvas.camera_view import CameraView
 from control_panels.top_control_panel import TopControlPanel
 from canvas.pressure_plot_widget import PressurePlotWidget
 from threads.serial_thread import SerialThread
@@ -140,18 +141,32 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(2, 2, 2, 2)
         outer.setSpacing(3)
 
-        self.top_ctrl = TopControlPanel(self)
-        self.top_ctrl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        outer.addWidget(self.top_ctrl)
+        # Ribbon layout: camera controls + PRIM control + plot settings
+        ribbon = QWidget()
+        ribbon_layout = QHBoxLayout(ribbon)
+        ribbon_layout.setContentsMargins(0, 0, 0, 0)
+        ribbon_layout.setSpacing(8)
 
+        self.camera_ctrl_panel = CameraControlPanel(self)
+        ribbon_layout.addWidget(self.camera_ctrl_panel)
+
+        self.top_ctrl = TopControlPanel(self)
+        ribbon_layout.addWidget(self.top_ctrl, stretch=1)
+
+        outer.addWidget(ribbon)
+
+        # Main layout: camera viewfinder on left, live plot on right
         self.main_splitter = QSplitter(Qt.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
 
+        self.camera_view = CameraView(self)
         self.pressure_plot_widget = PressurePlotWidget(self)
 
+        self.main_splitter.addWidget(self.camera_view)
         self.main_splitter.addWidget(self.pressure_plot_widget)
+
         self.main_splitter.setStretchFactor(0, 1)
-        self.main_splitter.setStretchFactor(1, 0)
+        self.main_splitter.setStretchFactor(1, 1)
 
         outer.addWidget(self.main_splitter, 1)
         self.setCentralWidget(central)
