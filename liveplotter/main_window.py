@@ -98,6 +98,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready. Select camera and serial port.", 5000)
 
         QTimer.singleShot(0, self._set_initial_splitter_sizes)
+        QTimer.singleShot(1000, self._initialize_camera_on_startup)
         self._set_initial_control_states()
 
     def _set_initial_splitter_sizes(self):
@@ -441,6 +442,22 @@ class MainWindow(QMainWindow):
                     "CSV queue error. Stopping recording.", 5000
                 )
                 self._trigger_stop_recording()
+
+    def _initialize_camera_on_startup(self):
+        try:
+            import imagingcontrol4 as ic4
+
+            devices = ic4.Device.enumerate()
+            if not devices:
+                log.warning("No IC4 cameras found.")
+                return
+
+            device = devices[0]
+            log.info(f"Opening camera: {device.modelName}")
+            self._camera_thread.open_camera(device.modelName)
+
+        except Exception as e:
+            log.exception(f"Error during camera initialization: {e}")
 
     def _update_recording_actions_enable_state(self):
         serial_ready = (
