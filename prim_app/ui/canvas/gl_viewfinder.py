@@ -155,8 +155,8 @@ void main() {
     def resizeGL(self, w: int, h: int):
         super().resizeGL(w, h)
 
-    @pyqtSlot(QImage, object)
-    def update_frame(self, qimage_unused: QImage, frame: np.ndarray):
+    @pyqtSlot(object)
+    def update_frame(self, frame):
         if (
             frame is None
             or not self.isValid()
