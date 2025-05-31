@@ -294,39 +294,45 @@ class MainWindow(QMainWindow):
         self._app_session_timer.timeout.connect(self._update_app_session_time)
         self._app_session_timer.start()
 
-    def _ensure_cti_loaded(self) -> bool:
+    def _ensure_cti_loaded(self):
+        import imagingcontrol4 as ic4
+        import os
+        from PyQt5.QtWidgets import QFileDialog
+
+        # Check if DeviceManager has already been initialized
         try:
-            import imagingcontrol4 as ic4
-            from app_settings import load_app_setting, save_app_setting
-            from PyQt5.QtWidgets import QFileDialog
-
-            cti_path = load_app_setting("cti_path")
-
-            if not cti_path or not os.path.exists(cti_path):
-                cti_path, _ = QFileDialog.getOpenFileName(
-                    self,
-                    "Select .cti File for GenTL Camera",
-                    "",
-                    "GenTL CTI Files (*.cti);;All Files (*)",
-                )
-                if not cti_path:
-                    log.warning("No .cti file selected.")
-                    return False
-                save_app_setting("cti_path", cti_path)
-
-            if not os.path.exists(cti_path):
-                log.error(f".cti file not found at saved path: {cti_path}")
-                return False
-
-            if not ic4.Library.isInitialized():
-                ic4.Library.init()
-
-            # For IC4 Python SDK, .cti is auto-loaded during init. We just store it.
-            log.info(f".cti assumed loaded via IC4 init. Stored path: {cti_path}")
-            return True
-
+            ic4.DeviceManager.initialize()
+            if ic4.DeviceManager.devices:
+                log.info("CTI file previously loaded and devices are available.")
+                return True
         except Exception as e:
-            log.exception("Failed to load .cti file.")
+            log.warning("DeviceManager failed to init; will prompt for CTI file.")
+
+        # Prompt for .cti file if needed
+        settings_path = os.path.join(os.path.expanduser("~"), ".prim_cti_path.txt")
+        if os.path.exists(settings_path):
+            with open(settings_path, "r") as f:
+                cti_path = f.read().strip()
+        else:
+            cti_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select GenTL Producer (.cti) File",
+                "",
+                "GenTL Files (*.cti)",
+            )
+            if not cti_path:
+                log.error("User cancelled CTI selection.")
+                return False
+            with open(settings_path, "w") as f:
+                f.write(cti_path)
+
+        try:
+            ic4.DeviceManager.load_cti_file(cti_path)
+            ic4.DeviceManager.initialize()
+            log.info(f"Loaded CTI file: {cti_path}")
+            return True
+        except Exception as e:
+            log.error("Failed to load .cti file.", exc_info=True)
             return False
 
     def _set_initial_control_states(self):
@@ -516,32 +522,25 @@ class MainWindow(QMainWindow):
             log.info("Camera stream stopped.")
 
     def _initialize_camera_on_startup(self):
+        import imagingcontrol4 as ic4
+        from threads.sdk_camera_thread import SDKCameraThread
+
+        if not self._ensure_cti_loaded():
+            log.error("CTI file not loaded. Skipping camera setup.")
+            return
+
         try:
-            from setup_wizard import prompt_for_camera_profile
-            from camera_profiler import load_camera_profile
-            import imagingcontrol4 as ic4
+            devices = ic4.DeviceManager.devices
+            if not devices:
+                raise RuntimeError("No cameras found after CTI load.")
 
-            # Ensure .cti has been loaded (only on first run)
-            if not self._ensure_cti_loaded():
-                return
-
-            # Try loading saved camera profile
-            profile = load_camera_profile()
-            if profile is None:
-                log.info(
-                    "No existing camera profile found. Prompting user to select camera and .cti."
-                )
-                profile = prompt_for_camera_profile()
-                if profile is None:
-                    log.warning("Camera profile selection canceled.")
-                    return
-
-            log.info(f"Attempting to initialize camera using profile: {profile}")
-            self._camera_thread.configure_from_profile(profile)
+            self._camera_thread = SDKCameraThread()
+            self._camera_thread.frame_ready.connect(self.camera_view.set_frame)
+            self._camera_thread.camera_error.connect(self._handle_camera_error)
             self._camera_thread.start()
-
+            log.info("Camera thread started successfully.")
         except Exception as e:
-            log.exception(f"Error during camera initialization: {e}")
+            log.error("Error during camera initialization: %s", str(e), exc_info=True)
 
     def _update_recording_actions_enable_state(self):
         serial_ready = (
