@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 
 
 class SDKCameraThread(QThread):
-    frame_ready = pyqtSignal(np.ndarray)
+    frame_ready = pyqtSignal(object)
     camera_properties_updated = pyqtSignal(dict)
     camera_error = pyqtSignal(str)
 
