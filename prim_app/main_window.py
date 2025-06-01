@@ -85,6 +85,7 @@ class MainWindow(QMainWindow):
         self._build_console_log_dock()
 
         self.ic4_controller = IC4CameraController()
+        self.camera_panel = CameraControlPanel(ic4_controller=self.ic4_controller, parent=self)
         self._build_central_widget_layout()
         self._connect_camera_signals()
 
@@ -116,59 +117,6 @@ class MainWindow(QMainWindow):
         self._set_initial_control_states()
         log.info("MainWindow initialized.")
         self.showMaximized()
-
-    def _set_initial_splitter_sizes(self):
-        if self.bottom_split:
-            w = self.bottom_split.width()
-            if w > 0:  # Ensure width is positive before calculating
-                self.bottom_split.setSizes([int(w * 0.6), int(w * 0.4)])
-            else:  # Fallback or retry if width is not yet available
-                QTimer.singleShot(100, self._set_initial_splitter_sizes)
-
-    def _connect_camera_signals(self):
-        """Wire up camera control panel to camera thread."""
-        if self.camera_control_panel:
-            self.camera_control_panel.property_changed.connect(
-                self._handle_camera_property_change
-            )
-            log.debug("Camera control panel signals connected.")
-
-    def _start_opencv_camera_thread(self):
-        """Start OpenCV-based camera thread and connect it to the view."""
-        from threads.opencv_camera_thread import OpenCVCameraThread
-
-        self.camera_thread = OpenCVCameraThread(index=0, resolution=(1280, 720), fps=10)
-        self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
-        self.camera_thread.camera_properties_updated.connect(
-            self.camera_control_panel.update_controls_from_camera
-        )
-        self.camera_thread.start()
-
-        log.info("OpenCV camera thread started with resolution=(1280, 720) at 10 FPS.")
-
-    def _report_camera_info_to_log(self, info_dict):
-        for key, val in info_dict.items():
-            log.info(f"[OpenCV Camera Info] {key}: {val}")
-
-    def _initialize_opencv_camera(self):  # New or renamed method
-        log.info("Attempting to initialize OpenCV camera...")
-        # if self.camera_panel: self.camera_panel.setEnabled(False) # If using camera_panel
-
-        # Use a default camera index, e.g., from your config file
-        # from utils.config import DEFAULT_CAMERA_INDEX (ensure this exists)
-        default_camera_idx = 0  # Or load from config
-        try:
-            self._start_opencv_camera_thread(default_camera_idx)
-            # save_app_setting(SETTING_LAST_CAMERA_INDEX, default_camera_idx) # If you store this
-        except Exception as e:
-            log.exception(
-                f"Failed to start live feed for OpenCV camera index '{default_camera_idx}': {e}"
-            )
-            QMessageBox.critical(
-                self,
-                "Camera Start Error",
-                f"Could not start live feed for OpenCV camera index {default_camera_idx}:\n{e}",
-            )
 
     def _init_paths_and_icons(self):
         base = os.path.dirname(os.path.abspath(__file__))
@@ -256,7 +204,13 @@ class MainWindow(QMainWindow):
         self.bottom_split.setStretchFactor(1, 1)  # Plot view
         layout.addWidget(self.bottom_split, 1)  # Give it more stretch
         self.setCentralWidget(central)
-
+    
+    def _connect_camera_signals(self):
+        if self.camera_thread:
+            self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
+            self.camera_thread.camera_properties_updated.connect(
+                self.camera_panel.update_property_sliders_from_thread)
+            
     def _build_menus(self):
         mb = self.menuBar()
         fm = mb.addMenu("&File")
@@ -378,12 +332,33 @@ class MainWindow(QMainWindow):
         self._app_session_timer.timeout.connect(self._update_app_session_time)
         self._app_session_timer.start()
 
-    def _handle_camera_property_change(self, name: str, value: float):
-        """Relay UI change to OpenCV camera thread."""
-        if self.camera_thread:
-            self.camera_thread.set_camera_property(name, value)
-            log.debug(f"[MainWindow] Relayed {name} = {value} to camera thread.")
+     @pyqtSlot()
+    def _clear_pressure_plot(self):
+        if self.pressure_plot_widget:
+            self.pressure_plot_widget.clear_plot()
+            self.statusBar().showMessage("Pressure plot data cleared.", 3000)
 
+    def _set_initial_splitter_sizes(self):
+        if self.bottom_split:
+            w = self.bottom_split.width()
+            if w > 0:  # Ensure width is positive before calculating
+                self.bottom_split.setSizes([int(w * 0.6), int(w * 0.4)])
+            else:  # Fallback or retry if width is not yet available
+                QTimer.singleShot(100, self._set_initial_splitter_sizes)
+
+    def _start_opencv_camera_thread(self):
+        """Start OpenCV-based camera thread and connect it to the view."""
+        from threads.opencv_camera_thread import OpenCVCameraThread
+
+        self.camera_thread = OpenCVCameraThread(index=0, resolution=(1280, 720), fps=10)
+        self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
+        self.camera_thread.camera_properties_updated.connect(
+            self.camera_control_panel.update_controls_from_camera
+        )
+        self.camera_thread.start()
+
+        log.info("OpenCV camera thread started with resolution=(1280, 720) at 10 FPS.")
+    
     def _set_initial_control_states(self):
         if self.top_ctrl:
             self.top_ctrl.update_connection_status("Disconnected", False)
@@ -395,6 +370,36 @@ class MainWindow(QMainWindow):
             self.camera_panel.setEnabled(
                 False
             )  # Ensure camera panel is initially disabled
+
+    def _report_camera_info_to_log(self, info_dict):
+        for key, val in info_dict.items():
+            log.info(f"[OpenCV Camera Info] {key}: {val}")
+
+    def _initialize_opencv_camera(self):  # New or renamed method
+        log.info("Attempting to initialize OpenCV camera...")
+        # if self.camera_panel: self.camera_panel.setEnabled(False) # If using camera_panel
+
+        # Use a default camera index, e.g., from your config file
+        # from utils.config import DEFAULT_CAMERA_INDEX (ensure this exists)
+        default_camera_idx = 0  # Or load from config
+        try:
+            self._start_opencv_camera_thread(default_camera_idx)
+            # save_app_setting(SETTING_LAST_CAMERA_INDEX, default_camera_idx) # If you store this
+        except Exception as e:
+            log.exception(
+                f"Failed to start live feed for OpenCV camera index '{default_camera_idx}': {e}"
+            )
+            QMessageBox.critical(
+                self,
+                "Camera Start Error",
+                f"Could not start live feed for OpenCV camera index {default_camera_idx}:\n{e}",
+            )
+
+    def _handle_camera_property_change(self, name: str, value: float):
+        """Relay UI change to OpenCV camera thread."""
+        if self.camera_thread:
+            self.camera_thread.set_camera_property(name, value)
+            log.debug(f"[MainWindow] Relayed {name} = {value} to camera thread.")
 
     @pyqtSlot(str)
     def _handle_serial_status_change(self, status: str):
@@ -981,12 +986,6 @@ class MainWindow(QMainWindow):
                 "Plot Data Save Error",
                 f"Could not automatically save plot CSV data:\n{e_save_plot}",
             )
-
-    @pyqtSlot()
-    def _clear_pressure_plot(self):
-        if self.pressure_plot_widget:
-            self.pressure_plot_widget.clear_plot()
-            self.statusBar().showMessage("Pressure plot data cleared.", 3000)
 
     @pyqtSlot()
     def _export_plot_data_as_csv(self):

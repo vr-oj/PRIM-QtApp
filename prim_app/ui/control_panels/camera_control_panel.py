@@ -1,71 +1,140 @@
+# PRIM-QTAPP/ui/control_panels/camera_control_panel.py
 import logging
 from PyQt5.QtWidgets import (
     QWidget,
-    QVBoxLayout,
-    QFormLayout,
-    QCheckBox,
-    QSlider,
     QLabel,
-    QSizePolicy,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QSlider,
+    QCheckBox,
 )
-from PyQt5.QtCore import Qt, pyqtSlot
+from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 
 log = logging.getLogger(__name__)
 
 
 class CameraControlPanel(QWidget):
+    property_changed = pyqtSignal(str, float)  # e.g., ('Gain', 0.5)
+    auto_exposure_toggled = pyqtSignal(bool)
+
     def __init__(self, ic4_controller=None, parent=None):
         super().__init__(parent)
-        self.ic4_controller = ic4_controller
-        self._init_ui()
+        self.ic4 = ic4_controller
+        self._is_auto_exposure = True
+        self._block_slider_signals = False
+        self._build_ui()
         self._connect_signals()
-        self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
 
-    def _init_ui(self):
+        if self.ic4:
+            self._sync_from_camera()
+
+    def _build_ui(self):
         layout = QVBoxLayout(self)
-        self.form = QFormLayout()
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(6)
 
-        # Auto Exposure Toggle
-        self.auto_exposure_checkbox = QCheckBox("Auto Exposure")
-        self.auto_exposure_checkbox.setChecked(True)
-        self.form.addRow("Auto Exposure", self.auto_exposure_checkbox)
+        # --- Auto Exposure Toggle ---
+        ae_row = QHBoxLayout()
+        self.ae_checkbox = QCheckBox("Auto Exposure")
+        self.ae_checkbox.setChecked(True)
+        ae_row.addWidget(self.ae_checkbox)
+        layout.addLayout(ae_row)
 
-        # Gain Slider
+        # --- Gain Slider ---
+        gain_row = QHBoxLayout()
+        self.gain_label = QLabel("Gain:")
         self.gain_slider = QSlider(Qt.Horizontal)
         self.gain_slider.setMinimum(0)
-        self.gain_slider.setMaximum(255)
-        self.gain_slider.setValue(128)
-        self.gain_label = QLabel("128")
-        gain_layout = QVBoxLayout()
-        gain_layout.addWidget(self.gain_slider)
-        gain_layout.addWidget(self.gain_label)
-        self.form.addRow("Gain", gain_layout)
+        self.gain_slider.setMaximum(100)
+        self.gain_slider.setEnabled(False)
+        gain_row.addWidget(self.gain_label)
+        gain_row.addWidget(self.gain_slider)
+        layout.addLayout(gain_row)
 
-        layout.addLayout(self.form)
+        # --- Brightness Slider ---
+        bright_row = QHBoxLayout()
+        self.brightness_label = QLabel("Brightness:")
+        self.brightness_slider = QSlider(Qt.Horizontal)
+        self.brightness_slider.setMinimum(0)
+        self.brightness_slider.setMaximum(100)
+        self.brightness_slider.setEnabled(False)
+        bright_row.addWidget(self.brightness_label)
+        bright_row.addWidget(self.brightness_slider)
+        layout.addLayout(bright_row)
+
+        self.setLayout(layout)
 
     def _connect_signals(self):
-        self.auto_exposure_checkbox.toggled.connect(self._on_auto_exposure_changed)
+        self.ae_checkbox.toggled.connect(self._on_auto_exposure_toggled)
         self.gain_slider.valueChanged.connect(self._on_gain_changed)
+        self.brightness_slider.valueChanged.connect(self._on_brightness_changed)
+
+    def _sync_from_camera(self):
+        log.info("[CameraControlPanel] Syncing UI with current camera state...")
+        if not self.ic4:
+            log.warning("[CameraControlPanel] No IC4 controller attached.")
+            return
+
+        try:
+            ae_on = self.ic4.get_auto_exposure()
+            self._is_auto_exposure = ae_on
+            self.ae_checkbox.setChecked(ae_on)
+            self.gain_slider.setEnabled(not ae_on)
+            self.brightness_slider.setEnabled(not ae_on)
+
+            gain_range = self.ic4.get_property_range("Gain")
+            gain_value = self.ic4.get_property("Gain")
+            bright_range = self.ic4.get_property_range("Brightness")
+            bright_value = self.ic4.get_property("Brightness")
+
+            self._block_slider_signals = True
+            self.gain_slider.setMinimum(gain_range[0])
+            self.gain_slider.setMaximum(gain_range[1])
+            self.gain_slider.setValue(int(gain_value))
+
+            self.brightness_slider.setMinimum(bright_range[0])
+            self.brightness_slider.setMaximum(bright_range[1])
+            self.brightness_slider.setValue(int(bright_value))
+            self._block_slider_signals = False
+
+            log.info(
+                "[CameraControlPanel] UI synced to Gain %.1f, Brightness %.1f",
+                gain_value,
+                bright_value,
+            )
+
+        except Exception as e:
+            log.exception("[CameraControlPanel] Error syncing camera properties: %s", e)
 
     @pyqtSlot(bool)
-    def _on_auto_exposure_changed(self, enabled):
-        log.debug(f"[UI → ic4] Auto Exposure set to {enabled}")
-        if self.ic4_controller:
-            self.ic4_controller.set_auto_exposure(enabled)
+    def _on_auto_exposure_toggled(self, checked):
+        self._is_auto_exposure = checked
+        if self.ic4:
+            self.ic4.set_auto_exposure(checked)
+        self.gain_slider.setEnabled(not checked)
+        self.brightness_slider.setEnabled(not checked)
+        log.info("[CameraControlPanel] Auto Exposure set to %s", checked)
 
-    @pyqtSlot(int)
     def _on_gain_changed(self, value):
-        self.gain_label.setText(str(value))
-        log.debug(f"[UI → ic4] Gain set to {value}")
-        if self.ic4_controller:
-            self.ic4_controller.set_gain(value)
-
-    def sync_ui_with_camera(self):
-        if not self.ic4_controller:
+        if self._block_slider_signals:
             return
-        props = self.ic4_controller.get_all_properties()
-        ae_val = props.get("Auto Exposure", "Off")
-        gain_val = props.get("Gain", 128)
-        self.auto_exposure_checkbox.setChecked(ae_val in ["On", "Continuous"])
-        self.gain_slider.setValue(int(gain_val))
-        log.debug(f"[UI Sync] AE={ae_val}, Gain={gain_val}")
+        if self.ic4:
+            self.ic4.set_property("Gain", float(value))
+        self.property_changed.emit("Gain", float(value))
+
+    def _on_brightness_changed(self, value):
+        if self._block_slider_signals:
+            return
+        if self.ic4:
+            self.ic4.set_property("Brightness", float(value))
+        self.property_changed.emit("Brightness", float(value))
+
+    def refresh_controls(self):
+        self._sync_from_camera()
+
+    def setEnabled(self, enabled: bool):
+        super().setEnabled(enabled)
+        self.ae_checkbox.setEnabled(enabled)
+        self.gain_slider.setEnabled(enabled and not self._is_auto_exposure)
+        self.brightness_slider.setEnabled(enabled and not self._is_auto_exposure)
