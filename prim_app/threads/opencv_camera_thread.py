@@ -13,9 +13,9 @@ class OpenCVCameraThread(QThread):
     frame_ready = pyqtSignal(np.ndarray)
     camera_properties_updated = pyqtSignal(dict)
 
-    def __init__(self, camera_index=0, resolution=(1280, 720), fps=10, parent=None):
+    def __init__(self, device_index=0, resolution=(1280, 720), fps=10, parent=None):
         super().__init__(parent)
-        self.camera_index = camera_index
+        self.camera_index = device_index
         self.target_width = resolution[0]
         self.target_height = resolution[1]
         self.target_fps = fps
