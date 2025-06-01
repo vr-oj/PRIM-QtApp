@@ -11,42 +11,40 @@ print("✅ IC4 Library initialized")
 grabber = ic4.Grabber()
 print("✅ Grabber created")
 
-# Step 3: List available devices
-devices = ic4.devenum.get_device_list()
-if not devices:
-    print("❌ No devices found.")
+# Step 3: List available devices (correct method for your installed version)
+try:
+    device_list = grabber.get_available_video_capture_devices()
+    if not device_list:
+        print("❌ No devices found.")
+        exit(1)
+    print("✅ Available devices:")
+    for i, dev in enumerate(device_list):
+        print(f"  {i+1}. {dev.get_display_name()}")
+except Exception as e:
+    print(f"❌ Error getting device list: {e}")
     exit(1)
 
-# Pick the first DMK camera
-camera = next((dev for dev in devices if "DMK" in dev.name), None)
-if not camera:
+# Step 4: Try to open the first DMK camera
+dmk_device = next((dev for dev in device_list if "DMK" in dev.get_display_name()), None)
+
+if dmk_device is None:
     print("❌ No DMK camera found.")
     exit(1)
 
-print(f"✅ Found camera: {camera.name}")
+try:
+    grabber.open_video_capture_device(dmk_device)
+    print(f"✅ Opened camera: {dmk_device.get_display_name()}")
+except Exception as e:
+    print(f"❌ Failed to open camera: {e}")
+    exit(1)
 
-# Step 4: Open the camera
-grabber.open_device(camera)
-print("✅ Camera opened successfully")
+# Step 5: Try to access property map
+try:
+    props = grabber.get_property_map()
+    print("✅ Retrieved property map")
+except Exception as e:
+    print(f"❌ Failed to access properties: {e}")
 
-# Step 5: List all properties
-props = grabber.get_property_map()
-print("✅ Retrieved property map")
-
-
-# Try reading key properties
-def read_prop(name):
-    try:
-        prop = props.get_property(name)
-        value = prop.get_value()
-        print(f"🔍 {name}: {value}")
-    except Exception as e:
-        print(f"⚠️  Could not read {name}: {e}")
-
-
-for pname in ["Exposure Auto", "Exposure", "Gain", "Frame Rate"]:
-    read_prop(pname)
-
-# Done
-grabber.close_device()
+# Cleanup
+grabber.close_video_capture_device()
 print("✅ Camera closed")
