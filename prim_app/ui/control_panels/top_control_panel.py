@@ -49,18 +49,6 @@ class TopControlPanel(QWidget):
 
         layout.addWidget(status_box, 1)
 
-        # Plot control panel
-        self.plot_controls = PlotControlPanel(self)
-        layout.addWidget(self.plot_controls, 1)
-
-        # Forward plot signals
-        self.plot_controls.x_axis_limits_changed.connect(self.x_axis_limits_changed)
-        self.plot_controls.y_axis_limits_changed.connect(self.y_axis_limits_changed)
-        self.plot_controls.export_plot_image_requested.connect(
-            self.export_plot_image_requested
-        )
-        self.plot_controls.clear_plot_requested.connect(self.clear_plot_requested)
-
     def update_connection_status(self, text: str, connected: bool):
         """
         Show connection status (with color coding).
