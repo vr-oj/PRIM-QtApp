@@ -123,3 +123,12 @@ class IC4CameraController:
             except Exception as e:
                 log.warning(f"[IC4] Failed to read '{name}': {e}")
         return props
+
+    def get_auto_exposure(self):
+        if not self.device:
+            return False
+        try:
+            return bool(self.device["Auto Exposure"].value)
+        except Exception as e:
+            log.warning(f"[IC4] Failed to get Auto Exposure state: {e}")
+            return False
