@@ -25,7 +25,7 @@ class OpenCVCameraThread(QThread):
     def run(self):
         try:
             log.info(
-                f"Attempting to open OpenCV camera at index {self.camera_index}..."
+                f"Attempting to open OpenCV camera at index {self.device_index}..."
             )
             self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
 
