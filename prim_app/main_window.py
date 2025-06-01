@@ -124,74 +124,73 @@ class MainWindow(QMainWindow):
             else:  # Fallback or retry if width is not yet available
                 QTimer.singleShot(100, self._set_initial_splitter_sizes)
 
-    def _connect_camera_signals(self):
-        th = self.camera_thread
-        if not (th and self.camera_view):  # cp not strictly needed for simplified view
-            log.warning("Cannot connect camera signals: thread or view missing.")
-            return True  # Indicate failure or inability to connect
+    def __init__(self):
+        super().__init__()
+        self._serial_thread = None
+        self._recording_worker = None
+        self._is_recording = False
+        self.camera_thread = None
+        self.camera_panel = None
+        self.camera_view = None
+        self.bottom_split = None
+        self.camera_settings = {}
 
-        # Disconnect any existing signals to be safe (optional for this simplification if re-creating thread)
-        try:
-            th.frame_ready.disconnect()
-        except TypeError:
-            pass
-        try:
-            th.camera_error.disconnect()
-        except TypeError:
-            pass
+        self._init_paths_and_icons()
+        self._build_console_log_dock()
+        self._build_central_widget_layout()
+        self.ic4_controller = IC4CameraController()
+        self.camera_control_panel = self.camera_panel
 
-        self.camera_control_panel.property_changed.connect(
-            self._handle_camera_property_change
-        )
-        # --- SIMPLIFIED CONNECTIONS ---
-        th.frame_ready.connect(self.camera_view.update_frame)
-        th.camera_error.connect(self._on_camera_error)
+        self._build_menus()
+        self._build_main_toolbar()
+        self._build_status_bar()
 
-        log.info("OpenCV camera signals connected (frame_ready, camera_error).")
-        return False  # Indicate success
-
-    def _start_opencv_camera_thread(self, camera_index=0):
-        self.ic4_controller.open_camera()
-        # Clean up any previous camera thread
-        if self.camera_thread:
-            self.camera_thread.stop()
-            self.camera_thread.wait()
-
-        # Detect the connected camera model and load its capabilities
         self.camera_model, self.camera_profile = detect_connected_camera()
         if self.camera_model:
             log.info(f"Connected camera identified as: {self.camera_model}")
+            log.info(f"Profile loaded: {self.camera_profile}")
         else:
-            log.warning("Camera model not identified. Using default settings.")
-            self.camera_profile = {}
+            log.warning("Unable to detect known camera model. Using fallback settings.")
 
-        resolution = self.camera_profile.get("safe_fallback_resolution", (1280, 720))
-        fps = self.camera_profile.get("default_fps", 10)
-
-        # Initialize the OpenCV camera thread with capabilities
-        self.camera_thread = OpenCVCameraThread(
-            device_index=camera_index, resolution=resolution, fps=fps
+        self.top_ctrl.x_axis_limits_changed.connect(
+            self.pressure_plot_widget.set_manual_x_limits
         )
+        self.top_ctrl.y_axis_limits_changed.connect(
+            self.pressure_plot_widget.set_manual_y_limits
+        )
+        self.top_ctrl.export_plot_image_requested.connect(
+            self.pressure_plot_widget.export_as_image
+        )
+        self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
 
-        # Connect camera thread signals
-        self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
+        self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
+
+        QTimer.singleShot(50, self._set_initial_splitter_sizes)
+        QTimer.singleShot(100, self._start_opencv_camera_thread)
+        self._set_initial_control_states()
+        log.info("MainWindow initialized.")
+        self.showMaximized()
+
+    def _connect_camera_signals(self):
+        """Wire up camera control panel to camera thread."""
+        if self.camera_control_panel:
+            self.camera_control_panel.property_changed.connect(
+                self._handle_camera_property_change
+            )
+            log.debug("Camera control panel signals connected.")
+
+    def _start_opencv_camera_thread(self):
+        """Start OpenCV-based camera thread and connect it to the view."""
+        from threads.opencv_camera_thread import OpenCVCameraThread
+
+        self.camera_thread = OpenCVCameraThread(index=0, resolution=(1280, 720), fps=10)
+        self.camera_thread.frame_ready.connect(self.camera_view.update_image)
         self.camera_thread.camera_properties_updated.connect(
             self.camera_control_panel.update_controls_from_camera
         )
-        self.camera_control_panel.property_changed.connect(
-            self.camera_thread.set_camera_property
-        )
-        self.camera_thread.camera_info_reported.connect(self._report_camera_info_to_log)
-
-        # Start camera thread
         self.camera_thread.start()
 
-        # Enable camera control panel now that the camera is running
-        self.camera_control_panel.setEnabled(True)
-
-        log.info(
-            f"OpenCV camera thread started with resolution={resolution} at {fps} FPS."
-        )
+        log.info("OpenCV camera thread started with resolution=(1280, 720) at 10 FPS.")
 
     def _report_camera_info_to_log(self, info_dict):
         for key, val in info_dict.items():
@@ -424,15 +423,10 @@ class MainWindow(QMainWindow):
         self._app_session_timer.start()
 
     def _handle_camera_property_change(self, name: str, value: float):
-        log.debug(f"[Main] UI change → {name} = {value}")
-
-        # Route to IC4 controller
-        if self.ic4_controller.is_ready():
-            self.ic4_controller.set_property(name, value)
-        else:
-            # fallback to OpenCV if needed
-            if self.camera_thread:
-                self.camera_thread.set_camera_property(name, value)
+        """Relay UI change to OpenCV camera thread."""
+        if self.camera_thread:
+            self.camera_thread.set_camera_property(name, value)
+            log.debug(f"[MainWindow] Relayed {name} = {value} to camera thread.")
 
     def _set_initial_control_states(self):
         if self.top_ctrl:
