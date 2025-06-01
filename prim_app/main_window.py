@@ -173,13 +173,19 @@ class MainWindow(QMainWindow):
 
     def _build_central_widget_layout(self):
         """
-        Builds a layout that matches:
+        Builds a layout matching the screenshot:
         ┌────────────────────────────────────────────────────────────────┐
-        │  Top Row:  [Camera Controls Tabs] [Device Status Panel] [Plot Controls Panel] │
+        │  Top Row:  [Camera Controls Tabs] [Device Status] [Plot Controls] │
         ├────────────────────────────────────────────────────────────────┤
-        │  Bottom Row:  [QtCameraWidget (live feed)] | [PressurePlotWidget (plot)]   │
+        │  Bottom Row:  [QtCameraWidget (live feed)] | [PressurePlotWidget] │
         └────────────────────────────────────────────────────────────────┘
         """
+
+        # ----------------------------
+        # 0) Pre‐create the camera_widget so it exists before we create the control panel
+        # ----------------------------
+        self.camera_widget = QtCameraWidget(self)
+        # Initially, leave it enabled (the Start button inside will handle on/off)
 
         # ----------------------------
         # 1) Create the container
@@ -207,12 +213,13 @@ class MainWindow(QMainWindow):
         source_lay.setContentsMargins(6, 6, 6, 6)
         source_lay.setSpacing(6)
 
-        # Device dropdown (will be populated at runtime)
+        # Device dropdown (populated later)
         self.device_combo = QComboBox()
-        self.device_combo.addItem("Select Device...", None)  # Placeholder
+        self.device_combo.addItem("Select Device...", None)
+        self.device_combo.currentIndexChanged.connect(self._on_device_selected)
         source_lay.addRow("Device:", self.device_combo)
 
-        # Resolution dropdown (populated after device enumeration)
+        # Resolution dropdown (populated when device selected)
         self.resolution_combo = QComboBox()
         self.resolution_combo.addItem("Select Resolution...", None)
         source_lay.addRow("Resolution:", self.resolution_combo)
@@ -230,12 +237,11 @@ class MainWindow(QMainWindow):
         adjustments_lay.setContentsMargins(6, 6, 6, 6)
         adjustments_lay.setSpacing(6)
 
-        # Our dynamic CameraControlPanel (builds sliders for Gain, Brightness, etc.)
-        # We’ll instantiate it with a placeholder – it will be enabled once the camera thread is ready.
+        # Now that self.camera_widget exists, we can create the panel with its internal thread
         self.camera_control_panel = CameraControlPanel(
             camera_thread=self.camera_widget._cam_thread, parent=self
         )
-        self.camera_control_panel.setEnabled(False)  # Disabled until camera is running
+        self.camera_control_panel.setEnabled(False)  # Disabled until camera starts
         adjustments_lay.addWidget(self.camera_control_panel)
 
         camera_tabs.addTab(adjustments_tab, "Adjustments")
@@ -246,7 +252,6 @@ class MainWindow(QMainWindow):
         roi_lay.setContentsMargins(6, 6, 6, 6)
         roi_lay.setSpacing(6)
 
-        # Placeholder text – you can replace with actual ROI controls later
         roi_placeholder = QLabel("ROI controls will go here.")
         roi_placeholder.setAlignment(Qt.AlignCenter)
         roi_lay.addWidget(roi_placeholder)
@@ -262,23 +267,18 @@ class MainWindow(QMainWindow):
         status_lay.setContentsMargins(6, 6, 6, 6)
         status_lay.setSpacing(4)
 
-        # Connection status label
         self.lbl_connection = QLabel("Disconnected")
         status_lay.addRow("Connection:", self.lbl_connection)
 
-        # Device Frame # label
         self.lbl_frame_number = QLabel("0")
         status_lay.addRow("Device Frame #:", self.lbl_frame_number)
 
-        # Device Time (s) label
         self.lbl_device_time = QLabel("0.00")
         status_lay.addRow("Device Time (s):", self.lbl_device_time)
 
-        # Current Pressure (mmHg) label
         self.lbl_current_pressure = QLabel("0.00")
         status_lay.addRow("Current Pressure:", self.lbl_current_pressure)
 
-        # Make status panel a fixed‐width so it doesn’t expand too wide
         status_panel.setFixedWidth(250)
         top_row_lay.addWidget(status_panel, stretch=1)
 
@@ -288,13 +288,11 @@ class MainWindow(QMainWindow):
         plot_lay.setContentsMargins(6, 6, 6, 6)
         plot_lay.setSpacing(4)
 
-        # Auto-scale X checkbox
         self.chk_autoscale_x = QCheckBox("Auto‐scale X")
         self.chk_autoscale_x.setChecked(True)
         self.chk_autoscale_x.stateChanged.connect(self._on_autoscale_x_toggled)
         plot_lay.addRow("", self.chk_autoscale_x)
 
-        # X‐Limits Min / Max
         self.edit_xmin = QLineEdit("0.0")
         self.edit_xmin.setEnabled(False)
         self.edit_xmax = QLineEdit("0.0")
@@ -309,13 +307,11 @@ class MainWindow(QMainWindow):
         xlimits_lay.addWidget(self.edit_xmax)
         plot_lay.addRow("X‐Limits:", xlimits_row)
 
-        # Auto‐scale Y checkbox
         self.chk_autoscale_y = QCheckBox("Auto‐scale Y")
         self.chk_autoscale_y.setChecked(True)
         self.chk_autoscale_y.stateChanged.connect(self._on_autoscale_y_toggled)
         plot_lay.addRow("", self.chk_autoscale_y)
 
-        # Y‐Limits Min / Max
         self.edit_ymin = QLineEdit("0.0")
         self.edit_ymin.setEnabled(False)
         self.edit_ymax = QLineEdit("30.0")
@@ -330,21 +326,18 @@ class MainWindow(QMainWindow):
         ylimits_lay.addWidget(self.edit_ymax)
         plot_lay.addRow("Y‐Limits:", ylimits_row)
 
-        # Reset Zoom/View button
         btn_reset_zoom = QPushButton("Reset Zoom/View")
         btn_reset_zoom.clicked.connect(self._on_reset_zoom)
         plot_lay.addRow("", btn_reset_zoom)
 
-        # Export Plot Image button
         btn_export_plot = QPushButton("Export Plot Image")
         btn_export_plot.clicked.connect(self._on_export_plot_image)
         plot_lay.addRow("", btn_export_plot)
 
-        # Fix its width so it doesn’t expand too large
         plot_ctrl_panel.setFixedWidth(300)
         top_row_lay.addWidget(plot_ctrl_panel, stretch=1)
 
-        # Add the completed top row to the main vertical layout
+        # Add the completed top row to the main layout
         main_vlay.addWidget(top_row_widget, stretch=0)
 
         # ----------------------------
@@ -354,7 +347,6 @@ class MainWindow(QMainWindow):
         self.bottom_split.setChildrenCollapsible(False)
 
         # -- 3a) Left: Live Camera Feed --
-        self.camera_widget = QtCameraWidget(self)
         self.camera_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.bottom_split.addWidget(self.camera_widget)
 
@@ -365,7 +357,7 @@ class MainWindow(QMainWindow):
         )
         self.bottom_split.addWidget(self.pressure_plot_widget)
 
-        # Balance the two panes roughly equally
+        # Balance the two panes
         self.bottom_split.setStretchFactor(0, 1)
         self.bottom_split.setStretchFactor(1, 1)
 
