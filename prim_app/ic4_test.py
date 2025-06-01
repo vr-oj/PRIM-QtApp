@@ -1,50 +1,57 @@
-# ic4_test.py
 import imagingcontrol4 as ic4
 
-print("✅ Starting IC4 test...")
 
-# Step 1: Initialize the library
-ic4.Library.init()
-print("✅ IC4 Library initialized")
+def format_device_info(device_info: ic4.DeviceInfo) -> str:
+    return f"Model: {device_info.model_name}, Serial: {device_info.serial}"
 
-# Step 2: Create a Grabber instance
-grabber = ic4.Grabber()
-print("✅ Grabber created")
 
-# Step 3: List available devices (correct method for your installed version)
-try:
-    device_list = grabber.get_available_video_capture_devices()
-    if not device_list:
-        print("❌ No devices found.")
-        exit(1)
-    print("✅ Available devices:")
-    for i, dev in enumerate(device_list):
-        print(f"  {i+1}. {dev.get_display_name()}")
-except Exception as e:
-    print(f"❌ Error getting device list: {e}")
-    exit(1)
+def print_device_list():
+    print("\n🔍 Enumerating all attached video capture devices...\n")
+    devices = ic4.DeviceEnum.devices()
 
-# Step 4: Try to open the first DMK camera
-dmk_device = next((dev for dev in device_list if "DMK" in dev.get_display_name()), None)
+    if not devices:
+        print("❌ No devices found.\n")
+    else:
+        print(f"✅ Found {len(devices)} device(s):")
+        for device in devices:
+            print(f" - {format_device_info(device)}")
 
-if dmk_device is None:
-    print("❌ No DMK camera found.")
-    exit(1)
 
-try:
-    grabber.open_video_capture_device(dmk_device)
-    print(f"✅ Opened camera: {dmk_device.get_display_name()}")
-except Exception as e:
-    print(f"❌ Failed to open camera: {e}")
-    exit(1)
+def print_interface_device_tree():
+    print("\n📡 Enumerating video capture devices by interface...\n")
+    interfaces = ic4.DeviceEnum.interfaces()
 
-# Step 5: Try to access property map
-try:
-    props = grabber.get_property_map()
-    print("✅ Retrieved property map")
-except Exception as e:
-    print(f"❌ Failed to access properties: {e}")
+    if not interfaces:
+        print("❌ No interfaces found.\n")
+        return
 
-# Cleanup
-grabber.close_video_capture_device()
-print("✅ Camera closed")
+    for interface in interfaces:
+        print(f"Interface: {interface.display_name}")
+        print(
+            f"  ↳ Transport Layer: {interface.transport_layer_name} ({interface.transport_layer_type})"
+        )
+        for device in interface.devices:
+            print(f"    - {format_device_info(device)}")
+
+
+def main():
+    print("✅ Starting IC4 test...")
+
+    try:
+        ic4.Library.init(
+            api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
+        )
+        print("✅ IC4 Library initialized")
+
+        print_device_list()
+        print_interface_device_tree()
+
+    except Exception as e:
+        print(f"❌ Error during IC4 test: {e}")
+    finally:
+        ic4.Library.exit()
+        print("\n✅ IC4 Library shut down cleanly.")
+
+
+if __name__ == "__main__":
+    main()
