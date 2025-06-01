@@ -49,6 +49,7 @@ from utils.config import (
     ABOUT_TEXT,
     # CAMERA_HARDCODED_DEFAULTS, # Temporarily remove usage
 )
+from utils.ic4_camera_controller import IC4CameraController
 from utils.camera_utils import detect_connected_camera
 from ui.control_panels.top_control_panel import TopControlPanel
 from ui.control_panels.camera_control_panel import CameraControlPanel
@@ -82,6 +83,7 @@ class MainWindow(QMainWindow):
         self._init_paths_and_icons()
         self._build_console_log_dock()
         self._build_central_widget_layout()
+        self.ic4_controller = IC4CameraController()
         self.camera_control_panel = self.camera_panel
 
         self._build_menus()
@@ -138,6 +140,9 @@ class MainWindow(QMainWindow):
         except TypeError:
             pass
 
+        self.camera_control_panel.property_changed.connect(
+            self._handle_camera_property_change
+        )
         # --- SIMPLIFIED CONNECTIONS ---
         th.frame_ready.connect(self.camera_view.update_frame)
         th.camera_error.connect(self._on_camera_error)
@@ -146,6 +151,7 @@ class MainWindow(QMainWindow):
         return False  # Indicate success
 
     def _start_opencv_camera_thread(self, camera_index=0):
+        self.ic4_controller.open_camera()
         # Clean up any previous camera thread
         if self.camera_thread:
             self.camera_thread.stop()
@@ -416,6 +422,17 @@ class MainWindow(QMainWindow):
         self._app_session_timer.setInterval(1000)
         self._app_session_timer.timeout.connect(self._update_app_session_time)
         self._app_session_timer.start()
+
+    def _handle_camera_property_change(self, name: str, value: float):
+        log.debug(f"[Main] UI change → {name} = {value}")
+
+        # Route to IC4 controller
+        if self.ic4_controller.is_ready():
+            self.ic4_controller.set_property(name, value)
+        else:
+            # fallback to OpenCV if needed
+            if self.camera_thread:
+                self.camera_thread.set_camera_property(name, value)
 
     def _set_initial_control_states(self):
         if self.top_ctrl:
