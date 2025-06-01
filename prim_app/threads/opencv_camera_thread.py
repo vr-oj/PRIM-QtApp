@@ -90,9 +90,15 @@ class OpenCVCameraThread(QThread):
             return
         if name == "AutoExposure":
             self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0 if value else 0.25)
+            actual = self.cap.get(cv2.CAP_PROP_AUTO_EXPOSURE)
+            log.debug(f"[Cam] AutoExposure set → requested={value}, actual={actual}")
         elif name == "Gain":
             self.cap.set(cv2.CAP_PROP_GAIN, value)
+            actual = self.cap.get(cv2.CAP_PROP_GAIN)
+            log.debug(f"[Cam] Gain set → requested={value}, actual={actual}")
         elif name == "Brightness":
             self.cap.set(cv2.CAP_PROP_BRIGHTNESS, value)
+            actual = self.cap.get(cv2.CAP_PROP_BRIGHTNESS)
+            log.debug(f"[Cam] Brightness set → requested={value}, actual={actual}")
         else:
             log.warning(f"Unknown camera property '{name}' requested to set.")
