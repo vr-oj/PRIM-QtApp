@@ -35,8 +35,9 @@ class OpenCVCameraThread(QThread):
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.target_height)
         self.cap.set(cv2.CAP_PROP_FPS, self.target_fps)
 
-        # Set Auto Exposure ON (1.0 for auto, 0.25 for manual, -1 for off in some drivers)
-        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0)  # Default to Auto ON
+        # Set initial exposure and gain settings
+        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0)  # 1.0 = Auto On, 0.25 = Manual
+        self.cap.set(cv2.CAP_PROP_EXPOSURE, -1)  # Some drivers require this for auto
 
         # Allow time for camera to adjust exposure
         time.sleep(1)
@@ -80,10 +81,6 @@ class OpenCVCameraThread(QThread):
         if self.cap:
             self.cap.set(cv2.CAP_PROP_GAIN, value)
 
-    def set_brightness(self, value: float):
-        if self.cap:
-            self.cap.set(cv2.CAP_PROP_BRIGHTNESS, value)
-
     def set_camera_property(self, name: str, value: float):
         """Generic camera property setter."""
         if self.cap is None:
@@ -96,9 +93,5 @@ class OpenCVCameraThread(QThread):
             self.cap.set(cv2.CAP_PROP_GAIN, value)
             actual = self.cap.get(cv2.CAP_PROP_GAIN)
             log.debug(f"[Cam] Gain set → requested={value}, actual={actual}")
-        elif name == "Brightness":
-            self.cap.set(cv2.CAP_PROP_BRIGHTNESS, value)
-            actual = self.cap.get(cv2.CAP_PROP_BRIGHTNESS)
-            log.debug(f"[Cam] Brightness set → requested={value}, actual={actual}")
         else:
             log.warning(f"Unknown camera property '{name}' requested to set.")

@@ -68,11 +68,9 @@ class CameraControlPanel(QWidget):
         self.setEnabled(True)
         self.auto_exposure_checkbox.setEnabled(True)
         self.gain_slider.setEnabled(True)
-        self.brightness_slider.setEnabled(True)
 
         self.auto_exposure_checkbox.blockSignals(False)
         self.gain_slider.blockSignals(False)
-        self.brightness_slider.blockSignals(False)
 
         log.debug(f"[UI Sync] AE={ae > 0}, Gain={gain}, Brightness={brightness}")
 
