@@ -7,7 +7,23 @@ from PyQt5.QtGui import QImage
 
 
 class SDKCameraThread(QThread):
+    """
+    QThread that opens a chosen IC4 device, sets resolution (if requested),
+    emits `grabber_ready` once the camera is open, then continuously grabs frames.
+    Emits:
+      - grabber_ready(): after device_open() and any resolution setup
+      - frame_ready(QImage, numpy.ndarray): each time a new frame is available
+      - error(str, str): on any error (message, error_code)
+    """
+
+    # Signal emitted as soon as grabber.device_open() (and optional resolution) succeed
     grabber_ready = pyqtSignal()
+
+    # Signal emitted for each new frame: QImage (for display) and raw NumPy array (BGRA)
+    frame_ready = pyqtSignal(QImage, object)
+
+    # Signal for errors: (message, code)
+    error = pyqtSignal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
