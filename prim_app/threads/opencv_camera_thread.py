@@ -81,3 +81,16 @@ class OpenCVCameraThread(QThread):
     def set_brightness(self, value: float):
         if self.cap:
             self.cap.set(cv2.CAP_PROP_BRIGHTNESS, value)
+
+    def set_camera_property(self, name: str, value: float):
+        """Generic camera property setter."""
+        if self.cap is None:
+            return
+        if name == "AutoExposure":
+            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0 if value else 0.25)
+        elif name == "Gain":
+            self.cap.set(cv2.CAP_PROP_GAIN, value)
+        elif name == "Brightness":
+            self.cap.set(cv2.CAP_PROP_BRIGHTNESS, value)
+        else:
+            log.warning(f"Unknown camera property '{name}' requested to set.")
