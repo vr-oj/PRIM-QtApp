@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QPixmap
 
-from .sdk_camera_thread import SDKCameraThread
+from threads.sdk_camera_thread import SDKCameraThread
 
 
 class QtCameraWidget(QWidget):

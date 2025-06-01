@@ -55,7 +55,7 @@ from ui.control_panels.top_control_panel import TopControlPanel
 from ui.control_panels.camera_control_panel import CameraControlPanel
 from ui.canvas.qtcamera_widget import QtCameraWidget
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
-from threads.opencv_camera_thread import OpenCVCameraThread
+from threads.sdk_camera_thread import SDKCameraThread
 from threads.serial_thread import SerialThread
 
 from recording import RecordingWorker
