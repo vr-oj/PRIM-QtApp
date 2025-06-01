@@ -132,3 +132,14 @@ class IC4CameraController:
         except Exception as e:
             log.warning(f"[IC4] Failed to get Auto Exposure state: {e}")
             return False
+
+    def get_property_range(self, name: str):
+        if not self.device:
+            log.warning(f"[IC4] Cannot get range. No device.")
+            return None
+        try:
+            prop = self.device[name]
+            return (prop.range.min, prop.range.max)
+        except Exception as e:
+            log.error(f"[IC4] Failed to get range for {name}: {e}")
+            return None
