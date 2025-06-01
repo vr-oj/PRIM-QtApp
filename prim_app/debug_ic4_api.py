@@ -1,15 +1,10 @@
+# file: debug_ic4_inspect.py
 import imagingcontrol4 as ic4
 
-try:
-    ic4.library.Library.init()
-    print("✅ IC4 Library initialized")
+print("Attributes in imagingcontrol4:")
+print(dir(ic4))
 
-    grabber = ic4.grabber.Grabber()
-    print("✅ Grabber created")
-
-    devices = grabber.get_available_video_capture_devices()
-    print(f"🔍 Found {len(devices)} device(s):")
-    for device in devices:
-        print(f"  - {device.name}")
-except Exception as e:
-    print("❌ Error:", e)
+if hasattr(ic4, "Grabber"):
+    g = ic4.Grabber()
+    print("Grabber object methods:")
+    print(dir(g))
