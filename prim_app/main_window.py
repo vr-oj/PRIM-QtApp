@@ -282,29 +282,39 @@ class MainWindow(QMainWindow):
         )
         self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
 
-        # PlotControlPanel → PressurePlotWidget
-        self.plot_control_panel.autoscale_x_changed.connect(
-            self.pressure_plot_widget.set_auto_scale_x
-        )
-        self.plot_control_panel.autoscale_y_changed.connect(
-            self.pressure_plot_widget.set_auto_scale_y
-        )
-        self.plot_control_panel.x_axis_limits_changed.connect(
-            self.pressure_plot_widget.set_manual_x_limits
-        )
-        self.plot_control_panel.y_axis_limits_changed.connect(
-            self.pressure_plot_widget.set_manual_y_limits
-        )
-        self.plot_control_panel.reset_zoom_requested.connect(
-            lambda: self.pressure_plot_widget.reset_zoom(
-                self.plot_control_panel.is_autoscale_x(),
-                self.plot_control_panel.is_autoscale_y(),
+        # PlotControlPanel → PressurePlotWidget (only if methods exist)
+        if hasattr(self.pressure_plot_widget, "set_auto_scale_x"):
+            self.plot_control_panel.autoscale_x_changed.connect(
+                self.pressure_plot_widget.set_auto_scale_x
             )
-        )
-        self.plot_control_panel.export_plot_image_requested.connect(
-            self.pressure_plot_widget.export_as_image
-        )
-        self.plot_control_panel.clear_plot_requested.connect(self._clear_pressure_plot)
+        if hasattr(self.pressure_plot_widget, "set_auto_scale_y"):
+            self.plot_control_panel.autoscale_y_changed.connect(
+                self.pressure_plot_widget.set_auto_scale_y
+            )
+        if hasattr(self.pressure_plot_widget, "set_manual_x_limits"):
+            self.plot_control_panel.x_axis_limits_changed.connect(
+                self.pressure_plot_widget.set_manual_x_limits
+            )
+        if hasattr(self.pressure_plot_widget, "set_manual_y_limits"):
+            self.plot_control_panel.y_axis_limits_changed.connect(
+                self.pressure_plot_widget.set_manual_y_limits
+            )
+        if hasattr(self.pressure_plot_widget, "reset_zoom"):
+            self.plot_control_panel.reset_zoom_requested.connect(
+                lambda: self.pressure_plot_widget.reset_zoom(
+                    self.plot_control_panel.is_autoscale_x(),
+                    self.plot_control_panel.is_autoscale_y(),
+                )
+            )
+        if hasattr(self.pressure_plot_widget, "export_as_image"):
+            self.plot_control_panel.export_plot_image_requested.connect(
+                self.pressure_plot_widget.export_as_image
+            )
+        # Always connect "Clear Plot Data" to clear_plot()
+        if hasattr(self.pressure_plot_widget, "clear_plot"):
+            self.plot_control_panel.clear_plot_requested.connect(
+                self.pressure_plot_widget.clear_plot
+            )
 
         # Set the central widget
         self.setCentralWidget(central)
@@ -324,26 +334,17 @@ class MainWindow(QMainWindow):
 
         # Create the device selection combo if not yet created
         if not hasattr(self, "device_combo"):
-            # We'll place it in a dialog when “Source” tab is shown
             self.device_combo = QComboBox()
             self.device_combo.addItem("Select Device...", None)
             self.device_combo.currentIndexChanged.connect(self._on_device_selected)
 
-            # Similarly create resolution combo
             self.resolution_combo = QComboBox()
             self.resolution_combo.addItem("Select Resolution...", None)
 
-            # And the Start Camera button
             self.btn_start_camera = QPushButton("Start Camera")
             self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
 
-            # We need to insert these into the “Source” portion of CameraControlPanel
-            # But since CameraControlPanel only handles “Adjustments,” we manually build
-            # a small UI in the “Info” tab placeholder when needed.
-            # For simplicity, we'll pop up a dialog when user first clicks “Start Camera”
-            # if no device/resolution selected. The "Source" UI is not shown as a tab here.
-
-        # Populate device_combo with actual devices
+        # Populate device_combo
         self.device_combo.clear()
         self.device_combo.addItem("Select Device...", None)
         for dev in devices:
@@ -385,7 +386,6 @@ class MainWindow(QMainWindow):
 
         # If not running, start
         if not cam_thread.isRunning():
-            # Prompt user to select device/resolution if not chosen
             if (
                 self.device_combo.currentData() is None
                 or self.resolution_combo.currentData() is None
@@ -413,7 +413,6 @@ class MainWindow(QMainWindow):
             self.btn_start_camera.setText("Stop Camera")
             self.camera_control_panel.setEnabled(True)
         else:
-            # Stop the thread
             try:
                 cam_thread.stop()
             except Exception as e:
@@ -513,10 +512,13 @@ class MainWindow(QMainWindow):
         pm.addAction(clear_plot_act)
 
         def trigger_reset_zoom():
-            self.pressure_plot_widget.reset_zoom(
-                self.plot_control_panel.is_autoscale_x(),
-                self.plot_control_panel.is_autoscale_y(),
-            )
+            if hasattr(self.pressure_plot_widget, "reset_zoom"):
+                self.pressure_plot_widget.reset_zoom(
+                    self.plot_control_panel.is_autoscale_x(),
+                    self.plot_control_panel.is_autoscale_y(),
+                )
+            else:
+                log.warning("reset_zoom() not found on PressurePlotWidget")
 
         reset_zoom_act = QAction("&Reset Plot Zoom", self, triggered=trigger_reset_zoom)
         pm.addAction(reset_zoom_act)
@@ -577,7 +579,9 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _clear_pressure_plot(self):
-        if self.pressure_plot_widget:
+        if self.pressure_plot_widget and hasattr(
+            self.pressure_plot_widget, "clear_plot"
+        ):
             self.pressure_plot_widget.clear_plot()
             self.statusBar().showMessage("Pressure plot data cleared.", 3000)
 
@@ -599,8 +603,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, "plot_control_panel"):
             self.plot_control_panel.setEnabled(True)
 
-    # ─── Recording Dialogs / Workers ──────────────────────────────────────────
-    # (Implement _trigger_start_recording_dialog, _trigger_stop_recording, etc. as in your old code)
+    # ─── Camera/Recording Dialogs & Methods ──────────────────────────────────
+    # (Implement _trigger_start_recording_dialog, _trigger_stop_recording, etc.
+    #   just as they were in your “old” file.)
 
     # ─── Menu Actions & Dialog Slots ──────────────────────────────────────────
     def _export_plot_data_as_csv(self):
