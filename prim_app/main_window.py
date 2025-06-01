@@ -164,7 +164,7 @@ class MainWindow(QMainWindow):
 
         # Initialize the OpenCV camera thread with capabilities
         self.camera_thread = OpenCVCameraThread(
-            camera_index=camera_index, resolution=resolution, fps=fps
+            device_index=camera_index, resolution=resolution, fps=fps
         )
         self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
         self.camera_thread.camera_properties_updated.connect(
