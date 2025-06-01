@@ -614,7 +614,6 @@ class MainWindow(QMainWindow):
         Stub for “Start Recording” action.
         Eventually this should pop up your record‐settings dialog; for now, do nothing.
         """
-        # You can log or show a message, if you want:
         log.info("Start Recording requested (stub).")
 
     def _trigger_stop_recording(self):
