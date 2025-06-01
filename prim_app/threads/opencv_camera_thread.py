@@ -36,7 +36,7 @@ class OpenCVCameraThread(QThread):
         self.cap.set(cv2.CAP_PROP_FPS, self.target_fps)
 
         # Set initial exposure and gain settings
-        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0)  # 1.0 = Auto On, 0.25 = Manual
+        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # 0.75 = Auto On, 0.25 = Manual
         self.cap.set(cv2.CAP_PROP_EXPOSURE, -1)  # Some drivers require this for auto
 
         # Allow time for camera to adjust exposure

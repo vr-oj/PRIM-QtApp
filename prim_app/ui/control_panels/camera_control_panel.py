@@ -43,7 +43,7 @@ class CameraControlPanel(QWidget):
     def update_controls_from_camera(self, prop_dict: dict):
         """Update the UI to reflect camera properties."""
         ae = prop_dict.get("AutoExposure", 1.0)
-        ae = 1.0 if ae in [1, 1.0, True] else 0.0  # Normalize value
+        aae = 1.0 if ae >= 0.5 else 0.0  # 0.75 = ON, 0.25 = OFF, -1.0 = unknown
         gain = prop_dict.get("Gain", 0)
 
         self.auto_exposure_checkbox.blockSignals(True)
@@ -62,7 +62,8 @@ class CameraControlPanel(QWidget):
         log.debug(f"[UI Sync] AE={ae > 0}, Gain={gain}")
 
     def _on_auto_exposure_changed(self, state):
-        value = 1.0 if state == Qt.Checked else 0.0
+        # Use 0.75 for Auto ON, 0.25 for Manual (as required by TIS/DirectShow backend)
+        value = 0.75 if state == Qt.Checked else 0.25
         self.property_changed.emit("AutoExposure", value)
         log.debug(f"[UI → Cam] AutoExposure set to {value}")
 
