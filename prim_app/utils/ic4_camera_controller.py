@@ -8,6 +8,7 @@ class IC4CameraController:
     def __init__(self):
         self.grabber = None
         self.device_opened = False
+        self.device_string = "DMK 33UX250"  # Can change to UP5000 if needed
         self._init_library()
         self._init_grabber()
 
@@ -22,19 +23,18 @@ class IC4CameraController:
         try:
             self.grabber = ic4.Grabber()
             log.info("[IC4] Grabber initialized.")
-            self._try_open_default_device()
         except Exception as e:
             log.error(f"[IC4] Failed to initialize Grabber: {e}")
 
-    def _try_open_default_device(self):
+    def open_camera(self):
         try:
-            default_device = "DMK 33UX250"  # Or "DMK 33UP5000"
-            self.grabber.open_device(default_device)
+            device = ic4.Device.open(self.device_string)
+            self.grabber.device = device
             self.device_opened = True
-            log.info(f"[IC4] Opened device: {default_device}")
+            log.info(f"[IC4] Opened camera: {self.device_string}")
         except Exception as e:
+            log.warning(f"[IC4] Could not open camera '{self.device_string}': {e}")
             self.device_opened = False
-            log.warning(f"[IC4] Could not open default camera '{default_device}': {e}")
 
     def set_auto_exposure(self, enable: bool):
         if not self.device_opened:
