@@ -24,12 +24,14 @@ class IC4CameraController:
             log.error(f"[IC4] Failed to initialize Grabber: {e}")
             return
 
+        self.open_camera()
+
     def open_camera(self):
         """Open the first available IC4 camera matching the model hint."""
         try:
-            devices = self.grabber.get_available_video_capture_devices()
+            devices = ic4.device.Device.enumerate()
         except Exception as e:
-            log.error(f"[IC4] Failed to get available devices: {e}")
+            log.error(f"[IC4] Failed to enumerate devices: {e}")
             return False
 
         if not devices:
@@ -81,6 +83,23 @@ class IC4CameraController:
             log.error(f"[IC4] Failed to get {name}: {e}")
             return None
 
+    def get_property_range(self, name: str):
+        if not self.device:
+            log.warning("[IC4] Cannot get range. No device.")
+            return None
+        try:
+            prop = self.device[name]
+            return (prop.range.min, prop.range.max)
+        except Exception as e:
+            log.warning(f"[IC4] Failed to get range for {name}: {e}")
+            return None
+
+    def set_auto_exposure(self, enabled: bool):
+        self.set_property("Auto Exposure", enabled)
+
+    def get_auto_exposure(self):
+        return self.get_property("Auto Exposure")
+
     def get_all_properties(self):
         if not self.device:
             return {}
@@ -92,54 +111,3 @@ class IC4CameraController:
             except Exception as e:
                 log.warning(f"[IC4] Property '{name}' unavailable: {e}")
         return props
-
-    # NEW METHODS
-    def set_auto_exposure(self, enabled: bool):
-        """Enable or disable auto exposure using IC4 SDK."""
-        try:
-            prop = self.device["Exposure Auto"]
-            if prop:
-                prop.value = "Continuous" if enabled else "Off"
-                log.debug(f"[IC4] Auto Exposure set to: {'ON' if enabled else 'OFF'}")
-        except Exception as e:
-            log.warning(f"[IC4] Failed to set Auto Exposure: {e}")
-
-    def set_gain(self, value: float):
-        """Set camera gain using IC4 SDK."""
-        try:
-            prop = self.device["Gain"]
-            if prop:
-                prop.value = value
-                log.debug(f"[IC4] Gain set to: {value}")
-        except Exception as e:
-            log.warning(f"[IC4] Failed to set Gain: {e}")
-
-    def get_camera_properties(self):
-        """Return a dict of current camera property values."""
-        props = {}
-        for name in ["Gain", "Exposure Time (us)", "Exposure Auto"]:
-            try:
-                props[name] = self.device[name].value
-            except Exception as e:
-                log.warning(f"[IC4] Failed to read '{name}': {e}")
-        return props
-
-    def get_auto_exposure(self):
-        if not self.device:
-            return False
-        try:
-            return bool(self.device["Auto Exposure"].value)
-        except Exception as e:
-            log.warning(f"[IC4] Failed to get Auto Exposure state: {e}")
-            return False
-
-    def get_property_range(self, name: str):
-        if not self.device:
-            log.warning(f"[IC4] Cannot get range. No device.")
-            return None
-        try:
-            prop = self.device[name]
-            return (prop.range.min, prop.range.max)
-        except Exception as e:
-            log.error(f"[IC4] Failed to get range for {name}: {e}")
-            return None
