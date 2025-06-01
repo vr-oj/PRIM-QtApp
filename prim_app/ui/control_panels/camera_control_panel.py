@@ -1,117 +1,90 @@
 # prim_app/ui/control_panels/camera_control_panel.py
 
-import logging
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QLabel,
-    QSlider,
     QCheckBox,
+    QSlider,
     QHBoxLayout,
-    QSpinBox,
-    QGroupBox,
-    QSizePolicy,
 )
-from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import Qt, pyqtSignal
+import logging
 
 log = logging.getLogger(__name__)
 
 
 class CameraControlPanel(QWidget):
-    property_changed = pyqtSignal(str, object)
+    # This signal is emitted when the user changes a property via UI
+    property_changed = pyqtSignal(str, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-        self._init_ui()
-        self._connect_signals()
-        self.setEnabled(False)
 
-    def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
+        self.setEnabled(False)
+        self.layout = QVBoxLayout()
+        self.setLayout(self.layout)
 
         # Auto Exposure
         self.auto_exposure_checkbox = QCheckBox("Auto Exposure")
-        layout.addWidget(self.auto_exposure_checkbox)
+        self.auto_exposure_checkbox.stateChanged.connect(self._on_auto_exposure_changed)
+        self.layout.addWidget(self.auto_exposure_checkbox)
 
-        # Gain controls
-        self.gain_group = QGroupBox("Gain")
-        gain_layout = QHBoxLayout()
+        # Gain
         self.gain_slider = QSlider(Qt.Horizontal)
-        self.gain_slider.setRange(0, 255)
-        self.gain_spinbox = QSpinBox()
-        self.gain_spinbox.setRange(0, 255)
-        gain_layout.addWidget(self.gain_slider)
-        gain_layout.addWidget(self.gain_spinbox)
-        self.gain_group.setLayout(gain_layout)
-        layout.addWidget(self.gain_group)
+        self.gain_slider.setMinimum(0)
+        self.gain_slider.setMaximum(255)
+        self.gain_slider.setValue(0)
+        self.gain_slider.setTickInterval(1)
+        self.gain_slider.valueChanged.connect(self._on_gain_changed)
+        self.layout.addWidget(QLabel("Gain"))
+        self.layout.addWidget(self.gain_slider)
 
-        # Brightness controls
-        self.brightness_group = QGroupBox("Brightness")
-        brightness_layout = QHBoxLayout()
+        # Brightness
         self.brightness_slider = QSlider(Qt.Horizontal)
-        self.brightness_slider.setRange(0, 255)
-        self.brightness_spinbox = QSpinBox()
-        self.brightness_spinbox.setRange(0, 255)
-        brightness_layout.addWidget(self.brightness_slider)
-        brightness_layout.addWidget(self.brightness_spinbox)
-        self.brightness_group.setLayout(brightness_layout)
-        layout.addWidget(self.brightness_group)
+        self.brightness_slider.setMinimum(0)
+        self.brightness_slider.setMaximum(255)
+        self.brightness_slider.setValue(0)
+        self.brightness_slider.setTickInterval(1)
+        self.brightness_slider.valueChanged.connect(self._on_brightness_changed)
+        self.layout.addWidget(QLabel("Brightness"))
+        self.layout.addWidget(self.brightness_slider)
 
-        layout.addStretch()
+    def update_controls_from_camera(self, prop_dict: dict):
+        """Update the UI to reflect camera properties."""
+        ae = prop_dict.get("AutoExposure", 1.0)
+        ae = 1.0 if ae in [1, 1.0, True] else 0.0  # Normalize value
+        gain = prop_dict.get("Gain", 0)
+        brightness = prop_dict.get("Brightness", 0)
 
-    def _connect_signals(self):
-        # Auto Exposure toggle
-        self.auto_exposure_checkbox.toggled.connect(self._on_auto_exposure_toggled)
+        self.auto_exposure_checkbox.blockSignals(True)
+        self.gain_slider.blockSignals(True)
+        self.brightness_slider.blockSignals(True)
 
-        # Gain sync
-        self.gain_slider.valueChanged.connect(self.gain_spinbox.setValue)
-        self.gain_spinbox.valueChanged.connect(self.gain_slider.setValue)
-        self.gain_slider.sliderReleased.connect(self._on_gain_changed)
-        self.gain_spinbox.editingFinished.connect(self._on_gain_changed)
-
-        # Brightness sync
-        self.brightness_slider.valueChanged.connect(self.brightness_spinbox.setValue)
-        self.brightness_spinbox.valueChanged.connect(self.brightness_slider.setValue)
-        self.brightness_slider.sliderReleased.connect(self._on_brightness_changed)
-        self.brightness_spinbox.editingFinished.connect(self._on_brightness_changed)
-
-    def _on_auto_exposure_toggled(self, checked):
-        # Only allow manual controls if AE is off
-        self.gain_group.setEnabled(not checked)
-        self.brightness_group.setEnabled(not checked)
-        self.property_changed.emit("AutoExposure", checked)
-        log.debug(f"Auto Exposure toggled: {'ON' if checked else 'OFF'}")
-
-    def _on_gain_changed(self):
-        value = self.gain_slider.value()
-        self.property_changed.emit("Gain", value)
-        log.debug(f"Gain changed to: {value}")
-
-    def _on_brightness_changed(self):
-        value = self.brightness_slider.value()
-        self.property_changed.emit("Brightness", value)
-        log.debug(f"Brightness changed to: {value}")
-
-    @pyqtSlot(dict)
-    def update_camera_properties(self, props: dict):
-        """Receive and reflect camera properties (from thread)"""
-        if not props:
-            self.setEnabled(False)
-            return
+        self.auto_exposure_checkbox.setChecked(ae > 0)
+        self.gain_slider.setValue(int(gain))
+        self.brightness_slider.setValue(int(brightness))
 
         self.setEnabled(True)
+        self.auto_exposure_checkbox.setEnabled(True)
+        self.gain_slider.setEnabled(True)
+        self.brightness_slider.setEnabled(True)
 
-        gain = int(props.get("Gain", 0))
-        brightness = int(props.get("Brightness", 0))
-        auto_exp_val = props.get("AutoExposure", 0.25)
-        auto_exp = auto_exp_val >= 0.5
+        self.auto_exposure_checkbox.blockSignals(False)
+        self.gain_slider.blockSignals(False)
+        self.brightness_slider.blockSignals(False)
 
-        self.auto_exposure_checkbox.setChecked(auto_exp)
-        self.gain_slider.setValue(gain)
-        self.brightness_slider.setValue(brightness)
-        self.gain_group.setEnabled(not auto_exp)
-        self.brightness_group.setEnabled(not auto_exp)
+        log.debug(f"[UI Sync] AE={ae > 0}, Gain={gain}, Brightness={brightness}")
 
-        log.debug(f"[UI Sync] AE={auto_exp}, Gain={gain}, Brightness={brightness}")
+    def _on_auto_exposure_changed(self, state):
+        value = 1.0 if state == Qt.Checked else 0.0
+        self.property_changed.emit("AutoExposure", value)
+        log.debug(f"[UI → Cam] AutoExposure set to {value}")
+
+    def _on_gain_changed(self, value):
+        self.property_changed.emit("Gain", float(value))
+        log.debug(f"[UI → Cam] Gain set to {value}")
+
+    def _on_brightness_changed(self, value):
+        self.property_changed.emit("Brightness", float(value))
+        log.debug(f"[UI → Cam] Brightness set to {value}")

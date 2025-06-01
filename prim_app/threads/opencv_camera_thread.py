@@ -1,98 +1,83 @@
 # prim_app/threads/opencv_camera_thread.py
 
-import logging
 import cv2
+import time
 import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal
+import logging
 
 log = logging.getLogger(__name__)
 
 
 class OpenCVCameraThread(QThread):
-    frame_ready = pyqtSignal(object)
-    camera_error = pyqtSignal(str)
+    frame_ready = pyqtSignal(np.ndarray)
     camera_properties_updated = pyqtSignal(dict)
-    camera_info_reported = pyqtSignal(dict)
 
-    def __init__(self, device_index=0, resolution=(1280, 720), fps=10, parent=None):
+    def __init__(self, camera_index=0, resolution=(1280, 720), fps=10, parent=None):
         super().__init__(parent)
-        self.device_index = device_index
-        self.target_width, self.target_height = resolution
+        self.camera_index = camera_index
+        self.target_width = resolution[0]
+        self.target_height = resolution[1]
         self.target_fps = fps
-        self.running = False
+        self._running = True
         self.cap = None
 
     def run(self):
-        try:
-            log.info(
-                f"Attempting to open OpenCV camera at index {self.device_index}..."
-            )
-            self.cap = cv2.VideoCapture(self.device_index, cv2.CAP_DSHOW)
-
-            if not self.cap.isOpened():
-                self.camera_error.emit("OpenCV could not open camera.")
-                return
-
-            # Attempt to set resolution and FPS
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.target_width)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.target_height)
-            self.cap.set(cv2.CAP_PROP_FPS, self.target_fps)
-
-            self.running = True
-            log.info(
-                f"Camera opened. Resolution: {self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)}x{self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)}"
-            )
-
-            # Emit properties on start
-            self._emit_camera_properties()
-
-            while self.running:
-                ret, frame = self.cap.read()
-                if ret:
-                    self.frame_ready.emit(frame)
-                else:
-                    log.warning("Failed to read frame from camera.")
-        except Exception as e:
-            log.exception("Exception in OpenCVCameraThread")
-            self.camera_error.emit(str(e))
-        finally:
-            if self.cap:
-                self.cap.release()
-                log.info("OpenCV camera released.")
-
-    def stop(self):
-        self.running = False
-
-    def _emit_camera_properties(self):
-        if not self.cap:
+        log.info(f"Attempting to open OpenCV camera at index {self.camera_index}...")
+        self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+        if not self.cap.isOpened():
+            log.error("Failed to open camera.")
             return
+
+        # --- Initial camera settings ---
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.target_width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.target_height)
+        self.cap.set(cv2.CAP_PROP_FPS, self.target_fps)
+
+        # Set Auto Exposure ON (1.0 for auto, 0.25 for manual, -1 for off in some drivers)
+        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0)  # Default to Auto ON
+
+        # Allow time for camera to adjust exposure
+        time.sleep(1)
+
+        log.info(
+            f"Camera opened. Resolution: {self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)}x{self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)}"
+        )
+
+        # Emit current camera properties
         props = {
-            "Gain": int(self.cap.get(cv2.CAP_PROP_GAIN)),
-            "Brightness": int(self.cap.get(cv2.CAP_PROP_BRIGHTNESS)),
+            "Gain": self.cap.get(cv2.CAP_PROP_GAIN),
+            "Brightness": self.cap.get(cv2.CAP_PROP_BRIGHTNESS),
             "AutoExposure": self.cap.get(cv2.CAP_PROP_AUTO_EXPOSURE),
             "Exposure": self.cap.get(cv2.CAP_PROP_EXPOSURE),
-            "Width": int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-            "Height": int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+            "Width": self.cap.get(cv2.CAP_PROP_FRAME_WIDTH),
+            "Height": self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT),
             "FPS": self.cap.get(cv2.CAP_PROP_FPS),
         }
-        self.camera_properties_updated.emit(props)
         log.debug(f"Camera properties: {props}")
+        self.camera_properties_updated.emit(props)
 
-    def set_camera_property(self, name, value):
-        if not self.cap:
-            return
-        try:
-            if name == "Gain":
-                self.cap.set(cv2.CAP_PROP_GAIN, float(value))
-            elif name == "Brightness":
-                self.cap.set(cv2.CAP_PROP_BRIGHTNESS, float(value))
-            elif name == "AutoExposure":
-                # Use 0.25 for manual, 0.75 for auto (DirectShow)
-                self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25 if not value else 0.75)
-            elif name == "Exposure":
-                self.cap.set(cv2.CAP_PROP_EXPOSURE, float(value))
+        while self._running:
+            ret, frame = self.cap.read()
+            if ret and frame is not None:
+                self.frame_ready.emit(frame)
+            time.sleep(1 / self.target_fps)
 
-            self._emit_camera_properties()
-            log.info(f"Set {name} to {value}")
-        except Exception as e:
-            log.warning(f"Failed to set camera property {name}: {e}")
+        self.cap.release()
+        log.info("OpenCV camera released.")
+
+    def stop(self):
+        self._running = False
+        self.wait()
+
+    def set_auto_exposure(self, enabled: bool):
+        if self.cap:
+            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0 if enabled else 0.25)
+
+    def set_gain(self, value: float):
+        if self.cap:
+            self.cap.set(cv2.CAP_PROP_GAIN, value)
+
+    def set_brightness(self, value: float):
+        if self.cap:
+            self.cap.set(cv2.CAP_PROP_BRIGHTNESS, value)

@@ -166,17 +166,23 @@ class MainWindow(QMainWindow):
         self.camera_thread = OpenCVCameraThread(
             device_index=camera_index, resolution=resolution, fps=fps
         )
-        self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
+
+        # Connect camera thread signals
+        self.camera_thread.frame_ready.connect(self.gl_view.update_frame)
         self.camera_thread.camera_properties_updated.connect(
-            self.camera_control_panel.update_camera_properties
+            self.camera_control_panel.update_controls_from_camera
         )
         self.camera_control_panel.property_changed.connect(
             self.camera_thread.set_camera_property
         )
         self.camera_thread.camera_info_reported.connect(self._report_camera_info_to_log)
 
+        # Start camera thread
         self.camera_thread.start()
+
+        # Enable camera control panel now that the camera is running
         self.camera_control_panel.setEnabled(True)
+
         log.info(
             f"OpenCV camera thread started with resolution={resolution} at {fps} FPS."
         )
