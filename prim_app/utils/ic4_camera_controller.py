@@ -1,113 +1,85 @@
 import logging
 import imagingcontrol4 as ic4
-from imagingcontrol4.library import Library
 
 log = logging.getLogger(__name__)
 
 
 class IC4CameraController:
-    def __init__(self, model_hint="DMK 33"):
-        self.device = None
-        self.model_hint = model_hint
+    def __init__(self):
+        self.grabber = None
+        self.device_opened = False
+        self._init_library()
+        self._init_grabber()
 
+    def _init_library(self):
         try:
-            Library.init()
+            ic4.Library.init()
             log.info("[IC4] Library initialized successfully.")
         except Exception as e:
-            log.error(f"[IC4] Failed to initialize library: {e}")
-            return
+            log.error(f"[IC4] Library initialization failed: {e}")
 
+    def _init_grabber(self):
         try:
-            self.grabber = ic4.grabber.Grabber()
+            self.grabber = ic4.Grabber()
             log.info("[IC4] Grabber initialized.")
+            self._try_open_default_device()
         except Exception as e:
             log.error(f"[IC4] Failed to initialize Grabber: {e}")
+
+    def _try_open_default_device(self):
+        try:
+            default_device = "DMK 33UX250"  # Or "DMK 33UP5000"
+            self.grabber.open_device(default_device)
+            self.device_opened = True
+            log.info(f"[IC4] Opened device: {default_device}")
+        except Exception as e:
+            self.device_opened = False
+            log.warning(f"[IC4] Could not open default camera '{default_device}': {e}")
+
+    def set_auto_exposure(self, enable: bool):
+        if not self.device_opened:
+            log.warning("[IC4] Cannot set Auto Exposure. No camera open.")
             return
-
-        self.open_camera()
-
-    def open_camera(self):
-        """Open the first available IC4 camera matching the model hint."""
         try:
-            devices = ic4.device.Device.enumerate()
+            self.grabber.set_property("Exposure", "Auto", enable)
         except Exception as e:
-            log.error(f"[IC4] Failed to enumerate devices: {e}")
-            return False
+            log.warning(f"[IC4] Failed to set Auto Exposure: {e}")
 
-        if not devices:
-            log.warning("[IC4] No compatible devices found.")
-            return False
-
-        for dev in devices:
-            if self.model_hint.lower() in dev.name.lower():
-                try:
-                    self.grabber.open(dev)
-                    self.device = self.grabber.get_device()
-                    log.info(f"[IC4] Camera opened: {dev.name}")
-                    return True
-                except Exception as e:
-                    log.error(f"[IC4] Failed to open camera: {e}")
-                    return False
-
-        log.warning(f"[IC4] No matching device for model hint: {self.model_hint}")
-        return False
-
-    def close_camera(self):
+    def get_auto_exposure(self):
+        if not self.device_opened:
+            log.warning("[IC4] Cannot get Auto Exposure. No camera open.")
+            return None
         try:
-            self.grabber.close()
-            log.info("[IC4] Camera closed.")
-            self.device = None
+            return self.grabber.get_property("Exposure", "Auto")
         except Exception as e:
-            log.warning(f"[IC4] Error while closing camera: {e}")
+            log.warning(f"[IC4] Failed to get Auto Exposure: {e}")
+            return None
 
-    def set_property(self, name: str, value):
-        if not self.device:
+    def set_property(self, category: str, name: str, value):
+        if not self.device_opened:
             log.warning("[IC4] Cannot set property. No camera open.")
             return
         try:
-            prop = self.device[name]
-            prop.value = value
-            log.debug(f"[IC4] Set {name} → {value}")
+            self.grabber.set_property(category, name, value)
         except Exception as e:
-            log.error(f"[IC4] Failed to set {name}: {e}")
+            log.warning(f"[IC4] Failed to set property {category}:{name}: {e}")
 
-    def get_property(self, name: str):
-        if not self.device:
+    def get_property(self, category: str, name: str):
+        if not self.device_opened:
             log.warning("[IC4] Cannot get property. No camera open.")
             return None
         try:
-            value = self.device[name].value
-            log.debug(f"[IC4] {name} = {value}")
-            return value
+            return self.grabber.get_property(category, name)
         except Exception as e:
-            log.error(f"[IC4] Failed to get {name}: {e}")
+            log.warning(f"[IC4] Failed to get property {category}:{name}: {e}")
             return None
 
     def get_property_range(self, name: str):
-        if not self.device:
+        if not self.device_opened:
             log.warning("[IC4] Cannot get range. No device.")
             return None
         try:
-            prop = self.device[name]
-            return (prop.range.min, prop.range.max)
+            return self.grabber.get_property_range(name)
         except Exception as e:
-            log.warning(f"[IC4] Failed to get range for {name}: {e}")
+            log.warning(f"[IC4] Failed to get property range for {name}: {e}")
             return None
-
-    def set_auto_exposure(self, enabled: bool):
-        self.set_property("Auto Exposure", enabled)
-
-    def get_auto_exposure(self):
-        return self.get_property("Auto Exposure")
-
-    def get_all_properties(self):
-        if not self.device:
-            return {}
-
-        props = {}
-        for name in ["Gain", "Exposure", "Auto Exposure", "Brightness", "Frame Rate"]:
-            try:
-                props[name] = self.device[name].value
-            except Exception as e:
-                log.warning(f"[IC4] Property '{name}' unavailable: {e}")
-        return props
