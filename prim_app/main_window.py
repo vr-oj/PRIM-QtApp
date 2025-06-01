@@ -168,7 +168,7 @@ class MainWindow(QMainWindow):
         )
 
         # Connect camera thread signals
-        self.camera_thread.frame_ready.connect(self.gl_view.update_frame)
+        self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
         self.camera_thread.camera_properties_updated.connect(
             self.camera_control_panel.update_controls_from_camera
         )
