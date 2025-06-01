@@ -268,7 +268,6 @@ class MainWindow(QMainWindow):
         top_layout.setSpacing(5)
 
         self.camera_panel = CameraControlPanel(self)
-        self.camera_panel.setEnabled(False)  # Disable camera panel for simplified mode
         top_layout.addWidget(self.camera_panel)
 
         self.top_ctrl = TopControlPanel(self)
