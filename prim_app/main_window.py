@@ -6,6 +6,7 @@ import re
 import logging
 import csv
 import json  # Keep for other potential uses
+import imagingcontrol4 as ic4
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -105,18 +106,6 @@ class MainWindow(QMainWindow):
         self._build_main_toolbar()
         self._build_status_bar()
 
-        # ─── Hook up top‐control signals for the plotting widget ─────────────────
-        self.top_ctrl.x_axis_limits_changed.connect(
-            self.pressure_plot_widget.set_manual_x_limits
-        )
-        self.top_ctrl.y_axis_limits_changed.connect(
-            self.pressure_plot_widget.set_manual_y_limits
-        )
-        self.top_ctrl.export_plot_image_requested.connect(
-            self.pressure_plot_widget.export_as_image
-        )
-        self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
-
         # ─── Window title and initial splitter sizing ───────────────────────────
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
         QTimer.singleShot(50, self._set_initial_splitter_sizes)
@@ -128,7 +117,7 @@ class MainWindow(QMainWindow):
     def _init_paths_and_icons(self):
         base = os.path.dirname(os.path.abspath(__file__))
         icon_dir = os.path.join(base, "ui", "icons")
-        if not os.path.isdir(icon_dir):
+        if not os.path.isdir(iconßß_dir):
             # Attempt to find icons if script is run from within prim_app directory
             alt_icon_dir = os.path.join(
                 os.path.dirname(base), "prim_app", "ui", "icons"
