@@ -8,16 +8,19 @@ from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication, QLoggingCategory
 from PyQt5.QtGui import QIcon, QSurfaceFormat
 from utils.config import APP_NAME, APP_VERSION as CONFIG_APP_VERSION
-
-import logging
-
-logging.getLogger("fontTools").setLevel(logging.WARNING)
+import matplotlib
 
 # Configure logging
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s [%(name)s:%(lineno)d] - %(message)s",
 )
+
+# Suppress matplotlib font_manager DEBUG logs
+logging.getLogger("matplotlib").setLevel(logging.INFO)
+logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
+logging.getLogger("fontTools").setLevel(logging.WARNING)
+
 log = logging.getLogger(__name__)
 
 # === Module-level logger for setup ===
