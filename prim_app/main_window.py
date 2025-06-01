@@ -109,33 +109,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
 
         QTimer.singleShot(50, self._set_initial_splitter_sizes)
-        self._set_initial_control_states()
-        log.info("MainWindow initialized.")
-        self.showMaximized()
-
-        self._init_paths_and_icons()
-        self._build_console_log_dock()
-        self._build_central_widget_layout()  # camera_panel is created here
-        self.camera_control_panel.setEnabled(False)
-        # self.main_splitter.addWidget(self.camera_control_panel)
-        self._build_menus()
-        self._build_main_toolbar()
-        self._build_status_bar()
-
-        self.top_ctrl.x_axis_limits_changed.connect(
-            self.pressure_plot_widget.set_manual_x_limits
-        )
-        self.top_ctrl.y_axis_limits_changed.connect(
-            self.pressure_plot_widget.set_manual_y_limits
-        )
-        self.top_ctrl.export_plot_image_requested.connect(
-            self.pressure_plot_widget.export_as_image
-        )
-        self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
-
-        self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
-
-        QTimer.singleShot(50, self._set_initial_splitter_sizes)
         QTimer.singleShot(100, self._start_opencv_camera_thread)
         self._set_initial_control_states()
         log.info("MainWindow initialized.")
