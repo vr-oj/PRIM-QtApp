@@ -78,8 +78,8 @@ class MainWindow(QMainWindow):
         self.camera_view = None
         self.bottom_split = None
         self.camera_settings = {}
-        self.camera_control_panel = CameraControlPanel()  # NEW
-        self.camera_control_panel.setEnabled(False)
+        self.camera_control_panel = CameraControlPanel()
+        self.camera_control_panel.setEnabled(True)
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
