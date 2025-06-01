@@ -18,7 +18,12 @@ class QtCameraWidget(QWidget):
         self.setLayout(QVBoxLayout())
 
         # 1) The QLabel where frames will be painted
-        self._label = QLabel("⏺ Camera Off", alignment=Qt.AlignCenter)
+        # Inside QtCameraWidget.__init__ or setup:
+        self._label = QLabel("Camera Off")
+        self._label.setAlignment(Qt.AlignCenter)  # center horizontally & vertically
+        # Make sure the label sits in a layout that fills the entire widget
+        layout = QVBoxLayout(self)
+        layout.addWidget(self._label, alignment=Qt.AlignCenter)
         self._label.setFixedSize(640, 480)  # adjust if you want a different size
         self.layout().addWidget(self._label)
 
