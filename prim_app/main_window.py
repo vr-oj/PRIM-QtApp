@@ -366,6 +366,90 @@ class MainWindow(QMainWindow):
         # Finally, set this as the central widget
         self.setCentralWidget(central)
 
+    # ────────────────────────────────────────────────────────────────
+    # Plot‐control slots for Auto‐scale X/Y, Reset Zoom, Export Image
+    # ────────────────────────────────────────────────────────────────
+
+    @pyqtSlot(int)
+    def _on_autoscale_x_toggled(self, state: int):
+        """
+        Called when the 'Auto‐scale X' checkbox changes.
+        If checked, disables the X‐min/max edits and invokes auto-scaling on the plot.
+        If unchecked, enables the X‐min/max edits and applies manual limits if valid.
+        """
+        auto_on = state == Qt.Checked
+        # Disable or enable the X‐limit edits
+        self.edit_xmin.setEnabled(not auto_on)
+        self.edit_xmax.setEnabled(not auto_on)
+
+        # Tell the plot widget to auto‐scale or hold manual limits
+        try:
+            self.pressure_plot_widget.set_auto_scale_x(auto_on)
+        except Exception as e:
+            log.error(f"Error toggling auto‐scale X: {e}")
+
+        if not auto_on:
+            # If turning OFF auto‐scale, immediately attempt to apply the manual limits
+            try:
+                xmin = float(self.edit_xmin.text())
+                xmax = float(self.edit_xmax.text())
+                self.pressure_plot_widget.set_manual_x_limits(xmin, xmax)
+            except ValueError:
+                # If the text isn't a valid float yet, ignore until the user fixes it
+                pass
+
+    @pyqtSlot(int)
+    def _on_autoscale_y_toggled(self, state: int):
+        """
+        Called when the 'Auto‐scale Y' checkbox changes.
+        If checked, disables the Y‐min/max edits and invokes auto-scaling on the plot.
+        If unchecked, enables the Y‐min/max edits and applies manual limits if valid.
+        """
+        auto_on = state == Qt.Checked
+        # Disable or enable the Y‐limit edits
+        self.edit_ymin.setEnabled(not auto_on)
+        self.edit_ymax.setEnabled(not auto_on)
+
+        # Tell the plot widget to auto‐scale or hold manual limits
+        try:
+            self.pressure_plot_widget.set_auto_scale_y(auto_on)
+        except Exception as e:
+            log.error(f"Error toggling auto‐scale Y: {e}")
+
+        if not auto_on:
+            # If turning OFF auto‐scale, immediately attempt to apply the manual limits
+            try:
+                ymin = float(self.edit_ymin.text())
+                ymax = float(self.edit_ymax.text())
+                self.pressure_plot_widget.set_manual_y_limits(ymin, ymax)
+            except ValueError:
+                # If the text isn't a valid float yet, ignore until the user fixes it
+                pass
+
+    @pyqtSlot()
+    def _on_reset_zoom(self):
+        """
+        Called when the 'Reset Zoom/View' button is clicked.
+        Resets both X and Y zoom according to the current auto‐scale checkboxes.
+        """
+        auto_x = self.chk_autoscale_x.isChecked()
+        auto_y = self.chk_autoscale_y.isChecked()
+        try:
+            self.pressure_plot_widget.reset_zoom(auto_x, auto_y)
+        except Exception as e:
+            log.error(f"Error resetting plot zoom: {e}")
+
+    @pyqtSlot()
+    def _on_export_plot_image(self):
+        """
+        Called when the 'Export Plot Image' button is clicked.
+        Delegates to the plot widget’s export_as_image() method.
+        """
+        try:
+            self.pressure_plot_widget.export_as_image()
+        except Exception as e:
+            log.error(f"Error exporting plot image: {e}")
+
     def _on_start_stop_camera(self):
         """
         Called when the user clicks the "Start Camera" / "Stop Camera" button in the Source tab.
