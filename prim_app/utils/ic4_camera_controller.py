@@ -10,62 +10,57 @@ class IC4CameraController:
     def __init__(self, model_hint="DMK 33"):
         self.device = None
         self.model_hint = model_hint
-
-        # Ensure library is initialized
-        try:
-            ic4.library.init()
-            log.info("[IC4] Library initialized.")
-        except Exception as e:
-            log.error(f"[IC4] Failed to initialize library: {e}")
+        self.grabber = ic4.grabber.Grabber()
+        log.info("[IC4] Grabber initialized.")
 
     def open_camera(self):
-        """Open the first available camera that matches the model hint."""
+        """Open the first available IC4 camera matching the model hint."""
         try:
-            devices = ic4.devenum.get_device_list()
+            devices = self.grabber.get_available_video_capture_devices()
         except Exception as e:
-            log.error(f"[IC4] Failed to get device list: {e}")
+            log.error(f"[IC4] Failed to get available devices: {e}")
             return False
 
         if not devices:
-            log.warning("No IC4-compatible cameras found.")
+            log.warning("[IC4] No compatible devices found.")
             return False
 
-        for dev_info in devices:
-            if self.model_hint.lower() in dev_info.name.lower():
+        for dev in devices:
+            if self.model_hint.lower() in dev.name.lower():
                 try:
-                    self.device = dev_info.open_device()
-                    log.info(f"[IC4] Device opened: {dev_info.name}")
+                    self.grabber.open(dev)
+                    self.device = self.grabber.get_device()
+                    log.info(f"[IC4] Camera opened: {dev.name}")
                     return True
                 except Exception as e:
-                    log.error(f"[IC4] Failed to open device: {e}")
+                    log.error(f"[IC4] Failed to open camera: {e}")
                     return False
 
-        log.warning(f"No camera matched model hint: {self.model_hint}")
+        log.warning(f"[IC4] No matching device for model hint: {self.model_hint}")
         return False
 
     def close_camera(self):
-        if self.device:
-            try:
-                self.device.close()
-                log.info("IC4 device closed.")
-            except Exception as e:
-                log.warning(f"[IC4] Error while closing camera: {e}")
+        try:
+            self.grabber.close()
+            log.info("[IC4] Camera closed.")
             self.device = None
+        except Exception as e:
+            log.warning(f"[IC4] Error while closing camera: {e}")
 
     def set_property(self, name: str, value):
         if not self.device:
-            log.warning("Attempted to set property with no IC4 device open.")
+            log.warning("[IC4] Cannot set property. No camera open.")
             return
         try:
             prop = self.device[name]
             prop.value = value
-            log.debug(f"[IC4] Set {name} to {value}")
+            log.debug(f"[IC4] Set {name} → {value}")
         except Exception as e:
             log.error(f"[IC4] Failed to set {name}: {e}")
 
     def get_property(self, name: str):
         if not self.device:
-            log.warning("Attempted to get property with no IC4 device open.")
+            log.warning("[IC4] Cannot get property. No camera open.")
             return None
         try:
             value = self.device[name].value
@@ -84,5 +79,5 @@ class IC4CameraController:
             try:
                 props[name] = self.device[name].value
             except Exception as e:
-                log.warning(f"[IC4] Property '{name}' not available: {e}")
+                log.warning(f"[IC4] Property '{name}' unavailable: {e}")
         return props
