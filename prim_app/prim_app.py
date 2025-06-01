@@ -11,6 +11,8 @@ from utils.config import APP_NAME, APP_VERSION as CONFIG_APP_VERSION
 
 import logging
 
+logging.getLogger("fontTools").setLevel(logging.WARNING)
+
 # Configure logging
 logging.basicConfig(
     level=logging.DEBUG,
