@@ -28,7 +28,7 @@ def main():
         grabber.device_open(device)
         print("✅ Camera opened successfully.\n")
 
-        prop_map = grabber.get_property_map()
+        prop_map = ic4.PropertyMap(grabber)
         print("📋 Available properties:\n")
 
         for prop_name in ["Gain", "Brightness", "ExposureTime", "AutoExposure"]:
