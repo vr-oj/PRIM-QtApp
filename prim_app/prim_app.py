@@ -193,10 +193,11 @@ def main_app_entry():
 
     # === Clean up IC4 Library on exit ===
     try:
-        ic4.Library.close()
-        log.info("IC4 Library closed cleanly.")
-    except Exception as e_close:
-        log.error(f"Error closing IC4 Library: {e_close}")
+        if hasattr(ic4.Library, "close"):
+            ic4.Library.close()
+    except Exception:
+        # If the binding doesn’t have a close() method, ignore it
+        pass
 
     sys.exit(exit_code)
 
