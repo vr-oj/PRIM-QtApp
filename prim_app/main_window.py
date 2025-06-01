@@ -79,12 +79,14 @@ class MainWindow(QMainWindow):
         self.camera_view = None
         self.bottom_split = None
         self.camera_settings = {}
+        self.last_trial_basepath = None
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
+
         self.ic4_controller = IC4CameraController()
         self._build_central_widget_layout()
-        self.camera_control_panel = self.camera_panel
+        self._connect_camera_signals()
 
         self._build_menus()
         self._build_main_toolbar()
@@ -109,7 +111,6 @@ class MainWindow(QMainWindow):
         self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
 
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
-
         QTimer.singleShot(50, self._set_initial_splitter_sizes)
         QTimer.singleShot(100, self._start_opencv_camera_thread)
         self._set_initial_control_states()
@@ -123,53 +124,6 @@ class MainWindow(QMainWindow):
                 self.bottom_split.setSizes([int(w * 0.6), int(w * 0.4)])
             else:  # Fallback or retry if width is not yet available
                 QTimer.singleShot(100, self._set_initial_splitter_sizes)
-
-    def __init__(self):
-        super().__init__()
-        self._serial_thread = None
-        self._recording_worker = None
-        self._is_recording = False
-        self.camera_thread = None
-        self.camera_panel = None
-        self.camera_view = None
-        self.bottom_split = None
-        self.camera_settings = {}
-        self.camera_control_panel = self.camera_panel
-
-        self._init_paths_and_icons()
-        self._build_console_log_dock()
-        self._build_central_widget_layout()
-        self.ic4_controller = IC4CameraController()
-
-        self._build_menus()
-        self._build_main_toolbar()
-        self._build_status_bar()
-
-        self.camera_model, self.camera_profile = detect_connected_camera()
-        if self.camera_model:
-            log.info(f"Connected camera identified as: {self.camera_model}")
-            log.info(f"Profile loaded: {self.camera_profile}")
-        else:
-            log.warning("Unable to detect known camera model. Using fallback settings.")
-
-        self.top_ctrl.x_axis_limits_changed.connect(
-            self.pressure_plot_widget.set_manual_x_limits
-        )
-        self.top_ctrl.y_axis_limits_changed.connect(
-            self.pressure_plot_widget.set_manual_y_limits
-        )
-        self.top_ctrl.export_plot_image_requested.connect(
-            self.pressure_plot_widget.export_as_image
-        )
-        self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
-
-        self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
-
-        QTimer.singleShot(50, self._set_initial_splitter_sizes)
-        QTimer.singleShot(100, self._start_opencv_camera_thread)
-        self._set_initial_control_states()
-        log.info("MainWindow initialized.")
-        self.showMaximized()
 
     def _connect_camera_signals(self):
         """Wire up camera control panel to camera thread."""
