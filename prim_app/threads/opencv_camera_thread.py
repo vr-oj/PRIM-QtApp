@@ -9,20 +9,17 @@ log = logging.getLogger(__name__)
 
 
 class OpenCVCameraThread(QThread):
-    frame_ready = pyqtSignal(np.ndarray)
+    frame_ready = pyqtSignal(object)
     camera_properties_updated = pyqtSignal(dict)
-    camera_error = pyqtSignal(str)
+    camera_info_reported = pyqtSignal(dict)
 
-    def __init__(self, device_index=0, parent=None):
+    def __init__(self, camera_index=0, resolution=(1280, 720), fps=10, parent=None):
         super().__init__(parent)
-        self.device_index = device_index
+        self.camera_index = camera_index
+        self.target_resolution = resolution
+        self.target_fps = fps
+        self._running = True
         self.cap = None
-        self.running = False
-
-        # Preferred resolution and FPS
-        self.target_width = 2592
-        self.target_height = 1944
-        self.target_fps = 10
 
     def run(self):
         try:
