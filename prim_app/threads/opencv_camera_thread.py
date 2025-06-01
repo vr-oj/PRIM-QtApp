@@ -12,6 +12,7 @@ log = logging.getLogger(__name__)
 class OpenCVCameraThread(QThread):
     frame_ready = pyqtSignal(np.ndarray)
     camera_properties_updated = pyqtSignal(dict)
+    camera_info_reported = pyqtSignal(dict)
 
     def __init__(self, device_index=0, resolution=(1280, 720), fps=10, parent=None):
         super().__init__(parent)
@@ -56,6 +57,7 @@ class OpenCVCameraThread(QThread):
         }
         log.debug(f"Camera properties: {props}")
         self.camera_properties_updated.emit(props)
+        self.camera_info_reported.emit(props)
 
         while self._running:
             ret, frame = self.cap.read()
