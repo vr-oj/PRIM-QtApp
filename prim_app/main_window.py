@@ -82,8 +82,8 @@ class MainWindow(QMainWindow):
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
-        self._build_central_widget_layout()
         self.ic4_controller = IC4CameraController()
+        self._build_central_widget_layout()
         self.camera_control_panel = self.camera_panel
 
         self._build_menus()
