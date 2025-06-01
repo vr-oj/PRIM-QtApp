@@ -272,7 +272,9 @@ class MainWindow(QMainWindow):
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(5)
 
-        self.camera_panel = CameraControlPanel(self)
+        self.camera_panel = CameraControlPanel(
+            ic4_controller=self.ic4_controller, parent=self
+        )
         top_layout.addWidget(self.camera_panel)
 
         self.top_ctrl = TopControlPanel(self)

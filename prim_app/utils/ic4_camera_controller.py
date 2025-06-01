@@ -1,6 +1,6 @@
 import logging
 import imagingcontrol4 as ic4
-from imagingcontrol4.library import Library  # <-- Add this import
+from imagingcontrol4.library import Library
 
 log = logging.getLogger(__name__)
 
@@ -11,7 +11,7 @@ class IC4CameraController:
         self.model_hint = model_hint
 
         try:
-            Library.init()  # <-- REQUIRED init before using Grabber
+            Library.init()
             log.info("[IC4] Library initialized successfully.")
         except Exception as e:
             log.error(f"[IC4] Failed to initialize library: {e}")
@@ -91,4 +91,35 @@ class IC4CameraController:
                 props[name] = self.device[name].value
             except Exception as e:
                 log.warning(f"[IC4] Property '{name}' unavailable: {e}")
+        return props
+
+    # NEW METHODS
+    def set_auto_exposure(self, enabled: bool):
+        """Enable or disable auto exposure using IC4 SDK."""
+        try:
+            prop = self.device["Exposure Auto"]
+            if prop:
+                prop.value = "Continuous" if enabled else "Off"
+                log.debug(f"[IC4] Auto Exposure set to: {'ON' if enabled else 'OFF'}")
+        except Exception as e:
+            log.warning(f"[IC4] Failed to set Auto Exposure: {e}")
+
+    def set_gain(self, value: float):
+        """Set camera gain using IC4 SDK."""
+        try:
+            prop = self.device["Gain"]
+            if prop:
+                prop.value = value
+                log.debug(f"[IC4] Gain set to: {value}")
+        except Exception as e:
+            log.warning(f"[IC4] Failed to set Gain: {e}")
+
+    def get_camera_properties(self):
+        """Return a dict of current camera property values."""
+        props = {}
+        for name in ["Gain", "Exposure Time (us)", "Exposure Auto"]:
+            try:
+                props[name] = self.device[name].value
+            except Exception as e:
+                log.warning(f"[IC4] Failed to read '{name}': {e}")
         return props
