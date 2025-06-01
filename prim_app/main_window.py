@@ -98,6 +98,8 @@ class MainWindow(QMainWindow):
         # ─── Build the central widget / layouts (including the new camera widget) ─
         self._build_central_widget_layout()
 
+        self._populate_device_list()
+
         # ─── Build menus, toolbars, status bar ───────────────────────────────────
         self._build_menus()
         self._build_main_toolbar()
@@ -371,6 +373,113 @@ class MainWindow(QMainWindow):
 
         # Finally, set this as the central widget
         self.setCentralWidget(central)
+
+    def _on_start_stop_camera(self):
+        """
+        Called when the user clicks the "Start Camera" / "Stop Camera" button in the Source tab.
+        This method toggles the SDKCameraThread on/off and updates UI state accordingly.
+        """
+        # If the camera thread isn’t yet running, start it:
+        cam_thread = self.camera_widget._cam_thread
+        if not cam_thread.isRunning():
+            # Check that a device has been selected
+            dev_info = self.device_combo.currentData()
+            if dev_info is None:
+                QMessageBox.warning(
+                    self,
+                    "Camera Not Configured",
+                    "Please select a valid camera device before starting.",
+                )
+                return
+
+            # Check that a resolution has been selected
+            res_data = self.resolution_combo.currentData()
+            if res_data is None:
+                QMessageBox.warning(
+                    self,
+                    "Camera Not Configured",
+                    "Please select a valid resolution before starting.",
+                )
+                return
+
+            # Tell the thread which DeviceInfo to open
+            cam_thread.set_device_info(dev_info)
+
+            # Tell the thread which resolution/pixel format to use
+            # Here, res_data could be a tuple like (width, height, pixel_format_id)
+            # Adjust according to how you populated resolution_combo
+            width, height, pixfmt = res_data
+            cam_thread.set_resolution((width, height, pixfmt))
+
+            # Finally, start the thread
+            cam_thread.start()
+
+            # Update the button text and enable adjustments panel
+            self.btn_start_camera.setText("Stop Camera")
+            self.camera_control_panel.setEnabled(True)
+
+            # Update device status to show “Connected” (you can refine as needed)
+            self.lbl_connection.setText(f"Connected to {dev_info.display_name}")
+
+        else:
+            # If it *is* running, stop it
+            try:
+                cam_thread.stop()
+            except Exception as e:
+                log.error(f"Error stopping camera thread: {e}")
+
+            # Reset the button text and disable adjustments panel
+            self.btn_start_camera.setText("Start Camera")
+            self.camera_control_panel.setEnabled(False)
+
+            # Reset device status
+            self.lbl_connection.setText("Disconnected")
+
+    def _populate_device_list(self):
+        """
+        Enumerate all connected IC4 cameras and fill `self.device_combo`.
+        """
+        try:
+            grab = ic4.Grabber()
+            devices = grab.device_info.enumerate()
+        except Exception as e:
+            log.error(f"Failed to enumerate IC4 devices: {e}")
+            devices = []
+
+        self.device_combo.clear()
+        self.device_combo.addItem("Select Device...", None)
+        for dev in devices:
+            # `dev.display_name` is a string describing camera + serial
+            self.device_combo.addItem(dev.display_name, dev)
+
+    def _on_device_selected(self, index):
+        dev_info = self.device_combo.itemData(index)
+        self.resolution_combo.clear()
+        self.resolution_combo.addItem("Select Resolution...", None)
+
+        if not dev_info:
+            return
+
+        try:
+            grab = ic4.Grabber()
+            grab.device_info = dev_info
+            grab.device_open()
+
+            # Enumerate supported video formats
+            pf_list = grab.format_video.enumerate()
+            # pf_list is a list of PropValue IDs – you can fetch width/height from each
+            for pv in pf_list:
+                width = grab.format_video.get_value(ic4.PropId.IMAGE_WIDTH, pv)
+                height = grab.format_video.get_value(ic4.PropId.IMAGE_HEIGHT, pv)
+                pixfmt = grab.format_video.get_value(ic4.PropId.PIXEL_FORMAT, pv)
+                display_str = (
+                    f"{width}×{height} ({pv.name if hasattr(pv, 'name') else pixfmt})"
+                )
+                self.resolution_combo.addItem(display_str, (width, height, pixfmt))
+            grab.device_close()
+
+        except Exception as e:
+            log.error(f"Failed to get formats for {dev_info}: {e}")
 
     def _build_menus(self):
         mb = self.menuBar()

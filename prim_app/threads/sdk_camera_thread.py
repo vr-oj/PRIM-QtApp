@@ -7,23 +7,25 @@ from PyQt5.QtGui import QImage
 
 
 class SDKCameraThread(QThread):
-    """
-    A QThread that initializes IC4, opens the first DMK device found,
-    and continuously grabs frames. Emits each frame as a QImage + raw numpy array.
-    """
-
-    # Emitted each time a new frame is available:
-    #   - QImage (for direct display)
-    #   - numpy.ndarray (raw BGRA data, if you need further processing)
-    frame_ready = pyqtSignal(QImage, object)
-
-    # Emitted on error (message, error_code)
-    error = pyqtSignal(str, str)
+    grabber_ready = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._running = False
         self.grabber = None
+        self.device_info_to_open = None
+        self.resolution_to_use = None
+
+    def set_device_info(self, dev_info):
+        """Store which DeviceInfo to open when the thread starts."""
+        self.device_info_to_open = dev_info
+
+    def set_resolution(self, resolution_tuple):
+        """
+        Store which resolution/pixel format to use.
+        `resolution_tuple` should be (width, height, pixel_format_id).
+        """
+        self.resolution_to_use = resolution_tuple
 
     def run(self):
         """
