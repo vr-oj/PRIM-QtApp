@@ -191,21 +191,25 @@ void main() {
             log.debug(
                 f"GLViewfinder: Texture re(allocated) for {w}x{h}, aspect: {self.frame_aspect_ratio:.2f}"
             )
-        data_for_texture = (
-            frame.copy()
-            if frame.ndim == 2
-            else frame[:, :, 0].copy() if (frame.ndim == 3 and channels == 1) else None
-        )
-        if data_for_texture is None:
+        if frame.ndim == 2:
+            data_for_texture = frame.copy()
+            self.texture_format = QOpenGLTexture.R8_UNorm
+            gl_format = QOpenGLTexture.Red
+        elif frame.ndim == 3 and frame.shape[2] == 3:
+            # Convert BGR (OpenCV) to RGB
+            frame_rgb = frame[:, :, ::-1].copy()
+            data_for_texture = frame_rgb
+            self.texture_format = QOpenGLTexture.RGB8_UNorm
+            gl_format = QOpenGLTexture.RGB
+        else:
             log.warning(
                 f"Unsupported frame format/channels for texture: shape{frame.shape}"
             )
             self.doneCurrent()
             return
+
         self.texture.bind()
-        self.texture.setData(
-            QOpenGLTexture.Red, QOpenGLTexture.UInt8, data_for_texture.data
-        )
+        self.texture.setData(gl_format, QOpenGLTexture.UInt8, data_for_texture.data)
         self.texture.release()
         self.update()
         self.doneCurrent()
