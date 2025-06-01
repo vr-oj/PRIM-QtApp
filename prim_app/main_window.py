@@ -285,18 +285,6 @@ class MainWindow(QMainWindow):
         self.camera_widget._cam_thread.frame_ready.connect(self._update_camera_info)
         self.camera_widget._cam_thread.error.connect(self._on_camera_error)
 
-        # TopControlPanel → PressurePlotWidget
-        self.top_ctrl.x_axis_limits_changed.connect(
-            self.pressure_plot_widget.set_manual_x_limits
-        )
-        self.top_ctrl.y_axis_limits_changed.connect(
-            self.pressure_plot_widget.set_manual_y_limits
-        )
-        self.top_ctrl.export_plot_image_requested.connect(
-            self.pressure_plot_widget.export_as_image
-        )
-        self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
-
         # PlotControlPanel → PressurePlotWidget (only if methods exist)
         if hasattr(self.pressure_plot_widget, "set_auto_scale_x"):
             self.plot_control_panel.autoscale_x_changed.connect(
