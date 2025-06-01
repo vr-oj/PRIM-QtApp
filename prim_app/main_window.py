@@ -49,7 +49,7 @@ from utils.config import (
     ABOUT_TEXT,
     # CAMERA_HARDCODED_DEFAULTS, # Temporarily remove usage
 )
-
+from utils.camera_utils import detect_connected_camera
 from ui.control_panels.top_control_panel import TopControlPanel
 from ui.control_panels.camera_control_panel import CameraControlPanel
 from ui.canvas.gl_viewfinder import GLViewfinder
@@ -87,6 +87,13 @@ class MainWindow(QMainWindow):
         self._build_menus()
         self._build_main_toolbar()
         self._build_status_bar()
+
+        self.camera_model, self.camera_profile = detect_connected_camera()
+        if self.camera_model:
+            log.info(f"Connected camera identified as: {self.camera_model}")
+            log.info(f"Profile loaded: {self.camera_profile}")
+        else:
+            log.warning("Unable to detect known camera model. Using fallback settings.")
 
         self.top_ctrl.x_axis_limits_changed.connect(
             self.pressure_plot_widget.set_manual_x_limits
@@ -166,11 +173,26 @@ class MainWindow(QMainWindow):
         return False  # Indicate success
 
     def _start_opencv_camera_thread(self, camera_index=0):
+        # Clean up any previous camera thread
         if self.camera_thread:
             self.camera_thread.stop()
             self.camera_thread.wait()
 
-        self.camera_thread = OpenCVCameraThread(camera_index)
+        # Detect the connected camera model and load its capabilities
+        self.camera_model, self.camera_profile = detect_connected_camera()
+        if self.camera_model:
+            log.info(f"Connected camera identified as: {self.camera_model}")
+        else:
+            log.warning("Camera model not identified. Using default settings.")
+            self.camera_profile = {}
+
+        resolution = self.camera_profile.get("safe_fallback_resolution", (1280, 720))
+        fps = self.camera_profile.get("default_fps", 10)
+
+        # Initialize the OpenCV camera thread with capabilities
+        self.camera_thread = OpenCVCameraThread(
+            camera_index=camera_index, resolution=resolution, fps=fps
+        )
         self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
         self.camera_thread.camera_properties_updated.connect(
             self.camera_control_panel.update_camera_properties
@@ -182,7 +204,9 @@ class MainWindow(QMainWindow):
 
         self.camera_thread.start()
         self.camera_control_panel.setEnabled(True)
-        log.info("OpenCV camera thread started.")
+        log.info(
+            f"OpenCV camera thread started with resolution={resolution} at {fps} FPS."
+        )
 
     def _report_camera_info_to_log(self, info_dict):
         for key, val in info_dict.items():
