@@ -138,3 +138,6 @@ class CameraControlPanel(QWidget):
         self.ae_checkbox.setEnabled(enabled)
         self.gain_slider.setEnabled(enabled and not self._is_auto_exposure)
         self.brightness_slider.setEnabled(enabled and not self._is_auto_exposure)
+
+    def update_controls_from_camera(self):
+        self._sync_from_camera()

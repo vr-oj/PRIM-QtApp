@@ -85,6 +85,7 @@ class MainWindow(QMainWindow):
         self._build_console_log_dock()
 
         self.ic4_controller = IC4CameraController()
+        self.ic4_controller.open_camera()
         self.camera_panel = CameraControlPanel(
             ic4_controller=self.ic4_controller, parent=self
         )
