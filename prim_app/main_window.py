@@ -118,7 +118,6 @@ class MainWindow(QMainWindow):
         log.info("MainWindow initialized.")
         self.showMaximized()
 
-
     def _init_paths_and_icons(self):
         base = os.path.dirname(os.path.abspath(__file__))
         icon_dir = os.path.join(base, "ui", "icons")
@@ -165,48 +164,207 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_console)
         self.dock_console.setVisible(False)
 
-        def _build_central_widget_layout(self):
+    def _build_central_widget_layout(self):
+        """
+        Builds a layout that matches:
+        ┌────────────────────────────────────────────────────────────────┐
+        │  Top Row:  [Camera Controls Tabs] [Device Status Panel] [Plot Controls Panel] │
+        ├────────────────────────────────────────────────────────────────┤
+        │  Bottom Row:  [QtCameraWidget (live feed)] | [PressurePlotWidget (plot)]   │
+        └────────────────────────────────────────────────────────────────┘
+        """
+
+        # ----------------------------
+        # 1) Create the container
+        # ----------------------------
         central = QWidget()
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(3)
+        main_vlay = QVBoxLayout(central)
+        main_vlay.setContentsMargins(4, 4, 4, 4)
+        main_vlay.setSpacing(6)
 
-        # ─── Top Row (only TopControlPanel now) ────────────────────────────────
-        top_row = QWidget()
-        top_layout = QHBoxLayout(top_row)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-        top_layout.setSpacing(5)
+        # ----------------------------
+        # 2) Build the Top Row
+        # ----------------------------
+        top_row_widget = QWidget()
+        top_row_lay = QHBoxLayout(top_row_widget)
+        top_row_lay.setContentsMargins(0, 0, 0, 0)
+        top_row_lay.setSpacing(10)
 
-        # Keep just the TopControlPanel
-        self.top_ctrl = TopControlPanel(self)
-        top_layout.addWidget(self.top_ctrl)
+        # -- 2a) Camera Controls (TabWidget with three tabs) --
+        camera_tabs = QTabWidget()
+        camera_tabs.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
 
-        # Add plot_controls if present
-        if hasattr(self.top_ctrl, "plot_controls") and self.top_ctrl.plot_controls:
-            top_layout.addWidget(self.top_ctrl.plot_controls)
-        else:
-            log.error("self.top_ctrl.plot_controls not found during layout build.")
+        # --- Tab 1: Source (Device & Resolution selection + “Start Camera” button) ---
+        source_tab = QWidget()
+        source_lay = QFormLayout(source_tab)
+        source_lay.setContentsMargins(6, 6, 6, 6)
+        source_lay.setSpacing(6)
 
-        top_row.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
-        layout.addWidget(top_row)
+        # Device dropdown (will be populated at runtime)
+        self.device_combo = QComboBox()
+        self.device_combo.addItem("Select Device...", None)  # Placeholder
+        source_lay.addRow("Device:", self.device_combo)
 
-        # ─── Bottom Split (Camera + Plot) ───────────────────────────────────────
+        # Resolution dropdown (populated after device enumeration)
+        self.resolution_combo = QComboBox()
+        self.resolution_combo.addItem("Select Resolution...", None)
+        source_lay.addRow("Resolution:", self.resolution_combo)
+
+        # Start/Stop Camera button
+        self.btn_start_camera = QPushButton("Start Camera")
+        self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
+        source_lay.addRow("", self.btn_start_camera)
+
+        camera_tabs.addTab(source_tab, "Source")
+
+        # --- Tab 2: Adjustments (Gain, Brightness, Auto-Exposure, etc.) ---
+        adjustments_tab = QWidget()
+        adjustments_lay = QVBoxLayout(adjustments_tab)
+        adjustments_lay.setContentsMargins(6, 6, 6, 6)
+        adjustments_lay.setSpacing(6)
+
+        # Our dynamic CameraControlPanel (builds sliders for Gain, Brightness, etc.)
+        # We’ll instantiate it with a placeholder – it will be enabled once the camera thread is ready.
+        self.camera_control_panel = CameraControlPanel(
+            camera_thread=self.camera_widget._cam_thread, parent=self
+        )
+        self.camera_control_panel.setEnabled(False)  # Disabled until camera is running
+        adjustments_lay.addWidget(self.camera_control_panel)
+
+        camera_tabs.addTab(adjustments_tab, "Adjustments")
+
+        # --- Tab 3: Region of Interest (ROI) (Placeholder) ---
+        roi_tab = QWidget()
+        roi_lay = QVBoxLayout(roi_tab)
+        roi_lay.setContentsMargins(6, 6, 6, 6)
+        roi_lay.setSpacing(6)
+
+        # Placeholder text – you can replace with actual ROI controls later
+        roi_placeholder = QLabel("ROI controls will go here.")
+        roi_placeholder.setAlignment(Qt.AlignCenter)
+        roi_lay.addWidget(roi_placeholder)
+
+        camera_tabs.addTab(roi_tab, "Region of Interest (ROI)")
+
+        # Add the camera_tabs to the top-left of the top row
+        top_row_lay.addWidget(camera_tabs, stretch=2)
+
+        # -- 2b) Device Status Panel (Centered) --
+        status_panel = QGroupBox("PRIM Device Status")
+        status_lay = QFormLayout(status_panel)
+        status_lay.setContentsMargins(6, 6, 6, 6)
+        status_lay.setSpacing(4)
+
+        # Connection status label
+        self.lbl_connection = QLabel("Disconnected")
+        status_lay.addRow("Connection:", self.lbl_connection)
+
+        # Device Frame # label
+        self.lbl_frame_number = QLabel("0")
+        status_lay.addRow("Device Frame #:", self.lbl_frame_number)
+
+        # Device Time (s) label
+        self.lbl_device_time = QLabel("0.00")
+        status_lay.addRow("Device Time (s):", self.lbl_device_time)
+
+        # Current Pressure (mmHg) label
+        self.lbl_current_pressure = QLabel("0.00")
+        status_lay.addRow("Current Pressure:", self.lbl_current_pressure)
+
+        # Make status panel a fixed‐width so it doesn’t expand too wide
+        status_panel.setFixedWidth(250)
+        top_row_lay.addWidget(status_panel, stretch=1)
+
+        # -- 2c) Plot Controls Panel (Right) --
+        plot_ctrl_panel = QGroupBox("Plot Controls")
+        plot_lay = QFormLayout(plot_ctrl_panel)
+        plot_lay.setContentsMargins(6, 6, 6, 6)
+        plot_lay.setSpacing(4)
+
+        # Auto-scale X checkbox
+        self.chk_autoscale_x = QCheckBox("Auto‐scale X")
+        self.chk_autoscale_x.setChecked(True)
+        self.chk_autoscale_x.stateChanged.connect(self._on_autoscale_x_toggled)
+        plot_lay.addRow("", self.chk_autoscale_x)
+
+        # X‐Limits Min / Max
+        self.edit_xmin = QLineEdit("0.0")
+        self.edit_xmin.setEnabled(False)
+        self.edit_xmax = QLineEdit("0.0")
+        self.edit_xmax.setEnabled(False)
+        xlimits_row = QWidget()
+        xlimits_lay = QHBoxLayout(xlimits_row)
+        xlimits_lay.setContentsMargins(0, 0, 0, 0)
+        xlimits_lay.setSpacing(4)
+        xlimits_lay.addWidget(QLabel("Min:"))
+        xlimits_lay.addWidget(self.edit_xmin)
+        xlimits_lay.addWidget(QLabel("Max:"))
+        xlimits_lay.addWidget(self.edit_xmax)
+        plot_lay.addRow("X‐Limits:", xlimits_row)
+
+        # Auto‐scale Y checkbox
+        self.chk_autoscale_y = QCheckBox("Auto‐scale Y")
+        self.chk_autoscale_y.setChecked(True)
+        self.chk_autoscale_y.stateChanged.connect(self._on_autoscale_y_toggled)
+        plot_lay.addRow("", self.chk_autoscale_y)
+
+        # Y‐Limits Min / Max
+        self.edit_ymin = QLineEdit("0.0")
+        self.edit_ymin.setEnabled(False)
+        self.edit_ymax = QLineEdit("30.0")
+        self.edit_ymax.setEnabled(False)
+        ylimits_row = QWidget()
+        ylimits_lay = QHBoxLayout(ylimits_row)
+        ylimits_lay.setContentsMargins(0, 0, 0, 0)
+        ylimits_lay.setSpacing(4)
+        ylimits_lay.addWidget(QLabel("Min:"))
+        ylimits_lay.addWidget(self.edit_ymin)
+        ylimits_lay.addWidget(QLabel("Max:"))
+        ylimits_lay.addWidget(self.edit_ymax)
+        plot_lay.addRow("Y‐Limits:", ylimits_row)
+
+        # Reset Zoom/View button
+        btn_reset_zoom = QPushButton("Reset Zoom/View")
+        btn_reset_zoom.clicked.connect(self._on_reset_zoom)
+        plot_lay.addRow("", btn_reset_zoom)
+
+        # Export Plot Image button
+        btn_export_plot = QPushButton("Export Plot Image")
+        btn_export_plot.clicked.connect(self._on_export_plot_image)
+        plot_lay.addRow("", btn_export_plot)
+
+        # Fix its width so it doesn’t expand too large
+        plot_ctrl_panel.setFixedWidth(300)
+        top_row_lay.addWidget(plot_ctrl_panel, stretch=1)
+
+        # Add the completed top row to the main vertical layout
+        main_vlay.addWidget(top_row_widget, stretch=0)
+
+        # ----------------------------
+        # 3) Build the Bottom Row (Camera View | Plot)
+        # ----------------------------
         self.bottom_split = QSplitter(Qt.Horizontal)
         self.bottom_split.setChildrenCollapsible(False)
 
-        # Insert our new QtCameraWidget (replaces GLViewfinder + OpenCV thread)
+        # -- 3a) Left: Live Camera Feed --
         self.camera_widget = QtCameraWidget(self)
+        self.camera_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.bottom_split.addWidget(self.camera_widget)
 
-        # Existing plot widget remains unchanged
+        # -- 3b) Right: Pressure Plot --
         self.pressure_plot_widget = PressurePlotWidget(self)
+        self.pressure_plot_widget.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Expanding
+        )
         self.bottom_split.addWidget(self.pressure_plot_widget)
 
-        # Balance stretches: camera on left, plot on right
+        # Balance the two panes roughly equally
         self.bottom_split.setStretchFactor(0, 1)
         self.bottom_split.setStretchFactor(1, 1)
 
-        layout.addWidget(self.bottom_split, 1)
+        main_vlay.addWidget(self.bottom_split, stretch=1)
+
+        # Finally, set this as the central widget
         self.setCentralWidget(central)
 
     def _build_menus(self):
@@ -1028,7 +1186,6 @@ class MainWindow(QMainWindow):
             )
             self._trigger_stop_recording()
 
-
     def closeEvent(self, event):
         log.info("MainWindow closeEvent triggered.")
 
@@ -1066,18 +1223,31 @@ class MainWindow(QMainWindow):
 
         # 2) SerialThread (unchanged)
         threads_to_clean.append(
-            ("SerialThread", self._serial_thread, getattr(self._serial_thread, "stop", None))
+            (
+                "SerialThread",
+                self._serial_thread,
+                getattr(self._serial_thread, "stop", None),
+            )
         )
 
         # 3) RecordingWorker (unchanged)
         threads_to_clean.append(
-            ("RecordingWorker", self._recording_worker, getattr(self._recording_worker, "stop_worker", None))
+            (
+                "RecordingWorker",
+                self._recording_worker,
+                getattr(self._recording_worker, "stop_worker", None),
+            )
         )
 
         for name, thread_instance, stop_method in threads_to_clean:
             if thread_instance:
-                if hasattr(thread_instance, "isRunning") and thread_instance.isRunning():
-                    log.info(f"Stopping {name} ({thread_instance.__class__.__name__})...")
+                if (
+                    hasattr(thread_instance, "isRunning")
+                    and thread_instance.isRunning()
+                ):
+                    log.info(
+                        f"Stopping {name} ({thread_instance.__class__.__name__})..."
+                    )
                     try:
                         if stop_method:
                             stop_method()
@@ -1087,7 +1257,9 @@ class MainWindow(QMainWindow):
                             )
 
                         timeout = 3000 if name == "RecordingWorker" else 1500
-                        if hasattr(thread_instance, "wait") and not thread_instance.wait(timeout):
+                        if hasattr(
+                            thread_instance, "wait"
+                        ) and not thread_instance.wait(timeout):
                             log.warning(
                                 f"{name} did not stop gracefully, forcing terminate."
                             )
@@ -1114,4 +1286,3 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         log.info("All threads cleaned up. Proceeding with close.")
         super().closeEvent(event)
-

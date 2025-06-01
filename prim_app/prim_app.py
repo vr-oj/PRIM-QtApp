@@ -1,9 +1,12 @@
 # PRIM-QTAPP/prim_app/prim_app.py
+
 import sys
 import os
 import re
 import traceback
 import logging
+import imagingcontrol4 as ic4  # <-- Added for IC4 initialization
+
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication, QLoggingCategory
 from PyQt5.QtGui import QIcon, QSurfaceFormat
@@ -74,37 +77,36 @@ def load_processed_qss(path):
 
 def main_app_entry():
     # --- SET DEFAULT OPENGL SURFACE FORMAT ---
-    # This should be done BEFORE the QApplication instance is created.
     fmt = QSurfaceFormat()
-    fmt.setRenderableType(QSurfaceFormat.OpenGL)  # Ensure OpenGL is the renderable type
-    fmt.setProfile(QSurfaceFormat.CoreProfile)  # Request Core Profile
-    fmt.setVersion(3, 3)  # Request OpenGL 3.3
-    # fmt.setOption(QSurfaceFormat.DebugContext, True) # Optional: for more verbose GL debugging from drivers
+    fmt.setRenderableType(QSurfaceFormat.OpenGL)
+    fmt.setProfile(QSurfaceFormat.CoreProfile)
+    fmt.setVersion(3, 3)
     QSurfaceFormat.setDefaultFormat(fmt)
     log.info(
         "Attempted to set default QSurfaceFormat to OpenGL 3.3 Core Profile globally."
     )
     # --- END SET DEFAULT OPENGL FORMAT ---
 
-    # High DPI scaling attributes (Qt specific)
-    if hasattr(Qt, "AA_EnableHighDpiScaling"):  # For Qt 5.6+
+    # High DPI scaling attributes
+    if hasattr(Qt, "AA_EnableHighDpiScaling"):
         QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    if hasattr(Qt, "AA_UseHighDpiPixmaps"):  # For Qt 5.0+
+    if hasattr(Qt, "AA_UseHighDpiPixmaps"):
         QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
+    # Create the QApplication
     app = QApplication(sys.argv)
 
-    # Log the actual default format AFTER QApplication is created, as it might influence context creation
-    # This helps confirm if the setDefaultFormat call was effective.
+    # Log the actual default QSurfaceFormat after QApplication created
     actual_default_fmt = QSurfaceFormat.defaultFormat()
     log.info(
-        f"Actual default QSurfaceFormat after QApplication init: Version {actual_default_fmt.majorVersion()}.{actual_default_fmt.minorVersion()}, Profile: {'Core' if actual_default_fmt.profile() == QSurfaceFormat.CoreProfile else 'Compatibility' if actual_default_fmt.profile() == QSurfaceFormat.CompatibilityProfile else 'NoProfile'}"
+        f"Actual default QSurfaceFormat after QApplication init: "
+        f"Version {actual_default_fmt.majorVersion()}.{actual_default_fmt.minorVersion()}, "
+        f"Profile: {('Core' if actual_default_fmt.profile() == QSurfaceFormat.CoreProfile else 'Compatibility' if actual_default_fmt.profile() == QSurfaceFormat.CompatibilityProfile else 'NoProfile')}"
     )
 
     # Application Icon
     base_dir = os.path.dirname(os.path.abspath(__file__))
     icon_dir = os.path.join(base_dir, "ui", "icons")
-    # Fallback if running from a different structure (e.g. project root for tests)
     if not os.path.isdir(icon_dir):
         alt_icon_dir = os.path.join(
             os.path.dirname(base_dir), "prim_app", "ui", "icons"
@@ -131,29 +133,22 @@ def main_app_entry():
 
     # Custom exception handler for unhandled Python exceptions
     def custom_exception_handler(exc_type, value, tb):
-        # Format the traceback
         error_message = "".join(traceback.format_exception(exc_type, value, tb))
         log.critical(f"UNHANDLED PYTHON EXCEPTION CAUGHT:\n{error_message}")
 
-        # Create and show a QMessageBox
-        # Ensure a QApplication instance exists for QMessageBox, which it should here.
         error_dialog = QMessageBox(
-            QMessageBox.Critical,  # Icon
-            f"{APP_NAME} - Critical Application Error",  # Title
-            "An unhandled error occurred, and the application might be unstable.\nPlease check the logs for details.",  # Main text
-            QMessageBox.Ok,  # Buttons
+            QMessageBox.Critical,
+            f"{APP_NAME} - Critical Application Error",
+            "An unhandled error occurred, and the application might be unstable.\nPlease check the logs for details.",
+            QMessageBox.Ok,
         )
-        error_dialog.setDetailedText(error_message)  # Allow user to see full traceback
-        error_dialog.exec_()  # Show the dialog
-        # Optionally, decide if the app should exit here, e.g., by calling QApplication.quit() or sys.exit()
-        # For now, it allows the app to continue if possible, but it might be unstable.
+        error_dialog.setDetailedText(error_message)
+        error_dialog.exec_()
 
     sys.excepthook = custom_exception_handler
 
     # Load application stylesheet
-    style_path = os.path.join(
-        base_dir, "style.qss"
-    )  # Assuming style.qss is in the same dir as prim_app.py
+    style_path = os.path.join(base_dir, "style.qss")
     if os.path.exists(style_path):
         qss_content = load_processed_qss(style_path)
         if qss_content:
@@ -163,36 +158,54 @@ def main_app_entry():
             log.warning(
                 f"Stylesheet {style_path} was empty or failed to load. Using default style."
             )
-            app.setStyle(QStyleFactory.create("Fusion"))  # Fallback style
+            app.setStyle(QStyleFactory.create("Fusion"))
     else:
         log.info("No stylesheet (style.qss) found. Using default style 'Fusion'.")
-        app.setStyle(QStyleFactory.create("Fusion"))  # Default style if no QSS
+        app.setStyle(QStyleFactory.create("Fusion"))
 
-    # Import MainWindow after setting up global configurations like QSurfaceFormat
+    # === Initialize IC4 Library Once ===
+    try:
+        ic4.Library.init()
+        log.info("IC4 Library initialized successfully.")
+    except ic4.IC4Exception as e:
+        log.critical(f"Could not initialize IC4: {e}")
+        # Show a critical message box and exit early
+        QMessageBox.critical(
+            None,
+            f"{APP_NAME} - Camera Initialization Error",
+            f"Failed to initialize the IC4 library:\n{e}\n\n"
+            "The application will now exit.",
+        )
+        sys.exit(1)
+
+    # Import MainWindow after IC4 is initialized
     from main_window import MainWindow
 
+    # Instantiate and show the main window
     main_win = MainWindow()
-    # Determine version string safely
-    app_display_version = (
-        CONFIG_APP_VERSION
-        if "CONFIG_APP_VERSION" in globals() and CONFIG_APP_VERSION
-        else "Unknown"
-    )
+    app_display_version = CONFIG_APP_VERSION if CONFIG_APP_VERSION else "Unknown"
     main_win.setWindowTitle(f"{APP_NAME} v{app_display_version}")
-    main_win.show()  # showMaximized() can be called from MainWindow's init or after show()
+    main_win.show()
 
+    # Run the event loop
     exit_code = app.exec_()
     log.info(f"Application event loop finished with exit code: {exit_code}")
+
+    # === Clean up IC4 Library on exit ===
+    try:
+        ic4.Library.close()
+        log.info("IC4 Library closed cleanly.")
+    except Exception as e_close:
+        log.error(f"Error closing IC4 Library: {e_close}")
+
     sys.exit(exit_code)
 
 
 if __name__ == "__main__":
-    # This initial logger is just for the launcher part, before full config.
+    # Launcher logger
     launcher_log = logging.getLogger("prim_app_launcher")
-    if (
-        not launcher_log.handlers
-    ):  # Avoid adding handlers multiple times if script is re-run in some envs
-        logging.basicConfig(  # Basic config for very early messages
+    if not launcher_log.handlers:
+        logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s - %(levelname)s - [%(name)s] - %(message)s",
         )
