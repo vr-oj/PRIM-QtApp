@@ -1,6 +1,5 @@
 import logging
 import imagingcontrol4 as ic4
-from imagingcontrol4.device import Device
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +30,7 @@ class IC4CameraController:
 
     def open_camera(self):
         """Open the first available camera that matches the model hint."""
-        devices = Device.enumerate()
+        devices = ic4.enumerate_devices()
         if not devices:
             log.error("No IC4-compatible devices found.")
             return False
@@ -39,10 +38,10 @@ class IC4CameraController:
         for dev_info in devices:
             if self.model_hint.lower() in dev_info.name.lower():
                 self.device = dev_info.open_device()
-                log.info(f"[IC4] Device opened: {dev_info.name}")
+                log.info(f"IC4 device opened: {dev_info.name}")
                 return True
 
-        log.warning("[IC4] No matching IC4 camera found.")
+        log.warning("No matching IC4 camera found.")
         return False
 
     def close_camera(self):
