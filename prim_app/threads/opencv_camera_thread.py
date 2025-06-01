@@ -12,6 +12,7 @@ class OpenCVCameraThread(QThread):
     frame_ready = pyqtSignal(object)
     camera_properties_updated = pyqtSignal(dict)
     camera_info_reported = pyqtSignal(dict)
+    camera_error = pyqtSignal(str)
 
     def __init__(self, camera_index=0, resolution=(1280, 720), fps=10, parent=None):
         super().__init__(parent)
@@ -24,9 +25,9 @@ class OpenCVCameraThread(QThread):
     def run(self):
         try:
             log.info(
-                f"Attempting to open OpenCV camera at index {self.device_index}..."
+                f"Attempting to open OpenCV camera at index {self.camera_index}..."
             )
-            self.cap = cv2.VideoCapture(self.device_index, cv2.CAP_DSHOW)
+            self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
 
             if not self.cap.isOpened():
                 self.camera_error.emit("OpenCV could not open camera.")
