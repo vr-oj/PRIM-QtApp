@@ -117,7 +117,7 @@ class MainWindow(QMainWindow):
     def _init_paths_and_icons(self):
         base = os.path.dirname(os.path.abspath(__file__))
         icon_dir = os.path.join(base, "ui", "icons")
-        if not os.path.isdir(iconßß_dir):
+        if not os.path.isdir(icon_dir):
             # Attempt to find icons if script is run from within prim_app directory
             alt_icon_dir = os.path.join(
                 os.path.dirname(base), "prim_app", "ui", "icons"
