@@ -85,7 +85,9 @@ class MainWindow(QMainWindow):
         self._build_console_log_dock()
 
         self.ic4_controller = IC4CameraController()
-        self.camera_panel = CameraControlPanel(ic4_controller=self.ic4_controller, parent=self)
+        self.camera_panel = CameraControlPanel(
+            ic4_controller=self.ic4_controller, parent=self
+        )
         self._build_central_widget_layout()
         self._connect_camera_signals()
 
@@ -204,13 +206,14 @@ class MainWindow(QMainWindow):
         self.bottom_split.setStretchFactor(1, 1)  # Plot view
         layout.addWidget(self.bottom_split, 1)  # Give it more stretch
         self.setCentralWidget(central)
-    
+
     def _connect_camera_signals(self):
         if self.camera_thread:
             self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
             self.camera_thread.camera_properties_updated.connect(
-                self.camera_panel.update_property_sliders_from_thread)
-            
+                self.camera_panel.update_property_sliders_from_thread
+            )
+
     def _build_menus(self):
         mb = self.menuBar()
         fm = mb.addMenu("&File")
@@ -332,7 +335,7 @@ class MainWindow(QMainWindow):
         self._app_session_timer.timeout.connect(self._update_app_session_time)
         self._app_session_timer.start()
 
-     @pyqtSlot()
+    @pyqtSlot()
     def _clear_pressure_plot(self):
         if self.pressure_plot_widget:
             self.pressure_plot_widget.clear_plot()
@@ -358,7 +361,7 @@ class MainWindow(QMainWindow):
         self.camera_thread.start()
 
         log.info("OpenCV camera thread started with resolution=(1280, 720) at 10 FPS.")
-    
+
     def _set_initial_control_states(self):
         if self.top_ctrl:
             self.top_ctrl.update_connection_status("Disconnected", False)
