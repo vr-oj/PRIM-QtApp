@@ -1,17 +1,15 @@
 import imagingcontrol4 as ic4
 
-print("Library version:", ic4.__version__)
-
 try:
     ic4.library.Library.init()
-    print("Library initialized.")
+    print("✅ IC4 Library initialized")
 
     grabber = ic4.grabber.Grabber()
-    print("Grabber initialized.")
+    print("✅ Grabber created")
 
     devices = grabber.get_available_video_capture_devices()
-    print("Available devices:")
-    for dev in devices:
-        print("  -", dev.name)
+    print(f"🔍 Found {len(devices)} device(s):")
+    for device in devices:
+        print(f"  - {device.name}")
 except Exception as e:
-    print("Error:", e)
+    print("❌ Error:", e)
