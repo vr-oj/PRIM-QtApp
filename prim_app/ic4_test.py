@@ -1,58 +1,48 @@
 import imagingcontrol4 as ic4
 
 
-def format_device_info(device_info: ic4.DeviceInfo) -> str:
-    return f"Model: {device_info.model_name}, Serial: {device_info.serial}"
-
-
-def print_device_list():
-    print("\n🔍 Enumerating all attached video capture devices...\n")
+def print_property(prop_name, prop):
     try:
-        devices = ic4.DeviceEnum.devices()
-        if not devices:
-            print("❌ No devices found.\n")
-        else:
-            print(f"✅ Found {len(devices)} device(s):")
-            for device in devices:
-                print(f" - {format_device_info(device)}")
+        value = prop.value
+        min_val, max_val = prop.range
+        print(f"  - {prop_name}: {value} (Range: {min_val}–{max_val})")
     except Exception as e:
-        print(f"❌ Error getting device list: {e}")
-
-
-def print_interface_device_tree():
-    print("\n📡 Enumerating video capture devices by interface...\n")
-    try:
-        interfaces = ic4.DeviceEnum.interfaces()
-        if not interfaces:
-            print("❌ No interfaces found.\n")
-            return
-
-        for interface in interfaces:
-            print(f"Interface: {interface.display_name}")
-            print(
-                f"  ↳ Transport Layer: {interface.transport_layer_name} ({interface.transport_layer_type})"
-            )
-            for device in interface.devices:
-                print(f"    - {format_device_info(device)}")
-    except Exception as e:
-        print(f"❌ Error getting interfaces: {e}")
+        print(f"  - {prop_name}: ❌ Error reading -> {e}")
 
 
 def main():
-    print("✅ Starting IC4 test...")
+    print("📷 Starting IC4 property test...\n")
+
+    ic4.Library.init(api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR)
 
     try:
-        ic4.Library.init(
-            api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
-        )
-        print("✅ IC4 Library initialized")
-        print_device_list()
-        print_interface_device_tree()
+        devices = ic4.DeviceEnum.devices()
+        if not devices:
+            print("❌ No devices found.")
+            return
+
+        device = devices[0]
+        print(f"✅ Found device: {device.model_name} (Serial: {device.serial})")
+
+        grabber = ic4.Grabber()
+        grabber.device_open(device)
+        print("✅ Camera opened successfully.\n")
+
+        prop_map = grabber.get_property_map()
+        print("📋 Available properties:\n")
+
+        for prop_name in ["Gain", "Brightness", "ExposureTime", "AutoExposure"]:
+            if prop_map.has_property(prop_name):
+                prop = prop_map.get_property(prop_name)
+                print_property(prop_name, prop)
+            else:
+                print(f"  - {prop_name}: ❌ Not supported by this device")
+
     except Exception as e:
-        print(f"❌ Error during IC4 test: {e}")
+        print(f"❌ ERROR: {e}")
     finally:
         ic4.Library.exit()
-        print("\n✅ IC4 Library shut down cleanly.")
+        print("\n✅ Library shut down.")
 
 
 if __name__ == "__main__":
