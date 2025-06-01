@@ -27,10 +27,6 @@ class QtCameraWidget(QWidget):
         self._label.setFixedSize(640, 480)  # adjust if you want a different size
         self.layout().addWidget(self._label)
 
-        # 2) A Start/Stop button
-        self._btn = QPushButton("Start Camera")
-        self.layout().addWidget(self._btn)
-
         # 3) Camera thread (not started yet)
         self._cam_thread = SDKCameraThread()
         # Connect signals from the thread to our slots
