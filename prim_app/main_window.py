@@ -36,7 +36,7 @@ from PyQt5.QtWidgets import (
     QCheckBox,
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize
-from PyQt5.QtGui import QIcon, QKeySequence
+from PyQt5.QtGui import QIcon, QKeySequence, QImage
 
 import prim_app
 
