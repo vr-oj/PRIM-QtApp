@@ -16,14 +16,11 @@ class OpenCVCameraThread(QThread):
 
     def __init__(self, index=0, resolution=(640, 480), fps=30, parent=None):
         super().__init__(parent)
-        self.index = index
         self.camera_index = index
-        self.resolution = resolution
-        self.fps = fps
-        self._running = False
-        self._camera = None
-        self._frame = None
-        self._property_cache = {}
+        self.target_width, self.target_height = resolution
+        self.target_fps = fps
+        self._running = True
+        self.cap = None
 
     def run(self):
         log.info(f"Attempting to open OpenCV camera at index {self.camera_index}...")
@@ -32,29 +29,29 @@ class OpenCVCameraThread(QThread):
             log.error("Failed to open camera.")
             return
 
-        # --- Initial camera settings ---
+        # --- Set initial resolution and frame rate ---
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.target_width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.target_height)
         self.cap.set(cv2.CAP_PROP_FPS, self.target_fps)
 
-        # Set initial exposure and gain settings
-        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # 0.75 = Auto On, 0.25 = Manual
-        self.cap.set(cv2.CAP_PROP_EXPOSURE, -1)  # Some drivers require this for auto
+        # Set to auto exposure mode
+        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)
+        self.cap.set(cv2.CAP_PROP_EXPOSURE, -1)
 
-        # Allow time for camera to adjust exposure
+        # Allow adjustment
         time.sleep(1)
 
-        log.info(
-            f"Camera opened. Resolution: {self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)}x{self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)}"
-        )
+        actual_w = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+        actual_h = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        log.info(f"Camera opened. Resolution: {actual_w}x{actual_h}")
 
-        # Emit current camera properties
+        # Emit properties
         props = {
             "Gain": self.cap.get(cv2.CAP_PROP_GAIN),
             "AutoExposure": self.cap.get(cv2.CAP_PROP_AUTO_EXPOSURE),
             "Exposure": self.cap.get(cv2.CAP_PROP_EXPOSURE),
-            "Width": self.cap.get(cv2.CAP_PROP_FRAME_WIDTH),
-            "Height": self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT),
+            "Width": actual_w,
+            "Height": actual_h,
             "FPS": self.cap.get(cv2.CAP_PROP_FPS),
         }
         log.debug(f"Camera properties: {props}")
@@ -76,18 +73,17 @@ class OpenCVCameraThread(QThread):
 
     def set_auto_exposure(self, enabled: bool):
         if self.cap:
-            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0 if enabled else 0.25)
+            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75 if enabled else 0.25)
 
     def set_gain(self, value: float):
         if self.cap:
             self.cap.set(cv2.CAP_PROP_GAIN, value)
 
     def set_camera_property(self, name: str, value: float):
-        """Generic camera property setter."""
-        if self.cap is None:
+        if not self.cap:
             return
         if name == "AutoExposure":
-            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0 if value else 0.25)
+            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75 if value else 0.25)
             actual = self.cap.get(cv2.CAP_PROP_AUTO_EXPOSURE)
             log.debug(f"[Cam] AutoExposure set → requested={value}, actual={actual}")
         elif name == "Gain":
