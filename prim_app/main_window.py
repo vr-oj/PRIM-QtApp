@@ -578,6 +578,18 @@ class MainWindow(QMainWindow):
         self._app_session_timer.start()
 
     @pyqtSlot()
+    def _update_app_session_time(self):
+        """
+        Increment the session timer (in seconds) and update the status‐bar label.
+        """
+        self._app_session_seconds += 1
+        hours, rem = divmod(self._app_session_seconds, 3600)
+        minutes, seconds = divmod(rem, 60)
+        self.app_session_time_label.setText(
+            f"Session: {hours:02d}:{minutes:02d}:{seconds:02d}"
+        )
+
+    @pyqtSlot()
     def _clear_pressure_plot(self):
         if self.pressure_plot_widget and hasattr(
             self.pressure_plot_widget, "clear_plot"
