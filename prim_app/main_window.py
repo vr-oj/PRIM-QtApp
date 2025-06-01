@@ -1,10 +1,12 @@
-# PRIM-QTAPP/prim_app/main_window.py
+# prim_app/main_window.py
+
 import os
 import sys
 import re
 import logging
 import csv
 import json  # Keep for other potential uses
+
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -36,7 +38,6 @@ from utils.app_settings import (
     save_app_setting,
     load_app_setting,
     SETTING_LAST_CAMERA_INDEX,
-    save_app_setting,  # Ensure this was the fix for the import error
 )
 from utils.config import (
     DEFAULT_FPS,
@@ -47,16 +48,16 @@ from utils.config import (
     DEFAULT_VIDEO_EXTENSION,
     DEFAULT_VIDEO_CODEC,
     ABOUT_TEXT,
-    # CAMERA_HARDCODED_DEFAULTS, # Temporarily remove usage
+    # CAMERA_HARDCODED_DEFAULTS,  # Temporarily removed
 )
-from utils.ic4_camera_controller import IC4CameraController
-from utils.camera_utils import detect_connected_camera
+
 from ui.control_panels.top_control_panel import TopControlPanel
 from ui.control_panels.camera_control_panel import CameraControlPanel
-from ui.canvas.gl_viewfinder import GLViewfinder
+from ui.canvas.qtcamera_widget import QtCameraWidget
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
 from threads.opencv_camera_thread import OpenCVCameraThread
 from threads.serial_thread import SerialThread
+
 from recording import RecordingWorker
 from utils.utils import list_serial_ports
 
@@ -71,38 +72,33 @@ def snake_case(name: str) -> str:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        # ─── State variables ─────────────────────────────────────────────────────
         self._serial_thread = None
         self._recording_worker = None
         self._is_recording = False
+
+        # So keep these as None for now:
         self.camera_thread = None
         self.camera_panel = None
         self.camera_view = None
-        self.bottom_split = None
+
         self.camera_settings = {}
         self.last_trial_basepath = None
 
+        # ─── Build UI scaffolding ────────────────────────────────────────────────
         self._init_paths_and_icons()
         self._build_console_log_dock()
 
-        self.ic4_controller = IC4CameraController()
-        self.ic4_controller.open_camera()
-        self.camera_panel = CameraControlPanel(
-            ic4_controller=self.ic4_controller, parent=self
-        )
+        # ─── Build the central widget / layouts (including the new camera widget) ─
         self._build_central_widget_layout()
-        self._connect_camera_signals()
 
+        # ─── Build menus, toolbars, status bar ───────────────────────────────────
         self._build_menus()
         self._build_main_toolbar()
         self._build_status_bar()
 
-        self.camera_model, self.camera_profile = detect_connected_camera()
-        if self.camera_model:
-            log.info(f"Connected camera identified as: {self.camera_model}")
-            log.info(f"Profile loaded: {self.camera_profile}")
-        else:
-            log.warning("Unable to detect known camera model. Using fallback settings.")
-
+        # ─── Hook up top‐control signals for the plotting widget ─────────────────
         self.top_ctrl.x_axis_limits_changed.connect(
             self.pressure_plot_widget.set_manual_x_limits
         )
@@ -114,12 +110,14 @@ class MainWindow(QMainWindow):
         )
         self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
 
+        # ─── Window title and initial splitter sizing ───────────────────────────
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
         QTimer.singleShot(50, self._set_initial_splitter_sizes)
-        QTimer.singleShot(100, self._start_opencv_camera_thread)
+
         self._set_initial_control_states()
         log.info("MainWindow initialized.")
         self.showMaximized()
+
 
     def _init_paths_and_icons(self):
         base = os.path.dirname(os.path.abspath(__file__))
@@ -167,53 +165,49 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_console)
         self.dock_console.setVisible(False)
 
-    def _build_central_widget_layout(self):
+        def _build_central_widget_layout(self):
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(3)
+
+        # ─── Top Row (only TopControlPanel now) ────────────────────────────────
         top_row = QWidget()
         top_layout = QHBoxLayout(top_row)
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(5)
 
-        self.camera_panel = CameraControlPanel(
-            ic4_controller=self.ic4_controller, parent=self
-        )
-        top_layout.addWidget(self.camera_panel)
-
+        # Keep just the TopControlPanel
         self.top_ctrl = TopControlPanel(self)
         top_layout.addWidget(self.top_ctrl)
 
-        # Ensure plot_controls exists before trying to add it
+        # Add plot_controls if present
         if hasattr(self.top_ctrl, "plot_controls") and self.top_ctrl.plot_controls:
             top_layout.addWidget(self.top_ctrl.plot_controls)
         else:
             log.error("self.top_ctrl.plot_controls not found during layout build.")
-            # You might want to create a placeholder or handle this error more gracefully
-            # For now, it will just not be added if missing.
 
-        top_row.setSizePolicy(
-            QSizePolicy.Preferred, QSizePolicy.Minimum
-        )  # Make vertical policy Minimum
-        layout.addWidget(top_row)  # Add top_row to the main vertical layout
+        top_row.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        layout.addWidget(top_row)
+
+        # ─── Bottom Split (Camera + Plot) ───────────────────────────────────────
         self.bottom_split = QSplitter(Qt.Horizontal)
-        self.bottom_split.setChildrenCollapsible(False)  # Good practice
-        self.camera_view = GLViewfinder(self)
-        self.bottom_split.addWidget(self.camera_view)
+        self.bottom_split.setChildrenCollapsible(False)
+
+        # Insert our new QtCameraWidget (replaces GLViewfinder + OpenCV thread)
+        self.camera_widget = QtCameraWidget(self)
+        self.bottom_split.addWidget(self.camera_widget)
+
+        # Existing plot widget remains unchanged
         self.pressure_plot_widget = PressurePlotWidget(self)
         self.bottom_split.addWidget(self.pressure_plot_widget)
-        self.bottom_split.setStretchFactor(0, 1)  # Camera view
-        self.bottom_split.setStretchFactor(1, 1)  # Plot view
-        layout.addWidget(self.bottom_split, 1)  # Give it more stretch
-        self.setCentralWidget(central)
 
-    def _connect_camera_signals(self):
-        if self.camera_thread:
-            self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
-            self.camera_thread.camera_properties_updated.connect(
-                self.camera_panel.update_property_sliders_from_thread
-            )
+        # Balance stretches: camera on left, plot on right
+        self.bottom_split.setStretchFactor(0, 1)
+        self.bottom_split.setStretchFactor(1, 1)
+
+        layout.addWidget(self.bottom_split, 1)
+        self.setCentralWidget(central)
 
     def _build_menus(self):
         mb = self.menuBar()
@@ -350,19 +344,6 @@ class MainWindow(QMainWindow):
             else:  # Fallback or retry if width is not yet available
                 QTimer.singleShot(100, self._set_initial_splitter_sizes)
 
-    def _start_opencv_camera_thread(self):
-        """Start OpenCV-based camera thread and connect it to the view."""
-        from threads.opencv_camera_thread import OpenCVCameraThread
-
-        self.camera_thread = OpenCVCameraThread(index=0, resolution=(1280, 720), fps=10)
-        self.camera_thread.frame_ready.connect(self.camera_view.update_frame)
-        self.camera_thread.camera_properties_updated.connect(
-            self.camera_panel.update_controls_from_camera()
-        )
-        self.camera_thread.start()
-
-        log.info("OpenCV camera thread started with resolution=(1280, 720) at 10 FPS.")
-
     def _set_initial_control_states(self):
         if self.top_ctrl:
             self.top_ctrl.update_connection_status("Disconnected", False)
@@ -370,40 +351,8 @@ class MainWindow(QMainWindow):
             self.start_recording_action.setEnabled(False)
         if hasattr(self, "stop_recording_action"):
             self.stop_recording_action.setEnabled(False)
-        if self.camera_panel:
-            self.camera_panel.setEnabled(
-                False
-            )  # Ensure camera panel is initially disabled
-
-    def _report_camera_info_to_log(self, info_dict):
-        for key, val in info_dict.items():
-            log.info(f"[OpenCV Camera Info] {key}: {val}")
-
-    def _initialize_opencv_camera(self):  # New or renamed method
-        log.info("Attempting to initialize OpenCV camera...")
-        # if self.camera_panel: self.camera_panel.setEnabled(False) # If using camera_panel
-
-        # Use a default camera index, e.g., from your config file
-        # from utils.config import DEFAULT_CAMERA_INDEX (ensure this exists)
-        default_camera_idx = 0  # Or load from config
-        try:
-            self._start_opencv_camera_thread(default_camera_idx)
-            # save_app_setting(SETTING_LAST_CAMERA_INDEX, default_camera_idx) # If you store this
-        except Exception as e:
-            log.exception(
-                f"Failed to start live feed for OpenCV camera index '{default_camera_idx}': {e}"
-            )
-            QMessageBox.critical(
-                self,
-                "Camera Start Error",
-                f"Could not start live feed for OpenCV camera index {default_camera_idx}:\n{e}",
-            )
-
-    def _handle_camera_property_change(self, name: str, value: float):
-        """Relay UI change to OpenCV camera thread."""
-        if self.camera_thread:
-            self.camera_thread.set_camera_property(name, value)
-            log.debug(f"[MainWindow] Relayed {name} = {value} to camera thread.")
+        if self.camera_widget:
+            self.camera_widget.setEnabled(False)  # Disable camera widget until needed
 
     @pyqtSlot(str)
     def _handle_serial_status_change(self, status: str):
@@ -1040,42 +989,50 @@ class MainWindow(QMainWindow):
         m, s = divmod(rem, 60)
         self.app_session_time_label.setText(f"Session: {h:02}:{m:02}:{s:02}")
 
-    @pyqtSlot(str)
-    def _on_camera_error(self, msg):
-        log.error(f"Camera error occurred: {msg}")
+    @pyqtSlot(str, str)
+    def _on_camera_error(self, msg: str, code: str):
+        """
+        Called whenever SDKCameraThread.error emits (message, error_code).
+        Shows a critical pop‐up, stops the thread, and updates the status bar.
+        """
+        log.error(f"Camera error occurred ({code}): {msg}")
         QMessageBox.critical(self, "Camera Error", msg)
 
-        # Stop and clean up the camera thread if it exists and is running
-        if self.camera_thread:
-            if self.camera_thread.isRunning():
-                try:
-                    log.info("Stopping camera thread due to reported error...")
-                    self.camera_thread.stop()
-                except Exception as e_stop_cam_err:
-                    log.error(
-                        f"Error trying to stop camera thread after it reported an error: {e_stop_cam_err}"
-                    )
-            self.camera_thread.deleteLater()  # Schedule for deletion
-            self.camera_thread = None
+        # Stop and clean up the internal camera thread if it’s still running
+        if (
+            self.camera_widget
+            and hasattr(self.camera_widget, "_cam_thread")
+            and self.camera_widget._cam_thread.isRunning()
+        ):
+            try:
+                log.info("Stopping SDKCameraThread due to error...")
+                self.camera_widget._cam_thread.stop()
+            except Exception as e_stop_cam_err:
+                log.error(
+                    f"Error stopping SDKCameraThread after error: {e_stop_cam_err}"
+                )
 
-        if self.camera_panel:
-            self.camera_panel.setEnabled(False)  # Disable controls
+        # Disable the entire camera widget, so user knows the feed isn’t active
+        if self.camera_widget:
+            self.camera_widget.setEnabled(False)
+
+        # Update status bar
         self.statusBar().showMessage(
-            "Camera Error! Live feed stopped or failed to start.",
-            0,  # Persistent message
+            "Camera Error! Live feed stopped or failed to start.", 0
         )
-        # If recording depends on camera, might need to stop recording too
+
+        # If a recording was in progress, stop it
         if self._is_recording and self._recording_worker:
             log.warning(
                 "Camera error occurred during active recording. Stopping recording."
             )
-            # Consider if a more specific message is needed for recording stop due to camera error
             self._trigger_stop_recording()
+
 
     def closeEvent(self, event):
         log.info("MainWindow closeEvent triggered.")
 
-        # Handle active recording session
+        # If a recording is active, confirm before closing
         if self._is_recording:
             reply = QMessageBox.question(
                 self,
@@ -1097,34 +1054,30 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
 
-        # Gracefully stop all threads
-        threads_to_clean = [
-            (
-                "CameraThread",
-                self.camera_thread,
-                getattr(self.camera_thread, "stop", None),
-            ),
-            (
-                "SerialThread",
-                self._serial_thread,
-                getattr(self._serial_thread, "stop", None),
-            ),
-            (
-                "RecordingWorker",
-                self._recording_worker,
-                getattr(self._recording_worker, "stop_worker", None),
-            ),
-        ]
+        # Gracefully stop camera (if running) and other threads
+        threads_to_clean = []
+
+        # 1) CameraThread is now inside camera_widget
+        if self.camera_widget and hasattr(self.camera_widget, "_cam_thread"):
+            cam_thread = self.camera_widget._cam_thread
+            threads_to_clean.append(
+                ("SDKCameraThread", cam_thread, getattr(cam_thread, "stop", None))
+            )
+
+        # 2) SerialThread (unchanged)
+        threads_to_clean.append(
+            ("SerialThread", self._serial_thread, getattr(self._serial_thread, "stop", None))
+        )
+
+        # 3) RecordingWorker (unchanged)
+        threads_to_clean.append(
+            ("RecordingWorker", self._recording_worker, getattr(self._recording_worker, "stop_worker", None))
+        )
 
         for name, thread_instance, stop_method in threads_to_clean:
             if thread_instance:
-                if (
-                    hasattr(thread_instance, "isRunning")
-                    and thread_instance.isRunning()
-                ):
-                    log.info(
-                        f"Stopping {name} ({thread_instance.__class__.__name__})..."
-                    )
+                if hasattr(thread_instance, "isRunning") and thread_instance.isRunning():
+                    log.info(f"Stopping {name} ({thread_instance.__class__.__name__})...")
                     try:
                         if stop_method:
                             stop_method()
@@ -1134,9 +1087,7 @@ class MainWindow(QMainWindow):
                             )
 
                         timeout = 3000 if name == "RecordingWorker" else 1500
-                        if hasattr(
-                            thread_instance, "wait"
-                        ) and not thread_instance.wait(timeout):
+                        if hasattr(thread_instance, "wait") and not thread_instance.wait(timeout):
                             log.warning(
                                 f"{name} did not stop gracefully, forcing terminate."
                             )
@@ -1150,8 +1101,9 @@ class MainWindow(QMainWindow):
                     thread_instance.deleteLater()
 
                 # Nullify
-                if name == "CameraThread":
-                    self.camera_thread = None
+                if name == "SDKCameraThread":
+                    # The thread is owned by the widget; just set the widget disabled
+                    self.camera_widget.setEnabled(False)
                 elif name == "SerialThread":
                     self._serial_thread = None
                 elif name == "RecordingWorker":
@@ -1162,3 +1114,4 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         log.info("All threads cleaned up. Proceeding with close.")
         super().closeEvent(event)
+
