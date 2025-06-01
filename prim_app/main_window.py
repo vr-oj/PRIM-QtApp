@@ -203,17 +203,32 @@ class MainWindow(QMainWindow):
         info_layout.setContentsMargins(6, 6, 6, 6)
         info_layout.setSpacing(4)
 
-        # Connection status
+        # Connection status (read‐only)
         self.lbl_cam_connection = QLabel("Disconnected")
         info_layout.addRow("Camera Status:", self.lbl_cam_connection)
 
-        # Frame count
+        # Frame count (read‐only)
         self.lbl_cam_frame = QLabel("0")
         info_layout.addRow("Frame #:", self.lbl_cam_frame)
 
-        # Resolution
+        # Resolution (read‐only; updates after first frame)
         self.lbl_cam_resolution = QLabel("N/A")
         info_layout.addRow("Resolution:", self.lbl_cam_resolution)
+
+        # --- Device selection combo and resolution combo ---
+        self.device_combo = QComboBox()
+        self.device_combo.addItem("Select Device...", None)
+        self.device_combo.currentIndexChanged.connect(self._on_device_selected)
+        info_layout.addRow("Device:", self.device_combo)
+
+        self.resolution_combo = QComboBox()
+        self.resolution_combo.addItem("Select Resolution...", None)
+        info_layout.addRow("Resolution:", self.resolution_combo)
+
+        # --- Start/Stop Camera button (appears under device/resolution) ---
+        self.btn_start_camera = QPushButton("Start Camera")
+        self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
+        info_layout.addRow("", self.btn_start_camera)
 
         self.camera_tabs.addTab(info_tab, "Info")
 
@@ -310,7 +325,6 @@ class MainWindow(QMainWindow):
             self.plot_control_panel.export_plot_image_requested.connect(
                 self.pressure_plot_widget.export_as_image
             )
-        # Always connect "Clear Plot Data" to clear_plot()
         if hasattr(self.pressure_plot_widget, "clear_plot"):
             self.plot_control_panel.clear_plot_requested.connect(
                 self.pressure_plot_widget.clear_plot
@@ -332,21 +346,11 @@ class MainWindow(QMainWindow):
             log.error(f"Failed to enumerate IC4 devices: {e}")
             devices = []
 
-        # Create the device selection combo if not yet created
-        if not hasattr(self, "device_combo"):
-            self.device_combo = QComboBox()
-            self.device_combo.addItem("Select Device...", None)
-            self.device_combo.currentIndexChanged.connect(self._on_device_selected)
-
-            self.resolution_combo = QComboBox()
-            self.resolution_combo.addItem("Select Resolution...", None)
-
-            self.btn_start_camera = QPushButton("Start Camera")
-            self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
-
-        # Populate device_combo
+        # Clear any existing items, then re-add the placeholder
         self.device_combo.clear()
         self.device_combo.addItem("Select Device...", None)
+
+        # Populate with actual DeviceInfo objects
         for dev in devices:
             self.device_combo.addItem(dev.display_name, dev)
 
