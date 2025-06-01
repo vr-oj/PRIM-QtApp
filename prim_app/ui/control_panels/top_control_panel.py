@@ -22,12 +22,6 @@ class TopControlPanel(QWidget):
     # generic passthrough
     parameter_changed = pyqtSignal(str, object)
 
-    # plot signals…
-    x_axis_limits_changed = pyqtSignal(float, float)
-    y_axis_limits_changed = pyqtSignal(float, float)
-    export_plot_image_requested = pyqtSignal()
-    clear_plot_requested = pyqtSignal()
-
     def __init__(self, parent=None):
         super().__init__(parent)
 

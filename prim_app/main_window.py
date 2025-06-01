@@ -162,197 +162,144 @@ class MainWindow(QMainWindow):
 
     def _build_central_widget_layout(self):
         """
-        Builds a layout matching the screenshot:
-        ┌────────────────────────────────────────────────────────────────┐
-        │  Top Row:  [Camera Controls Tabs] [Device Status] [Plot Controls] │
-        ├────────────────────────────────────────────────────────────────┤
-        │  Bottom Row:  [QtCameraWidget (live feed)] | [PressurePlotWidget] │
-        └────────────────────────────────────────────────────────────────┘
+        Layout with three sections across the top:
+
+          [Camera Control Tabs]    [Top Control]    [Plot Control]
+
+        Bottom row:
+
+          [QtCameraWidget (live feed)] | [PressurePlotWidget (live plot)]
         """
 
-        # ----------------------------
-        # 0) Pre‐create the camera_widget so it exists before we create the control panel
-        # ----------------------------
+        # ─── 0) Pre-create camera_widget so its thread exists for CameraControlPanel ───
         self.camera_widget = QtCameraWidget(self)
-        # Initially, leave it enabled (the Start button inside will handle on/off)
 
-        # ----------------------------
-        # 1) Create the container
-        # ----------------------------
+        # ─── 1) Central container & main vertical layout ────────────────────────────
         central = QWidget()
         main_vlay = QVBoxLayout(central)
         main_vlay.setContentsMargins(4, 4, 4, 4)
         main_vlay.setSpacing(6)
 
-        # ----------------------------
-        # 2) Build the Top Row
-        # ----------------------------
+        # ─── 2) Top Row: three sections ─────────────────────────────────────────────
         top_row_widget = QWidget()
         top_row_lay = QHBoxLayout(top_row_widget)
         top_row_lay.setContentsMargins(0, 0, 0, 0)
         top_row_lay.setSpacing(10)
 
-        # -- 2a) Camera Controls (TabWidget with three tabs) --
+        # --- 2a) Camera Control (Tabbed: Info | Controls) ---
         camera_tabs = QTabWidget()
         camera_tabs.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
 
-        # --- Tab 1: Source (Device & Resolution selection + “Start Camera” button) ---
-        source_tab = QWidget()
-        source_lay = QFormLayout(source_tab)
-        source_lay.setContentsMargins(6, 6, 6, 6)
-        source_lay.setSpacing(6)
+        # ==== Tab 1: "Info" ====
+        info_tab = QWidget()
+        info_layout = QFormLayout(info_tab)
+        info_layout.setContentsMargins(6, 6, 6, 6)
+        info_layout.setSpacing(4)
 
-        # Device dropdown (populated later)
-        self.device_combo = QComboBox()
-        self.device_combo.addItem("Select Device...", None)
-        self.device_combo.currentIndexChanged.connect(self._on_device_selected)
-        source_lay.addRow("Device:", self.device_combo)
+        # Connection status label
+        self.lbl_cam_connection = QLabel("Disconnected")
+        info_layout.addRow("Camera Status:", self.lbl_cam_connection)
 
-        # Resolution dropdown (populated when device selected)
-        self.resolution_combo = QComboBox()
-        self.resolution_combo.addItem("Select Resolution...", None)
-        source_lay.addRow("Resolution:", self.resolution_combo)
+        # Frame count label
+        self.lbl_cam_frame = QLabel("0")
+        info_layout.addRow("Frame #:", self.lbl_cam_frame)
 
-        # Start/Stop Camera button
-        self.btn_start_camera = QPushButton("Start Camera")
-        self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
-        source_lay.addRow("", self.btn_start_camera)
+        # Resolution label (will update after camera opens)
+        self.lbl_cam_resolution = QLabel("N/A")
+        info_layout.addRow("Resolution:", self.lbl_cam_resolution)
 
-        camera_tabs.addTab(source_tab, "Source")
+        camera_tabs.addTab(info_tab, "Info")
 
-        # --- Tab 2: Adjustments (Gain, Brightness, Auto-Exposure, etc.) ---
-        adjustments_tab = QWidget()
-        adjustments_lay = QVBoxLayout(adjustments_tab)
-        adjustments_lay.setContentsMargins(6, 6, 6, 6)
-        adjustments_lay.setSpacing(6)
+        # ==== Tab 2: "Controls" ====
+        controls_tab = QWidget()
+        controls_layout = QVBoxLayout(controls_tab)
+        controls_layout.setContentsMargins(6, 6, 6, 6)
+        controls_layout.setSpacing(6)
 
-        # Now that self.camera_widget exists, we can create the panel with its internal thread
+        # CameraControlPanel shows gain, brightness, auto-exposure sliders
         self.camera_control_panel = CameraControlPanel(
             camera_thread=self.camera_widget._cam_thread, parent=self
         )
         self.camera_control_panel.setEnabled(False)  # Disabled until camera starts
-        adjustments_lay.addWidget(self.camera_control_panel)
+        controls_layout.addWidget(self.camera_control_panel)
 
-        camera_tabs.addTab(adjustments_tab, "Adjustments")
-
-        # --- Tab 3: Region of Interest (ROI) (Placeholder) ---
-        roi_tab = QWidget()
-        roi_lay = QVBoxLayout(roi_tab)
-        roi_lay.setContentsMargins(6, 6, 6, 6)
-        roi_lay.setSpacing(6)
-
-        roi_placeholder = QLabel("ROI controls will go here.")
-        roi_placeholder.setAlignment(Qt.AlignCenter)
-        roi_lay.addWidget(roi_placeholder)
-
-        camera_tabs.addTab(roi_tab, "Region of Interest (ROI)")
+        camera_tabs.addTab(controls_tab, "Controls")
 
         # Add the camera_tabs to the top-left of the top row
         top_row_lay.addWidget(camera_tabs, stretch=2)
 
-        # -- 2b) Device Status Panel (Centered) --
-        status_panel = QGroupBox("PRIM Device Status")
-        status_lay = QFormLayout(status_panel)
-        status_lay.setContentsMargins(6, 6, 6, 6)
-        status_lay.setSpacing(4)
+        # --- 2b) Top Control Panel (center) ---
+        self.top_ctrl = TopControlPanel(self)
+        top_row_lay.addWidget(self.top_ctrl, stretch=2)
 
-        self.lbl_connection = QLabel("Disconnected")
-        status_lay.addRow("Connection:", self.lbl_connection)
+        # --- 2c) Plot Control Panel (rightmost) ---
+        from ui.control_panels.plot_control_panel import PlotControlPanel
 
-        self.lbl_frame_number = QLabel("0")
-        status_lay.addRow("Device Frame #:", self.lbl_frame_number)
+        self.plot_control_panel = PlotControlPanel(self)
+        top_row_lay.addWidget(self.plot_control_panel, stretch=2)
 
-        self.lbl_device_time = QLabel("0.00")
-        status_lay.addRow("Device Time (s):", self.lbl_device_time)
-
-        self.lbl_current_pressure = QLabel("0.00")
-        status_lay.addRow("Current Pressure:", self.lbl_current_pressure)
-
-        status_panel.setFixedWidth(250)
-        top_row_lay.addWidget(status_panel, stretch=1)
-
-        # -- 2c) Plot Controls Panel (Right) --
-        plot_ctrl_panel = QGroupBox("Plot Controls")
-        plot_lay = QFormLayout(plot_ctrl_panel)
-        plot_lay.setContentsMargins(6, 6, 6, 6)
-        plot_lay.setSpacing(4)
-
-        self.chk_autoscale_x = QCheckBox("Auto‐scale X")
-        self.chk_autoscale_x.setChecked(True)
-        self.chk_autoscale_x.stateChanged.connect(self._on_autoscale_x_toggled)
-        plot_lay.addRow("", self.chk_autoscale_x)
-
-        self.edit_xmin = QLineEdit("0.0")
-        self.edit_xmin.setEnabled(False)
-        self.edit_xmax = QLineEdit("0.0")
-        self.edit_xmax.setEnabled(False)
-        xlimits_row = QWidget()
-        xlimits_lay = QHBoxLayout(xlimits_row)
-        xlimits_lay.setContentsMargins(0, 0, 0, 0)
-        xlimits_lay.setSpacing(4)
-        xlimits_lay.addWidget(QLabel("Min:"))
-        xlimits_lay.addWidget(self.edit_xmin)
-        xlimits_lay.addWidget(QLabel("Max:"))
-        xlimits_lay.addWidget(self.edit_xmax)
-        plot_lay.addRow("X‐Limits:", xlimits_row)
-
-        self.chk_autoscale_y = QCheckBox("Auto‐scale Y")
-        self.chk_autoscale_y.setChecked(True)
-        self.chk_autoscale_y.stateChanged.connect(self._on_autoscale_y_toggled)
-        plot_lay.addRow("", self.chk_autoscale_y)
-
-        self.edit_ymin = QLineEdit("0.0")
-        self.edit_ymin.setEnabled(False)
-        self.edit_ymax = QLineEdit("30.0")
-        self.edit_ymax.setEnabled(False)
-        ylimits_row = QWidget()
-        ylimits_lay = QHBoxLayout(ylimits_row)
-        ylimits_lay.setContentsMargins(0, 0, 0, 0)
-        ylimits_lay.setSpacing(4)
-        ylimits_lay.addWidget(QLabel("Min:"))
-        ylimits_lay.addWidget(self.edit_ymin)
-        ylimits_lay.addWidget(QLabel("Max:"))
-        ylimits_lay.addWidget(self.edit_ymax)
-        plot_lay.addRow("Y‐Limits:", ylimits_row)
-
-        btn_reset_zoom = QPushButton("Reset Zoom/View")
-        btn_reset_zoom.clicked.connect(self._on_reset_zoom)
-        plot_lay.addRow("", btn_reset_zoom)
-
-        btn_export_plot = QPushButton("Export Plot Image")
-        btn_export_plot.clicked.connect(self._on_export_plot_image)
-        plot_lay.addRow("", btn_export_plot)
-
-        plot_ctrl_panel.setFixedWidth(300)
-        top_row_lay.addWidget(plot_ctrl_panel, stretch=1)
-
-        # Add the completed top row to the main layout
         main_vlay.addWidget(top_row_widget, stretch=0)
 
-        # ----------------------------
-        # 3) Build the Bottom Row (Camera View | Plot)
-        # ----------------------------
+        # ─── 3) Bottom Row: Camera View and Plot ───────────────────────────────────
         self.bottom_split = QSplitter(Qt.Horizontal)
         self.bottom_split.setChildrenCollapsible(False)
 
-        # -- 3a) Left: Live Camera Feed --
+        # --- 3a) Left: Live Camera Feed ---
         self.camera_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.bottom_split.addWidget(self.camera_widget)
 
-        # -- 3b) Right: Pressure Plot --
+        # --- 3b) Right: Pressure Plot Widget ---
         self.pressure_plot_widget = PressurePlotWidget(self)
         self.pressure_plot_widget.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Expanding
         )
         self.bottom_split.addWidget(self.pressure_plot_widget)
 
-        # Balance the two panes
+        # Balance the two panes equally
         self.bottom_split.setStretchFactor(0, 1)
         self.bottom_split.setStretchFactor(1, 1)
 
         main_vlay.addWidget(self.bottom_split, stretch=1)
 
-        # Finally, set this as the central widget
+        # ─── 4) Wire Up Signals ────────────────────────────────────────────────────
+
+        # 4a) Camera Thread → Info Tab updates
+        #   - frame_ready to update frame count and maybe resolution (once)
+        self.camera_widget._cam_thread.frame_ready.connect(self._update_camera_info)
+
+        # 4b) Camera Thread → Error (optional: show in Info tab)
+        self.camera_widget._cam_thread.error.connect(self._on_camera_error)
+
+        # 4c) Top Control Panel → PressurePlotWidget
+        self.top_ctrl.x_axis_limits_changed.connect(
+            self.pressure_plot_widget.set_manual_x_limits
+        )
+        self.top_ctrl.y_axis_limits_changed.connect(
+            self.pressure_plot_widget.set_manual_y_limits
+        )
+        self.top_ctrl.export_plot_image_requested.connect(
+            self.pressure_plot_widget.export_as_image
+        )
+        self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
+
+        # 4d) Plot Control Panel → PressurePlotWidget
+        self.plot_control_panel.autoscale_x_changed.connect(
+            self.pressure_plot_widget.set_auto_scale_x
+        )
+        self.plot_control_panel.autoscale_y_changed.connect(
+            self.pressure_plot_widget.set_auto_scale_y
+        )
+        self.plot_control_panel.reset_zoom_requested.connect(
+            lambda: self.pressure_plot_widget.reset_zoom(
+                self.plot_control_panel.is_autoscale_x(),
+                self.plot_control_panel.is_autoscale_y(),
+            )
+        )
+        self.plot_control_panel.export_image_requested.connect(
+            self.pressure_plot_widget.export_as_image
+        )
+
+        # ─── 5) Finalize ───────────────────────────────────────────────────────────
         self.setCentralWidget(central)
 
     # ────────────────────────────────────────────────────────────────
@@ -439,66 +386,47 @@ class MainWindow(QMainWindow):
         except Exception as e:
             log.error(f"Error exporting plot image: {e}")
 
+    @pyqtSlot(QImage, object)
+    def _update_camera_info(self, image: QImage, raw):
+        """
+        Update the 'Info' tab with current frame count and resolution.
+        Called every time a new frame arrives.
+        """
+        # Increment frame count
+        try:
+            current_count = int(self.lbl_cam_frame.text())
+        except ValueError:
+            current_count = 0
+        current_count += 1
+        self.lbl_cam_frame.setText(str(current_count))
+
+        # Update resolution label based on image dimensions
+        width = image.width()
+        height = image.height()
+        self.lbl_cam_resolution.setText(f"{width}×{height}")
+
+        # Also set the connection label once if it’s not already "Connected"
+        if self.lbl_cam_connection.text() != "Connected":
+            self.lbl_cam_connection.setText("Connected")
+
     def _on_start_stop_camera(self):
-        """
-        Called when the user clicks the "Start Camera" / "Stop Camera" button in the Source tab.
-        This method toggles the SDKCameraThread on/off and updates UI state accordingly.
-        """
-        # If the camera thread isn’t yet running, start it:
         cam_thread = self.camera_widget._cam_thread
         if not cam_thread.isRunning():
-            # Check that a device has been selected
-            dev_info = self.device_combo.currentData()
-            if dev_info is None:
-                QMessageBox.warning(
-                    self,
-                    "Camera Not Configured",
-                    "Please select a valid camera device before starting.",
-                )
-                return
-
-            # Check that a resolution has been selected
-            res_data = self.resolution_combo.currentData()
-            if res_data is None:
-                QMessageBox.warning(
-                    self,
-                    "Camera Not Configured",
-                    "Please select a valid resolution before starting.",
-                )
-                return
-
-            # Tell the thread which DeviceInfo to open
-            cam_thread.set_device_info(dev_info)
-
-            # Tell the thread which resolution/pixel format to use
-            # Here, res_data could be a tuple like (width, height, pixel_format_id)
-            # Adjust according to how you populated resolution_combo
-            width, height, pixfmt = res_data
-            cam_thread.set_resolution((width, height, pixfmt))
-
-            # Finally, start the thread
+            # ... (after validating device & resolution) ...
             cam_thread.start()
-
-            # Update the button text and enable adjustments panel
             self.btn_start_camera.setText("Stop Camera")
             self.camera_control_panel.setEnabled(True)
-
-            # Update device status to show “Connected” (you can refine as needed)
-            self.lbl_connection.setText(f"Connected to {dev_info.display_name}")
-
+            # Reset frame count and resolution display
+            self.lbl_cam_frame.setText("0")
+            self.lbl_cam_resolution.setText("N/A")
+            self.lbl_cam_connection.setText("Connecting...")
         else:
-            # If it *is* running, stop it
-            try:
-                cam_thread.stop()
-            except Exception as e:
-                log.error(f"Error stopping camera thread: {e}")
-
-            # Reset the button text and disable adjustments panel
+            cam_thread.stop()
             self.btn_start_camera.setText("Start Camera")
             self.camera_control_panel.setEnabled(False)
-
-            # Reset device status
-            self.lbl_connection.setText("Disconnected")
+            self.lbl_cam_connection.setText("Disconnected")
+            self.lbl_cam_frame.setText("0")
+            self.lbl_cam_resolution.setText("N/A")
 
     def _populate_device_list(self):
         """
