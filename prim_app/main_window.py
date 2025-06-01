@@ -134,12 +134,12 @@ class MainWindow(QMainWindow):
         self.camera_view = None
         self.bottom_split = None
         self.camera_settings = {}
+        self.camera_control_panel = self.camera_panel
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
         self._build_central_widget_layout()
         self.ic4_controller = IC4CameraController()
-        self.camera_control_panel = self.camera_panel
 
         self._build_menus()
         self._build_main_toolbar()
