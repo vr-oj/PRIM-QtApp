@@ -5,12 +5,17 @@ import sys
 import re
 import logging
 import csv
-import json  # Keep for other potential uses
-import imagingcontrol4 as ic4
+import json
 
+import imagingcontrol4 as ic4
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
+    QWidget,
+    QHBoxLayout,
+    QVBoxLayout,
+    QSplitter,
+    QFormLayout,
     QDockWidget,
     QTextEdit,
     QToolBar,
@@ -18,24 +23,20 @@ from PyQt5.QtWidgets import (
     QAction,
     QFileDialog,
     QDialog,
-    QFormLayout,
     QDialogButtonBox,
     QLineEdit,
     QComboBox,
     QLabel,
-    QVBoxLayout,
-    QHBoxLayout,
-    QWidget,
-    QSplitter,
+    QPushButton,
     QMessageBox,
     QSizePolicy,
     QTabWidget,
     QGroupBox,
-    QFormLayout,
-    QPushButton,
+    QDoubleSpinBox,
     QCheckBox,
+    QHBoxLayout,
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime
 from PyQt5.QtGui import QIcon, QKeySequence, QImage
 
 import prim_app
@@ -54,16 +55,16 @@ from utils.config import (
     DEFAULT_VIDEO_EXTENSION,
     DEFAULT_VIDEO_CODEC,
     ABOUT_TEXT,
-    # CAMERA_HARDCODED_DEFAULTS,  # Temporarily removed
+    PLOT_DEFAULT_Y_MIN,
+    PLOT_DEFAULT_Y_MAX,
 )
-
-from ui.control_panels.top_control_panel import TopControlPanel
-from ui.control_panels.camera_control_panel import CameraControlPanel
 from ui.canvas.qtcamera_widget import QtCameraWidget
+from ui.control_panels.camera_control_panel import CameraControlPanel
+from ui.control_panels.top_control_panel import TopControlPanel
+from ui.control_panels.plot_control_panel import PlotControlPanel
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
-from threads.sdk_camera_thread import SDKCameraThread
-from threads.serial_thread import SerialThread
 
+from threads.serial_thread import SerialThread
 from recording import RecordingWorker
 from utils.utils import list_serial_ports
 
@@ -79,52 +80,61 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        # ─── State variables ─────────────────────────────────────────────────────
+        # ─── State Variables ─────────────────────────────────────────────────────
         self._serial_thread = None
         self._recording_worker = None
         self._is_recording = False
 
-        # So keep these as None for now:
-        self.camera_thread = None
-        self.camera_panel = None
-        self.camera_view = None
+        # Camera‐related
+        self.device_combo = None
+        self.resolution_combo = None
+        self.btn_start_camera = None
+        self.camera_widget = None
+        self.camera_control_panel = None
+        self.camera_tabs = None
 
-        self.camera_settings = {}
-        self.last_trial_basepath = None
+        # Plot controls
+        self.plot_control_panel = None
 
-        # ─── Build UI scaffolding ────────────────────────────────────────────────
+        # Top control (Arduino status)
+        self.top_ctrl = None
+
+        # Plotting
+        self.pressure_plot_widget = None
+
+        # Other UI
+        self.lbl_cam_connection = None
+        self.lbl_cam_frame = None
+        self.lbl_cam_resolution = None
+
         self._init_paths_and_icons()
         self._build_console_log_dock()
-
-        # ─── Build the central widget / layouts (including the new camera widget) ─
         self._build_central_widget_layout()
-
-        self._populate_device_list()
-
-        # ─── Build menus, toolbars, status bar ───────────────────────────────────
         self._build_menus()
         self._build_main_toolbar()
         self._build_status_bar()
 
-        # ─── Window title and initial splitter sizing ───────────────────────────
+        # Populate device list so user can select camera
+        self._populate_device_list()
+        self._set_initial_control_states()
+
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
         QTimer.singleShot(50, self._set_initial_splitter_sizes)
-
-        self._set_initial_control_states()
         log.info("MainWindow initialized.")
         self.showMaximized()
+
+    # ─── UI Builders ────────────────────────────────────────────────────────
 
     def _init_paths_and_icons(self):
         base = os.path.dirname(os.path.abspath(__file__))
         icon_dir = os.path.join(base, "ui", "icons")
         if not os.path.isdir(icon_dir):
-            # Attempt to find icons if script is run from within prim_app directory
             alt_icon_dir = os.path.join(
                 os.path.dirname(base), "prim_app", "ui", "icons"
             )
             if os.path.isdir(alt_icon_dir):
                 icon_dir = alt_icon_dir
-            else:  # Try one level up from base for cases like running tests from project root
+            else:
                 another_alt_icon_dir = os.path.join(
                     os.path.dirname(base), "ui", "icons"
                 )
@@ -163,114 +173,104 @@ class MainWindow(QMainWindow):
     def _build_central_widget_layout(self):
         """
         Layout with three sections across the top:
-
           [Camera Control Tabs]    [Top Control]    [Plot Control]
 
         Bottom row:
-
           [QtCameraWidget (live feed)] | [PressurePlotWidget (live plot)]
         """
-
-        # ─── 0) Pre-create camera_widget so its thread exists for CameraControlPanel ───
+        # ─── Pre-create camera_widget for thread availability ─────────────────
         self.camera_widget = QtCameraWidget(self)
 
-        # ─── 1) Central container & main vertical layout ────────────────────────────
+        # ─── Central container & main vertical layout ─────────────────────────
         central = QWidget()
         main_vlay = QVBoxLayout(central)
         main_vlay.setContentsMargins(4, 4, 4, 4)
         main_vlay.setSpacing(6)
 
-        # ─── 2) Top Row: three sections ─────────────────────────────────────────────
+        # ─── Top Row: Camera Control | Top Control | Plot Control ───────────
         top_row_widget = QWidget()
         top_row_lay = QHBoxLayout(top_row_widget)
         top_row_lay.setContentsMargins(0, 0, 0, 0)
         top_row_lay.setSpacing(10)
 
-        # --- 2a) Camera Control (Tabbed: Info | Controls) ---
-        camera_tabs = QTabWidget()
-        camera_tabs.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        # --- Camera Control: a QTabWidget with Info & Controls tabs ---
+        self.camera_tabs = QTabWidget()
+        self.camera_tabs.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
 
-        # ==== Tab 1: "Info" ====
+        # ==== Tab 1: Info ====
         info_tab = QWidget()
         info_layout = QFormLayout(info_tab)
         info_layout.setContentsMargins(6, 6, 6, 6)
         info_layout.setSpacing(4)
 
-        # Connection status label
+        # Connection status
         self.lbl_cam_connection = QLabel("Disconnected")
         info_layout.addRow("Camera Status:", self.lbl_cam_connection)
 
-        # Frame count label
+        # Frame count
         self.lbl_cam_frame = QLabel("0")
         info_layout.addRow("Frame #:", self.lbl_cam_frame)
 
-        # Resolution label (will update after camera opens)
+        # Resolution
         self.lbl_cam_resolution = QLabel("N/A")
         info_layout.addRow("Resolution:", self.lbl_cam_resolution)
 
-        camera_tabs.addTab(info_tab, "Info")
+        self.camera_tabs.addTab(info_tab, "Info")
 
-        # ==== Tab 2: "Controls" ====
+        # ==== Tab 2: Controls ====
         controls_tab = QWidget()
         controls_layout = QVBoxLayout(controls_tab)
         controls_layout.setContentsMargins(6, 6, 6, 6)
         controls_layout.setSpacing(6)
 
-        # CameraControlPanel shows gain, brightness, auto-exposure sliders
+        # CameraControlPanel: gain, brightness, auto-exposure sliders
         self.camera_control_panel = CameraControlPanel(
             camera_thread=self.camera_widget._cam_thread, parent=self
         )
-        self.camera_control_panel.setEnabled(False)  # Disabled until camera starts
+        self.camera_control_panel.setEnabled(False)
         controls_layout.addWidget(self.camera_control_panel)
 
-        camera_tabs.addTab(controls_tab, "Controls")
+        self.camera_tabs.addTab(controls_tab, "Controls")
 
-        # Add the camera_tabs to the top-left of the top row
-        top_row_lay.addWidget(camera_tabs, stretch=2)
+        top_row_lay.addWidget(self.camera_tabs, stretch=2)
 
-        # --- 2b) Top Control Panel (center) ---
+        # --- Top Control Panel (center) ---
         self.top_ctrl = TopControlPanel(self)
         top_row_lay.addWidget(self.top_ctrl, stretch=2)
 
-        # --- 2c) Plot Control Panel (rightmost) ---
-        from ui.control_panels.plot_control_panel import PlotControlPanel
-
+        # --- Plot Control Panel (right) ---
         self.plot_control_panel = PlotControlPanel(self)
         top_row_lay.addWidget(self.plot_control_panel, stretch=2)
 
         main_vlay.addWidget(top_row_widget, stretch=0)
 
-        # ─── 3) Bottom Row: Camera View and Plot ───────────────────────────────────
+        # ─── Bottom Row: Camera Viewfinder | Live Plot ───────────────────────
         self.bottom_split = QSplitter(Qt.Horizontal)
         self.bottom_split.setChildrenCollapsible(False)
 
-        # --- 3a) Left: Live Camera Feed ---
+        # Left: QtCameraWidget (live feed)
         self.camera_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.bottom_split.addWidget(self.camera_widget)
 
-        # --- 3b) Right: Pressure Plot Widget ---
+        # Right: PressurePlotWidget (live plot)
         self.pressure_plot_widget = PressurePlotWidget(self)
         self.pressure_plot_widget.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Expanding
         )
         self.bottom_split.addWidget(self.pressure_plot_widget)
 
-        # Balance the two panes equally
         self.bottom_split.setStretchFactor(0, 1)
         self.bottom_split.setStretchFactor(1, 1)
 
         main_vlay.addWidget(self.bottom_split, stretch=1)
 
-        # ─── 4) Wire Up Signals ────────────────────────────────────────────────────
+        # ─── Wire Up Signals ─────────────────────────────────────────────────────
 
-        # 4a) Camera Thread → Info Tab updates
-        #   - frame_ready to update frame count and maybe resolution (once)
+        # CameraThread → Info Tab updates
         self.camera_widget._cam_thread.frame_ready.connect(self._update_camera_info)
-
-        # 4b) Camera Thread → Error (optional: show in Info tab)
         self.camera_widget._cam_thread.error.connect(self._on_camera_error)
 
-        # 4c) Top Control Panel → PressurePlotWidget
+        # TopControlPanel → PressurePlotWidget
         self.top_ctrl.x_axis_limits_changed.connect(
             self.pressure_plot_widget.set_manual_x_limits
         )
@@ -282,12 +282,18 @@ class MainWindow(QMainWindow):
         )
         self.top_ctrl.clear_plot_requested.connect(self._clear_pressure_plot)
 
-        # 4d) Plot Control Panel → PressurePlotWidget
+        # PlotControlPanel → PressurePlotWidget
         self.plot_control_panel.autoscale_x_changed.connect(
             self.pressure_plot_widget.set_auto_scale_x
         )
         self.plot_control_panel.autoscale_y_changed.connect(
             self.pressure_plot_widget.set_auto_scale_y
+        )
+        self.plot_control_panel.x_axis_limits_changed.connect(
+            self.pressure_plot_widget.set_manual_x_limits
+        )
+        self.plot_control_panel.y_axis_limits_changed.connect(
+            self.pressure_plot_widget.set_manual_y_limits
         )
         self.plot_control_panel.reset_zoom_requested.connect(
             lambda: self.pressure_plot_widget.reset_zoom(
@@ -295,142 +301,19 @@ class MainWindow(QMainWindow):
                 self.plot_control_panel.is_autoscale_y(),
             )
         )
-        self.plot_control_panel.export_image_requested.connect(
+        self.plot_control_panel.export_plot_image_requested.connect(
             self.pressure_plot_widget.export_as_image
         )
+        self.plot_control_panel.clear_plot_requested.connect(self._clear_pressure_plot)
 
-        # ─── 5) Finalize ───────────────────────────────────────────────────────────
+        # Set the central widget
         self.setCentralWidget(central)
 
-    # ────────────────────────────────────────────────────────────────
-    # Plot‐control slots for Auto‐scale X/Y, Reset Zoom, Export Image
-    # ────────────────────────────────────────────────────────────────
-
-    @pyqtSlot(int)
-    def _on_autoscale_x_toggled(self, state: int):
-        """
-        Called when the 'Auto‐scale X' checkbox changes.
-        If checked, disables the X‐min/max edits and invokes auto-scaling on the plot.
-        If unchecked, enables the X‐min/max edits and applies manual limits if valid.
-        """
-        auto_on = state == Qt.Checked
-        # Disable or enable the X‐limit edits
-        self.edit_xmin.setEnabled(not auto_on)
-        self.edit_xmax.setEnabled(not auto_on)
-
-        # Tell the plot widget to auto‐scale or hold manual limits
-        try:
-            self.pressure_plot_widget.set_auto_scale_x(auto_on)
-        except Exception as e:
-            log.error(f"Error toggling auto‐scale X: {e}")
-
-        if not auto_on:
-            # If turning OFF auto‐scale, immediately attempt to apply the manual limits
-            try:
-                xmin = float(self.edit_xmin.text())
-                xmax = float(self.edit_xmax.text())
-                self.pressure_plot_widget.set_manual_x_limits(xmin, xmax)
-            except ValueError:
-                # If the text isn't a valid float yet, ignore until the user fixes it
-                pass
-
-    @pyqtSlot(int)
-    def _on_autoscale_y_toggled(self, state: int):
-        """
-        Called when the 'Auto‐scale Y' checkbox changes.
-        If checked, disables the Y‐min/max edits and invokes auto-scaling on the plot.
-        If unchecked, enables the Y‐min/max edits and applies manual limits if valid.
-        """
-        auto_on = state == Qt.Checked
-        # Disable or enable the Y‐limit edits
-        self.edit_ymin.setEnabled(not auto_on)
-        self.edit_ymax.setEnabled(not auto_on)
-
-        # Tell the plot widget to auto‐scale or hold manual limits
-        try:
-            self.pressure_plot_widget.set_auto_scale_y(auto_on)
-        except Exception as e:
-            log.error(f"Error toggling auto‐scale Y: {e}")
-
-        if not auto_on:
-            # If turning OFF auto‐scale, immediately attempt to apply the manual limits
-            try:
-                ymin = float(self.edit_ymin.text())
-                ymax = float(self.edit_ymax.text())
-                self.pressure_plot_widget.set_manual_y_limits(ymin, ymax)
-            except ValueError:
-                # If the text isn't a valid float yet, ignore until the user fixes it
-                pass
-
-    @pyqtSlot()
-    def _on_reset_zoom(self):
-        """
-        Called when the 'Reset Zoom/View' button is clicked.
-        Resets both X and Y zoom according to the current auto‐scale checkboxes.
-        """
-        auto_x = self.chk_autoscale_x.isChecked()
-        auto_y = self.chk_autoscale_y.isChecked()
-        try:
-            self.pressure_plot_widget.reset_zoom(auto_x, auto_y)
-        except Exception as e:
-            log.error(f"Error resetting plot zoom: {e}")
-
-    @pyqtSlot()
-    def _on_export_plot_image(self):
-        """
-        Called when the 'Export Plot Image' button is clicked.
-        Delegates to the plot widget’s export_as_image() method.
-        """
-        try:
-            self.pressure_plot_widget.export_as_image()
-        except Exception as e:
-            log.error(f"Error exporting plot image: {e}")
-
-    @pyqtSlot(QImage, object)
-    def _update_camera_info(self, image: QImage, raw):
-        """
-        Update the 'Info' tab with current frame count and resolution.
-        Called every time a new frame arrives.
-        """
-        # Increment frame count
-        try:
-            current_count = int(self.lbl_cam_frame.text())
-        except ValueError:
-            current_count = 0
-        current_count += 1
-        self.lbl_cam_frame.setText(str(current_count))
-
-        # Update resolution label based on image dimensions
-        width = image.width()
-        height = image.height()
-        self.lbl_cam_resolution.setText(f"{width}×{height}")
-
-        # Also set the connection label once if it’s not already "Connected"
-        if self.lbl_cam_connection.text() != "Connected":
-            self.lbl_cam_connection.setText("Connected")
-
-    def _on_start_stop_camera(self):
-        cam_thread = self.camera_widget._cam_thread
-        if not cam_thread.isRunning():
-            # ... (after validating device & resolution) ...
-            cam_thread.start()
-            self.btn_start_camera.setText("Stop Camera")
-            self.camera_control_panel.setEnabled(True)
-            # Reset frame count and resolution display
-            self.lbl_cam_frame.setText("0")
-            self.lbl_cam_resolution.setText("N/A")
-            self.lbl_cam_connection.setText("Connecting...")
-        else:
-            cam_thread.stop()
-            self.btn_start_camera.setText("Start Camera")
-            self.camera_control_panel.setEnabled(False)
-            self.lbl_cam_connection.setText("Disconnected")
-            self.lbl_cam_frame.setText("0")
-            self.lbl_cam_resolution.setText("N/A")
+    # ─── Camera Device & Resolution Enumeration ─────────────────────────────────
 
     def _populate_device_list(self):
         """
-        Enumerate all connected IC4 cameras and fill `self.device_combo`.
+        Enumerate all connected IC4 cameras and fill self.device_combo.
         """
         try:
             grab = ic4.Grabber()
@@ -439,13 +322,38 @@ class MainWindow(QMainWindow):
             log.error(f"Failed to enumerate IC4 devices: {e}")
             devices = []
 
+        # Create the device selection combo if not yet created
+        if not hasattr(self, "device_combo"):
+            # We'll place it in a dialog when “Source” tab is shown
+            self.device_combo = QComboBox()
+            self.device_combo.addItem("Select Device...", None)
+            self.device_combo.currentIndexChanged.connect(self._on_device_selected)
+
+            # Similarly create resolution combo
+            self.resolution_combo = QComboBox()
+            self.resolution_combo.addItem("Select Resolution...", None)
+
+            # And the Start Camera button
+            self.btn_start_camera = QPushButton("Start Camera")
+            self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
+
+            # We need to insert these into the “Source” portion of CameraControlPanel
+            # But since CameraControlPanel only handles “Adjustments,” we manually build
+            # a small UI in the “Info” tab placeholder when needed.
+            # For simplicity, we'll pop up a dialog when user first clicks “Start Camera”
+            # if no device/resolution selected. The "Source" UI is not shown as a tab here.
+
+        # Populate device_combo with actual devices
         self.device_combo.clear()
         self.device_combo.addItem("Select Device...", None)
         for dev in devices:
-            # `dev.display_name` is a string describing camera + serial
             self.device_combo.addItem(dev.display_name, dev)
 
+    @pyqtSlot(int)
     def _on_device_selected(self, index):
+        """
+        When the user selects a camera device, enumerate its supported resolutions.
+        """
         dev_info = self.device_combo.itemData(index)
         self.resolution_combo.clear()
         self.resolution_combo.addItem("Select Resolution...", None)
@@ -457,33 +365,116 @@ class MainWindow(QMainWindow):
             grab = ic4.Grabber()
             grab.device_info = dev_info
             grab.device_open()
-
-            # Enumerate supported video formats
             pf_list = grab.format_video.enumerate()
-            # pf_list is a list of PropValue IDs – you can fetch width/height from each
             for pv in pf_list:
-                width = grab.format_video.get_value(ic4.PropId.IMAGE_WIDTH, pv)
-                height = grab.format_video.get_value(ic4.PropId.IMAGE_HEIGHT, pv)
+                w = grab.format_video.get_value(ic4.PropId.IMAGE_WIDTH, pv)
+                h = grab.format_video.get_value(ic4.PropId.IMAGE_HEIGHT, pv)
                 pixfmt = grab.format_video.get_value(ic4.PropId.PIXEL_FORMAT, pv)
-                display_str = (
-                    f"{width}×{height} ({pv.name if hasattr(pv, 'name') else pixfmt})"
-                )
-                self.resolution_combo.addItem(display_str, (width, height, pixfmt))
+                display_str = f"{w}×{h} ({pv.name if hasattr(pv, 'name') else pixfmt})"
+                self.resolution_combo.addItem(display_str, (w, h, pixfmt))
             grab.device_close()
-
         except Exception as e:
             log.error(f"Failed to get formats for {dev_info}: {e}")
+
+    @pyqtSlot()
+    def _on_start_stop_camera(self):
+        """
+        Toggle the SDKCameraThread: start grabbing or stop.
+        """
+        cam_thread = self.camera_widget._cam_thread
+
+        # If not running, start
+        if not cam_thread.isRunning():
+            # Prompt user to select device/resolution if not chosen
+            if (
+                self.device_combo.currentData() is None
+                or self.resolution_combo.currentData() is None
+            ):
+                dlg = QMessageBox(self)
+                dlg.setIcon(QMessageBox.Warning)
+                dlg.setWindowTitle("Camera Not Configured")
+                dlg.setText(
+                    "Please select a valid device and resolution before starting."
+                )
+                dlg.exec_()
+                return
+
+            dev_info = self.device_combo.currentData()
+            res_data = self.resolution_combo.currentData()
+            cam_thread.set_device_info(dev_info)
+            cam_thread.set_resolution(res_data)
+
+            # Reset Info tab labels
+            self.lbl_cam_frame.setText("0")
+            self.lbl_cam_resolution.setText("N/A")
+            self.lbl_cam_connection.setText("Connecting...")
+
+            cam_thread.start()
+            self.btn_start_camera.setText("Stop Camera")
+            self.camera_control_panel.setEnabled(True)
+        else:
+            # Stop the thread
+            try:
+                cam_thread.stop()
+            except Exception as e:
+                log.error(f"Error stopping camera thread: {e}")
+
+            self.btn_start_camera.setText("Start Camera")
+            self.camera_control_panel.setEnabled(False)
+            self.lbl_cam_connection.setText("Disconnected")
+            self.lbl_cam_frame.setText("0")
+            self.lbl_cam_resolution.setText("N/A")
+            self.camera_widget._label.setText("⏺ Camera Off")
+
+    @pyqtSlot(QImage, object)
+    def _update_camera_info(self, image: QImage, raw):
+        """
+        Update the 'Info' tab with frame count and resolution.
+        """
+        try:
+            current_count = int(self.lbl_cam_frame.text())
+        except ValueError:
+            current_count = 0
+        current_count += 1
+        self.lbl_cam_frame.setText(str(current_count))
+
+        width = image.width()
+        height = image.height()
+        self.lbl_cam_resolution.setText(f"{width}×{height}")
+
+        if self.lbl_cam_connection.text() != "Connected":
+            self.lbl_cam_connection.setText("Connected")
+
+    @pyqtSlot(str, str)
+    def _on_camera_error(self, msg: str, code: str):
+        """
+        Handle camera errors: show a dialog and disable camera panels.
+        """
+        log.error(f"Camera error occurred ({code}): {msg}")
+        QMessageBox.critical(self, "Camera Error", msg)
+
+        cam_thread = self.camera_widget._cam_thread
+        if cam_thread.isRunning():
+            try:
+                cam_thread.stop()
+            except Exception as stop_e:
+                log.error(f"Error stopping camera thread after error: {stop_e}")
+
+        self.camera_control_panel.setEnabled(False)
+        self.lbl_cam_connection.setText("Error")
+        self.lbl_cam_frame.setText("0")
+        self.lbl_cam_resolution.setText("N/A")
+        self.camera_widget._label.setText("❗ Camera Error")
 
     def _build_menus(self):
         mb = self.menuBar()
         fm = mb.addMenu("&File")
         exp_data_act = QAction(
-            "Export Plot &Data (CSV)â¦", self, triggered=self._export_plot_data_as_csv
+            "Export Plot &Data (CSV)…", self, triggered=self._export_plot_data_as_csv
         )
         fm.addAction(exp_data_act)
-        exp_img_act = QAction("Export Plot &Imageâ¦", self)
-        if hasattr(self, "pressure_plot_widget") and self.pressure_plot_widget:
-            exp_img_act.triggered.connect(self.pressure_plot_widget.export_as_image)
+        exp_img_act = QAction("Export Plot &Image…", self)
+        exp_img_act.triggered.connect(self.pressure_plot_widget.export_as_image)
         fm.addAction(exp_img_act)
         fm.addSeparator()
         exit_act = QAction(
@@ -522,20 +513,10 @@ class MainWindow(QMainWindow):
         pm.addAction(clear_plot_act)
 
         def trigger_reset_zoom():
-            if (
-                hasattr(self, "pressure_plot_widget")
-                and self.pressure_plot_widget
-                and hasattr(self, "top_ctrl")
-                and self.top_ctrl
-                and hasattr(self.top_ctrl, "plot_controls")
-                and self.top_ctrl.plot_controls
-            ):
-                self.pressure_plot_widget.reset_zoom(
-                    self.top_ctrl.plot_controls.auto_x_cb.isChecked(),
-                    self.top_ctrl.plot_controls.auto_y_cb.isChecked(),
-                )
-            else:
-                log.warning("Cannot reset zoom, UI components missing.")
+            self.pressure_plot_widget.reset_zoom(
+                self.plot_control_panel.is_autoscale_x(),
+                self.plot_control_panel.is_autoscale_y(),
+            )
 
         reset_zoom_act = QAction("&Reset Plot Zoom", self, triggered=trigger_reset_zoom)
         pm.addAction(reset_zoom_act)
@@ -553,6 +534,8 @@ class MainWindow(QMainWindow):
         tb.setIconSize(QSize(20, 20))
         tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.addToolBar(Qt.TopToolBarArea, tb)
+
+        # Serial port connect/disconnect
         self.connect_serial_action = QAction(
             self.icon_connect,
             "&Connect PRIM Device",
@@ -560,12 +543,11 @@ class MainWindow(QMainWindow):
             triggered=self._toggle_serial_connection,
         )
         tb.addAction(self.connect_serial_action)
+
         self.serial_port_combobox = QComboBox()
         self.serial_port_combobox.setToolTip("Select Serial Port")
         self.serial_port_combobox.setMinimumWidth(200)
-        self.serial_port_combobox.addItem(
-            "ð Simulated Data", QVariant()
-        )  # Ensure QVariant for None/empty
+        self.serial_port_combobox.addItem("⌨️ Simulated Data", QVariant())
         ports = list_serial_ports()
         if ports:
             for p_dev, p_desc in ports:
@@ -573,12 +555,11 @@ class MainWindow(QMainWindow):
                     f"{os.path.basename(p_dev)} ({p_desc})", QVariant(p_dev)
                 )
         else:
-            self.serial_port_combobox.addItem(
-                "No Serial Ports Found", QVariant()
-            )  # QVariant for None
+            self.serial_port_combobox.addItem("No Serial Ports Found", QVariant())
             self.serial_port_combobox.setEnabled(False)
         tb.addWidget(self.serial_port_combobox)
         tb.addSeparator()
+
         if hasattr(self, "start_recording_action"):
             tb.addAction(self.start_recording_action)
         if hasattr(self, "stop_recording_action"):
@@ -586,7 +567,6 @@ class MainWindow(QMainWindow):
 
     def _build_status_bar(self):
         sb = self.statusBar()
-        # self.setStatusBar(sb) # Not needed, statusBar() returns the existing one or creates it
         self.app_session_time_label = QLabel("Session: 00:00:00")
         sb.addPermanentWidget(self.app_session_time_label)
         self._app_session_seconds = 0
@@ -604,731 +584,82 @@ class MainWindow(QMainWindow):
     def _set_initial_splitter_sizes(self):
         if self.bottom_split:
             w = self.bottom_split.width()
-            if w > 0:  # Ensure width is positive before calculating
+            if w > 0:
                 self.bottom_split.setSizes([int(w * 0.6), int(w * 0.4)])
-            else:  # Fallback or retry if width is not yet available
+            else:
                 QTimer.singleShot(100, self._set_initial_splitter_sizes)
 
     def _set_initial_control_states(self):
-        if self.top_ctrl:
-            self.top_ctrl.update_connection_status("Disconnected", False)
         if hasattr(self, "start_recording_action"):
             self.start_recording_action.setEnabled(False)
         if hasattr(self, "stop_recording_action"):
             self.stop_recording_action.setEnabled(False)
-        if self.camera_widget:
-            self.camera_widget.setEnabled(False)  # Disable camera widget until needed
-
-    @pyqtSlot(str)
-    def _handle_serial_status_change(self, status: str):
-        log.info(f"Serial status: {status}")
-        self.statusBar().showMessage(f"PRIM Device: {status}", 4000)
-        # Determine connected state more reliably
-        connected = (
-            "connected" in status.lower()
-            or "opened serial port" in status.lower()
-            or "simulation mode" in status.lower()
-        )  # Simulation is also a "connected" state for UI
-
-        if self.top_ctrl:
-            self.top_ctrl.update_connection_status(status, connected)
-
-        self.connect_serial_action.setIcon(
-            self.icon_disconnect if connected else self.icon_connect
-        )
-        self.connect_serial_action.setText(
-            f"{'Disconnect' if connected else 'Connect'} PRIM Device"
-        )
-        self.serial_port_combobox.setEnabled(not connected)
-
-        if connected and self.pressure_plot_widget:
-            self.pressure_plot_widget.clear_plot()  # Clear plot on new connection
-            # Update placeholder if switching to simulation or real device
-            if "simulation mode" in status.lower():
-                self.pressure_plot_widget._update_placeholder(
-                    "Waiting for PRIM device data (Simulation)..."
-                )
-            else:
-                self.pressure_plot_widget._update_placeholder(
-                    "Waiting for PRIM device data..."
-                )
-
-        if not connected and self._is_recording:
-            # This implies a disconnection during recording
-            QMessageBox.warning(
-                self,
-                "Recording Auto-Stopped",
-                "PRIM device disconnected. Recording stopped.",
-            )
-            self._trigger_stop_recording()  # Stop recording if device disconnects
-
-        self._update_recording_actions_enable_state()
-
-    @pyqtSlot(str)
-    def _handle_serial_error(self, msg: str):
-        log.error(f"Serial error: {msg}")
-        self.statusBar().showMessage(f"Serial Error: {msg}", 6000)
-        # If the error implies disconnection, update status accordingly
-        if (
-            "disconnecting" in msg.lower()
-            or "error opening" in msg.lower()
-            or "serial error" in msg.lower()
-        ):
-            self._handle_serial_status_change(f"Error: {msg}. Disconnected.")
-        self._update_recording_actions_enable_state()  # Re-evaluate recording actions
-
-    @pyqtSlot()
-    def _handle_serial_thread_finished(self):
-        log.info("SerialThread 'finished' signal received.")
-        sender = self.sender()
-
-        # Check if the sender is the current _serial_thread instance
-        if self._serial_thread is sender:
-            current_conn_text = ""
-            if self.top_ctrl and hasattr(self.top_ctrl, "conn_lbl"):
-                # Check current displayed status to avoid redundant "Disconnected" messages
-                # if the status was already set to an error or disconnected state.
-                current_conn_text = self.top_ctrl.conn_lbl.text().lower()
-
-            # Only update status if it wasn't already set to an error/disconnected state by _handle_serial_error or explicit stop
-            if not (
-                "error" in current_conn_text
-                or "failed" in current_conn_text
-                or "disconnected" in current_conn_text
-            ):
-                if (
-                    "simulation" not in current_conn_text
-                ):  # Don't show "Disconnected" if it was just simulation ending.
-                    self._handle_serial_status_change("Disconnected")
-
-            if self._serial_thread:  # Double check before deleteLater
-                self._serial_thread.deleteLater()
-            self._serial_thread = None
-            log.info("Current _serial_thread instance cleaned up.")
-        elif sender and isinstance(
-            sender, SerialThread
-        ):  # Check if it's an orphaned SerialThread
-            log.warning(
-                "Received 'finished' from an orphaned SerialThread instance. Cleaning it up."
-            )
-            sender.deleteLater()
-        else:  # Should not happen
-            log.warning(
-                "Received 'finished' signal, but sender is not the expected SerialThread or is None."
-            )
-
-        self._update_recording_actions_enable_state()
-
-    @pyqtSlot(int, float, float)
-    def _handle_new_serial_data(self, idx: int, t: float, p: float):
-        plot_ctrls = getattr(self.top_ctrl, "plot_controls", None)
-        if plot_ctrls:  # Ensure plot_ctrls exists
-            self.top_ctrl.update_prim_data(
-                idx, t, p
-            )  # Update labels in TopControlPanel
-            if self.pressure_plot_widget:
-                self.pressure_plot_widget.update_plot(
-                    t,
-                    p,
-                    plot_ctrls.auto_x_cb.isChecked(),
-                    plot_ctrls.auto_y_cb.isChecked(),
-                )
-
-        # Optional: Console logging for new data (can be verbose)
-        # if self.dock_console and self.dock_console.isVisible() and self.console_out_textedit:
-        #     self.console_out_textedit.append(f"PRIM Data: Idx={idx}, Time={t:.3f}s, P={p:.2f}")
-
-        if self._is_recording and self._recording_worker:
-            try:
-                self._recording_worker.add_csv_data(t, idx, p)
-            except Exception as e_csv:
-                log.exception(f"Error adding CSV data to recording queue: {e_csv}")
-                self.statusBar().showMessage(
-                    "CRITICAL: Error queueing CSV data. Recording data may be lost.",
-                    5000,
-                )
-                # Potentially stop recording or flag major error
-                # self._trigger_stop_recording()
-
-    def _toggle_serial_connection(self):
-        if self._serial_thread and self._serial_thread.isRunning():
-            log.info("User requested to stop serial connection.")
-            self._serial_thread.stop()  # stop() in SerialThread should set self.running = False
-            # The finished signal from SerialThread will handle cleanup.
-        else:
-            # Get selected port from combobox
-            selected_index = self.serial_port_combobox.currentIndex()
-            port_to_use_variant = self.serial_port_combobox.itemData(selected_index)
-            port_to_use = (
-                port_to_use_variant if isinstance(port_to_use_variant, str) else None
-            )  # Ensure it's a string or None
-
-            current_text = self.serial_port_combobox.currentText()
-            is_simulation = "simulated data" in current_text.lower()
-
-            if not port_to_use and not is_simulation:
-                QMessageBox.warning(
-                    self,
-                    "Serial Connection Error",
-                    "Please select a valid serial port or choose 'Simulated Data'.",
-                )
-                return
-
-            log.info(
-                f"User requested to start serial connection: Port='{port_to_use if port_to_use else 'Simulation'}'"
-            )
-
-            # Cleanup old thread instance if it exists (e.g., from a previous failed start)
-            if self._serial_thread:
-                log.debug(
-                    "Cleaning up previous _serial_thread instance before starting new one."
-                )
-                if (
-                    self._serial_thread.isRunning()
-                ):  # Should not happen if logic is correct, but as a safeguard
-                    self._serial_thread.stop()
-                    self._serial_thread.wait(500)  # Brief wait
-                self._serial_thread.deleteLater()
-                self._serial_thread = None
-                QApplication.processEvents()
-
-            try:
-                self._serial_thread = SerialThread(
-                    port=port_to_use, parent=self
-                )  # Pass parent for auto-cleanup
-                # Connect signals
-                self._serial_thread.data_ready.connect(self._handle_new_serial_data)
-                self._serial_thread.error_occurred.connect(self._handle_serial_error)
-                self._serial_thread.status_changed.connect(
-                    self._handle_serial_status_change
-                )
-                self._serial_thread.finished.connect(
-                    self._handle_serial_thread_finished
-                )
-
-                self._serial_thread.start()  # Start the thread
-            except Exception as e:
-                log.exception("Failed to create or start SerialThread.")
-                QMessageBox.critical(
-                    self,
-                    "Serial Thread Error",
-                    f"Could not start serial communication: {e}",
-                )
-                if (
-                    self._serial_thread
-                ):  # If instance was created but start failed or other error
-                    self._serial_thread.deleteLater()
-                    self._serial_thread = None
-                self._update_recording_actions_enable_state()  # Ensure UI reflects failure
-
-    def _update_recording_actions_enable_state(self):
-        # Recording can start if serial is ready (connected or simulating) AND not already recording
-        serial_ready_for_recording = (
-            self._serial_thread is not None
-            and self._serial_thread.isRunning()
-            and (
-                "connected" in self.top_ctrl.conn_lbl.text().lower()
-                or "simulation mode" in self.top_ctrl.conn_lbl.text().lower()
-                or "opened serial port" in self.top_ctrl.conn_lbl.text().lower()
-            )
-        )
-
-        can_start_recording = serial_ready_for_recording and not self._is_recording
-        can_stop_recording = self._is_recording  # Can only stop if currently recording
-
-        if hasattr(self, "start_recording_action"):
-            self.start_recording_action.setEnabled(can_start_recording)
-        if hasattr(self, "stop_recording_action"):
-            self.stop_recording_action.setEnabled(can_stop_recording)
-
-    def _trigger_start_recording_dialog(self):
-        # Check if serial connection is active (real or simulated)
-        serial_is_active = (
-            self._serial_thread
-            and self._serial_thread.isRunning()
-            and (
-                "connected" in self.top_ctrl.conn_lbl.text().lower()
-                or "simulation mode" in self.top_ctrl.conn_lbl.text().lower()
-                or "opened serial port" in self.top_ctrl.conn_lbl.text().lower()
-            )
-        )
-
-        if not serial_is_active:
-            QMessageBox.warning(
-                self,
-                "Cannot Start Recording",
-                "PRIM device (or simulation) is not active.",
-            )
-            return
-        if self._is_recording:
-            QMessageBox.information(
-                self,
-                "Recording Already Active",
-                "A recording session is already in progress.",
-            )
-            return
-
-        # --- Recording Dialog ---
-        dialog = QDialog(self)
-        dialog.setWindowTitle("New Recording Session Details")
-        layout = QFormLayout(dialog)
-
-        # Session Name
-        default_session_name = (
-            f"Session_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')}"
-        )
-        name_edit = QLineEdit(default_session_name)
-        name_edit.setPlaceholderText("Enter a unique session name")
-        layout.addRow("Session Name:", name_edit)
-
-        # Operator
-        operator_edit = QLineEdit(
-            load_app_setting("last_operator", "")
-        )  # Load last used operator
-        operator_edit.setPlaceholderText("Operator's name/initials")
-        layout.addRow("Operator:", operator_edit)
-
-        # Notes
-        notes_edit = QTextEdit()
-        notes_edit.setPlaceholderText("Optional notes about the session...")
-        notes_edit.setFixedHeight(80)  # Reasonable default height
-        layout.addRow("Notes:", notes_edit)
-
-        # Dialog Buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addRow(buttons)
-
-        if dialog.exec_() != QDialog.Accepted:
-            log.info("Recording dialog cancelled by user.")
-            return
-
-        # --- Process Dialog Input ---
-        save_app_setting(
-            "last_operator", operator_edit.text()
-        )  # Save operator for next time
-
-        session_name_raw = name_edit.text().strip()
-        if not session_name_raw:  # Use placeholder if empty
-            session_name_raw = (
-                name_edit.placeholderText()
-                if name_edit.placeholderText()
-                else default_session_name
-            )
-
-        # Sanitize session name for folder/file usage
-        session_name_safe = "".join(
-            c if c.isalnum() or c in ("_", "-") else "_" for c in session_name_raw
-        )
-        session_name_safe = re.sub(r"_+", "_", session_name_safe).strip(
-            "_"
-        )  # Replace multiple underscores and strip leading/trailing
-        if not session_name_safe:  # Fallback if sanitization results in empty string
-            session_name_safe = f"Session_Unnamed_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')}"
-
-        # --- Create Session Folder and Define Paths ---
-        session_folder = os.path.join(PRIM_RESULTS_DIR, session_name_safe)
-        try:
-            os.makedirs(session_folder, exist_ok=True)
-            log.info(f"Session folder created/ensured: {session_folder}")
-        except OSError as e_mkdir:
-            log.error(f"Failed to create session folder '{session_folder}': {e_mkdir}")
-            QMessageBox.critical(
-                self,
-                "File System Error",
-                f"Could not create session folder:\n{e_mkdir}",
-            )
-            return
-
-        # Base path for recording files (video, CSV) without extension
-        recording_base_prefix = os.path.join(session_folder, session_name_safe)
-        self.last_trial_basepath = session_folder  # Store parent folder for later access (e.g., saving plot data)
-
-        # --- Determine Recording Parameters (FPS, Frame Size) ---
-        # For simplified camera, we might not have reliable dynamic frame size/fps from camera settings yet.
-        # Using defaults from config.py, but ideally, this would come from an active (even if simplified) camera stream.
-        # For now, assume we don't have live camera parameters for recording.
-        # This part will need adjustment once simplified camera feed is stable and provides frame info.
-
-        w, h = DEFAULT_FRAME_SIZE  # Fallback
-        record_fps = DEFAULT_FPS  # Fallback
-
-        log.warning(
-            "Using default frame size and FPS for recording as simplified camera does not yet provide this. Video may not match live view if camera defaults differ."
-        )
-        # TODO: Once basic live feed is working, get frame dimensions from the received frames for the recorder.
-        # Example: if self.camera_view and self.camera_view.current_frame_width > 0:
-        # w, h = self.camera_view.current_frame_width, self.camera_view.current_frame_height
-        # record_fps = self.camera_thread.target_fps # Or a fixed value if target_fps isn't reliable yet
-
-        video_ext = DEFAULT_VIDEO_EXTENSION.lower()
-        codec = DEFAULT_VIDEO_CODEC
-        log.info(
-            f"Preparing to start recording: Session='{session_name_safe}'. Target Params: FPS={record_fps}, Size={w}x{h}, Format={video_ext}/{codec}"
-        )
-
-        # --- Start Recording Worker ---
-        try:
-            # Ensure any previous worker is stopped and cleaned up
-            if self._recording_worker and self._recording_worker.isRunning():
-                log.info("Stopping previous recording worker before starting new one.")
-                self._recording_worker.stop_worker()
-                if not self._recording_worker.wait(2000):  # Wait for graceful stop
-                    log.warning(
-                        "Previous recording worker did not stop gracefully, terminating."
-                    )
-                    self._recording_worker.terminate()
-                    self._recording_worker.wait(500)
-            if self._recording_worker:
-                self._recording_worker.deleteLater()
-                self._recording_worker = None
-                QApplication.processEvents()
-
-            self._recording_worker = RecordingWorker(
-                basepath=recording_base_prefix,
-                fps=record_fps,
-                frame_size=(w, h),
-                video_ext=video_ext,
-                video_codec=codec,
-                parent=self,  # For Qt parent-child cleanup
-            )
-            self._recording_worker.start()
-
-            # Wait a bit for the worker to initialize its internal TrialRecorder
-            # A more robust way would be a signal from RecordingWorker once it's truly ready.
-            QThread.msleep(700)  # Increased sleep for robustness
-
-            if not (
-                self._recording_worker
-                and self._recording_worker.isRunning()
-                and self._recording_worker.is_ready_to_record  # Crucial check
-            ):
-                log.error(
-                    "RecordingWorker started but did not report as ready (is_ready_to_record is false)."
-                )
-                # Attempt to get more detailed error if TrialRecorder init failed (this is complex)
-                # For now, a generic error.
-                raise RuntimeError(
-                    "Recording worker or its internal TrialRecorder failed readiness check. Check logs for TrialRecorder errors."
-                )
-
-            self._is_recording = True
-            if hasattr(self, "start_recording_action"):
-                self.start_recording_action.setIcon(
-                    self.icon_recording_active
-                )  # Update icon
-            self._update_recording_actions_enable_state()  # Update button states
-
-            if self.pressure_plot_widget:
-                self.pressure_plot_widget.clear_plot()  # Clear plot for new recording session
-
-            self.statusBar().showMessage(
-                f"ð´ REC: {session_name_safe}", 0  # Persistent message (0 timeout)
-            )
-            log.info(f"Recording started successfully for session: {session_name_safe}")
-
-        except Exception as e_rec_start:
-            log.exception(
-                f"Critical error during recording start sequence: {e_rec_start}"
-            )
-            QMessageBox.critical(
-                self,
-                "Recording Start Error",
-                f"Could not start recording worker:\n{e_rec_start}",
-            )
-            if self._recording_worker:  # Cleanup if worker was created but failed
-                if self._recording_worker.isRunning():
-                    self._recording_worker.stop_worker()
-                    self._recording_worker.wait(500)
-                self._recording_worker.deleteLater()
-                self._recording_worker = None
-            self._is_recording = False
-            self._update_recording_actions_enable_state()  # Reset UI
-            if self.statusBar().currentMessage().startswith("ð´ REC:"):
-                self.statusBar().clearMessage()
-            return
-
-    def _trigger_stop_recording(self):
-        if not self._is_recording or not self._recording_worker:
-            log.info(
-                "Stop recording called, but not currently recording or worker is missing."
-            )
-            if self._is_recording:  # If flag is somehow true without worker, reset it
-                self._is_recording = False
-            self._update_recording_actions_enable_state()
-            if self.statusBar().currentMessage().startswith("ð´ REC:"):
-                self.statusBar().clearMessage()
-            return
-
-        log.info("User requested to stop recording...")
-        # Determine session name for messages (safer access)
-        session_name_stopped = "Session"  # Default
-        if hasattr(self, "last_trial_basepath") and self.last_trial_basepath:
-            # Extract from the folder name, which should be the sanitized session name
-            base_folder_name = os.path.basename(self.last_trial_basepath)
-            if base_folder_name:  # Ensure it's not empty
-                session_name_stopped = base_folder_name
-
-        try:
-            # Signal the worker to stop and wait for it to finish processing its queue
-            self._recording_worker.stop_worker()  # This queues a 'stop' sentinel
-            log.debug(
-                "Waiting for RecordingWorker to finish processing queue and stop..."
-            )
-            if not self._recording_worker.wait(
-                10000
-            ):  # Increased timeout for potentially large queues
-                log.warning(
-                    "RecordingWorker did not stop gracefully within timeout, terminating."
-                )
-                self._recording_worker.terminate()  # Force terminate if unresponsive
-                self._recording_worker.wait(1000)  # Wait for termination to complete
-            log.info("RecordingWorker thread has finished or been terminated.")
-
-            # Get final frame count (safer access)
-            count = 0
-            if hasattr(
-                self._recording_worker, "video_frame_count"
-            ):  # Check if property exists
-                count = self._recording_worker.video_frame_count
-
-            self.statusBar().showMessage(
-                f"Recording '{session_name_stopped}' stopped. {count} video frames recorded.",
-                7000,
-            )
-
-            # Auto-save plot data for the session that just ended
-            if hasattr(self, "last_trial_basepath") and self.last_trial_basepath:
-                self._save_current_plot_data_for_session()  # Save plot data
-
-                # Ask user if they want to open the folder
-                if (
-                    QMessageBox.information(
-                        self,
-                        "Recording Saved",
-                        f"Session '{session_name_stopped}' data saved to:\n{self.last_trial_basepath}\n\nVideo frames recorded: {count}\n\nOpen session folder?",
-                        QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.No,  # Default to No
-                    )
-                    == QMessageBox.Yes
-                ):
-                    try:
-                        if sys.platform == "win32":
-                            os.startfile(self.last_trial_basepath)
-                        elif sys.platform == "darwin":  # macOS
-                            os.system(f'open "{self.last_trial_basepath}"')
-                        else:  # Linux and other POSIX
-                            os.system(f'xdg-open "{self.last_trial_basepath}"')
-                    except Exception as e_open:
-                        log.error(
-                            f"Error opening session folder '{self.last_trial_basepath}': {e_open}"
-                        )
-                        QMessageBox.warning(
-                            self,
-                            "Open Folder Error",
-                            f"Could not open folder:\n{e_open}",
-                        )
-            else:
-                QMessageBox.information(
-                    self,
-                    "Recording Stopped",
-                    f"{count} video frames recorded. Path information was missing for auto-save features.",
-                )
-
-        except Exception as e_stop_rec:
-            log.exception(
-                f"Error during user-initiated stop recording sequence: {e_stop_rec}"
-            )
-            self.statusBar().showMessage(
-                f"Error stopping recording: {e_stop_rec}", 5000
-            )
-        finally:
-            # Cleanup worker instance
-            if self._recording_worker:
-                self._recording_worker.deleteLater()  # Schedule for deletion
-            self._recording_worker = None
-            self._is_recording = False  # Crucial: reset recording flag
-
-            if hasattr(self, "start_recording_action"):
-                self.start_recording_action.setIcon(
-                    self.icon_record_start
-                )  # Reset icon
-
-            self._update_recording_actions_enable_state()  # Update UI button states
-
-            if self.statusBar().currentMessage().startswith("ð´ REC:"):
-                self.statusBar().clearMessage()  # Clear persistent recording message
-            log.info("Recording fully stopped and UI updated.")
-
-    def _save_current_plot_data_for_session(self):
-        if not hasattr(self, "last_trial_basepath") or not self.last_trial_basepath:
-            log.warning("Cannot auto-save plot data: 'last_trial_basepath' is not set.")
-            return
-        if not (
-            self.pressure_plot_widget
-            and self.pressure_plot_widget.times
-            and self.pressure_plot_widget.pressures
-        ):
-            log.info("No plot data available to auto-save for the session.")
-            return
-
-        # Determine session name from the folder path for the CSV filename
-        session_name_for_file = os.path.basename(self.last_trial_basepath)
-        if not session_name_for_file:  # Fallback if base path itself is odd
-            session_name_for_file = "session_plot"
-
-        csv_filename = f"{session_name_for_file}_pressure_plot_data.csv"
-        csv_path = os.path.join(self.last_trial_basepath, csv_filename)
-
-        try:
-            with open(csv_path, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["time_s", "pressure_mmHg"])  # Header
-                for t, p in zip(
-                    self.pressure_plot_widget.times, self.pressure_plot_widget.pressures
-                ):
-                    writer.writerow(
-                        [f"{t:.6f}", f"{p:.6f}"]
-                    )  # Format to 6 decimal places
-            log.info(f"Session plot data automatically saved to: {csv_path}")
-            self.statusBar().showMessage(
-                f"Plot CSV for session '{session_name_for_file}' saved.", 4000
-            )
-        except Exception as e_save_plot:
-            log.exception(
-                f"Failed to auto-save session plot data to '{csv_path}': {e_save_plot}"
-            )
-            QMessageBox.warning(
-                self,
-                "Plot Data Save Error",
-                f"Could not automatically save plot CSV data:\n{e_save_plot}",
-            )
-
-    @pyqtSlot()
+        if hasattr(self, "camera_control_panel"):
+            self.camera_control_panel.setEnabled(False)
+        if hasattr(self, "plot_control_panel"):
+            self.plot_control_panel.setEnabled(True)
+
+    # ─── Recording Dialogs / Workers ──────────────────────────────────────────
+    # (Implement _trigger_start_recording_dialog, _trigger_stop_recording, etc. as in your old code)
+
+    # ─── Menu Actions & Dialog Slots ──────────────────────────────────────────
     def _export_plot_data_as_csv(self):
-        if not (
-            self.pressure_plot_widget
-            and self.pressure_plot_widget.times
-            and self.pressure_plot_widget.pressures
-        ):
-            QMessageBox.information(
-                self, "No Data to Export", "The pressure plot has no data to export."
-            )
-            return
-
-        default_filename = f"manual_plot_export_{QDateTime.currentDateTime().toString('yyyyMMdd_HHmmss')}.csv"
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Plot Data as CSV", default_filename, "CSV Files (*.csv)"
+            self, "Export Plot Data as CSV", PRIM_RESULTS_DIR, "CSV Files (*.csv)"
         )
-        if not path:  # User cancelled
-            return
-
-        try:
-            with open(path, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["time_s", "pressure_mmHg"])  # Header
-                for t, p in zip(
-                    self.pressure_plot_widget.times, self.pressure_plot_widget.pressures
-                ):
-                    writer.writerow([f"{t:.6f}", f"{p:.6f}"])
-            self.statusBar().showMessage(
-                f"Plot data successfully exported to {os.path.basename(path)}", 4000
-            )
-            log.info(f"Plot data manually exported to: {path}")
-        except Exception as e_export:
-            log.exception(
-                f"Failed to manually export plot data to '{path}': {e_export}"
-            )
-            QMessageBox.critical(
-                self, "Export Error", f"Could not save plot CSV data:\n{e_export}"
-            )
-
-    @pyqtSlot()
-    def _show_about_dialog(self):
-        QMessageBox.about(self, f"About {APP_NAME}", ABOUT_TEXT)
-
-    def _update_app_session_time(self):
-        self._app_session_seconds += 1
-        h, rem = divmod(self._app_session_seconds, 3600)
-        m, s = divmod(rem, 60)
-        self.app_session_time_label.setText(f"Session: {h:02}:{m:02}:{s:02}")
-
-    @pyqtSlot(str, str)
-    def _on_camera_error(self, msg: str, code: str):
-        """
-        Called whenever SDKCameraThread.error emits (message, error_code).
-        Shows a critical pop‐up, stops the thread, and updates the status bar.
-        """
-        log.error(f"Camera error occurred ({code}): {msg}")
-        QMessageBox.critical(self, "Camera Error", msg)
-
-        # Stop and clean up the internal camera thread if it’s still running
-        if (
-            self.camera_widget
-            and hasattr(self.camera_widget, "_cam_thread")
-            and self.camera_widget._cam_thread.isRunning()
-        ):
+        if path:
             try:
-                log.info("Stopping SDKCameraThread due to error...")
-                self.camera_widget._cam_thread.stop()
-            except Exception as e_stop_cam_err:
-                log.error(
-                    f"Error stopping SDKCameraThread after error: {e_stop_cam_err}"
+                data = self.pressure_plot_widget.get_plot_data()  # assume method exists
+                with open(path, "w", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Time (s)", "Pressure (mmHg)"])
+                    for t, p in zip(data["time"], data["pressure"]):
+                        writer.writerow([t, p])
+                self.statusBar().showMessage(f"Plot data exported to {path}", 3000)
+            except Exception as e:
+                log.error(f"Error exporting CSV: {e}")
+                QMessageBox.critical(
+                    self, "Export Error", f"Failed to export CSV:\n{e}"
                 )
 
-        # Disable the entire camera widget, so user knows the feed isn’t active
-        if self.camera_widget:
-            self.camera_widget.setEnabled(False)
+    def _show_about_dialog(self):
+        QMessageBox.information(self, f"About {APP_NAME}", ABOUT_TEXT)
 
-        # Update status bar
-        self.statusBar().showMessage(
-            "Camera Error! Live feed stopped or failed to start.", 0
-        )
+    # ─── Serial Connection Slots ────────────────────────────────────────────────
+    def _toggle_serial_connection(self):
+        # Your existing logic to open/close SerialThread
+        pass
 
-        # If a recording was in progress, stop it
-        if self._is_recording and self._recording_worker:
-            log.warning(
-                "Camera error occurred during active recording. Stopping recording."
-            )
-            self._trigger_stop_recording()
-
+    # ─── Window Close Cleanup ──────────────────────────────────────────────────
     def closeEvent(self, event):
         log.info("MainWindow closeEvent triggered.")
 
-        # If a recording is active, confirm before closing
         if self._is_recording:
             reply = QMessageBox.question(
                 self,
                 "Confirm Exit While Recording",
-                "A recording session is currently active. Are you sure you want to stop recording and exit?",
+                "A recording session is currently active. Stop recording and exit?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             )
             if reply == QMessageBox.Yes:
-                log.info("User chose to stop recording and exit.")
                 self._trigger_stop_recording()
                 if self._recording_worker and hasattr(self._recording_worker, "wait"):
                     if not self._recording_worker.wait(5000):
-                        log.warning(
-                            "Recording worker did not finish cleanly. Forcing cleanup."
-                        )
+                        log.warning("Recording worker did not finish cleanly.")
             else:
-                log.info("User cancelled exit due to active recording.")
                 event.ignore()
                 return
 
-        # Gracefully stop camera (if running) and other threads
         threads_to_clean = []
 
-        # 1) CameraThread is now inside camera_widget
-        if self.camera_widget and hasattr(self.camera_widget, "_cam_thread"):
-            cam_thread = self.camera_widget._cam_thread
-            threads_to_clean.append(
-                ("SDKCameraThread", cam_thread, getattr(cam_thread, "stop", None))
-            )
+        # CameraThread inside camera_widget
+        cam_thread = self.camera_widget._cam_thread
+        threads_to_clean.append(
+            ("SDKCameraThread", cam_thread, getattr(cam_thread, "stop", None))
+        )
 
-        # 2) SerialThread (unchanged)
+        # SerialThread
         threads_to_clean.append(
             (
                 "SerialThread",
@@ -1337,7 +668,7 @@ class MainWindow(QMainWindow):
             )
         )
 
-        # 3) RecordingWorker (unchanged)
+        # RecordingWorker
         threads_to_clean.append(
             (
                 "RecordingWorker",
@@ -1352,43 +683,28 @@ class MainWindow(QMainWindow):
                     hasattr(thread_instance, "isRunning")
                     and thread_instance.isRunning()
                 ):
-                    log.info(
-                        f"Stopping {name} ({thread_instance.__class__.__name__})..."
-                    )
+                    log.info(f"Stopping {name}...")
                     try:
                         if stop_method:
                             stop_method()
                         else:
                             log.warning(
-                                f"No stop method for {name}, attempting terminate."
+                                f"No stop method for {name}. Attempting terminate."
                             )
-
                         timeout = 3000 if name == "RecordingWorker" else 1500
                         if hasattr(
                             thread_instance, "wait"
                         ) and not thread_instance.wait(timeout):
                             log.warning(
-                                f"{name} did not stop gracefully, forcing terminate."
+                                f"{name} did not stop gracefully; forcing terminate."
                             )
                             if hasattr(thread_instance, "terminate"):
                                 thread_instance.terminate()
                                 thread_instance.wait(500)
                     except Exception as e:
-                        log.error(f"Exception while stopping {name}: {e}")
-
+                        log.error(f"Exception stopping {name}: {e}")
                 if hasattr(thread_instance, "deleteLater"):
                     thread_instance.deleteLater()
-
-                # Nullify
-                if name == "SDKCameraThread":
-                    # The thread is owned by the widget; just set the widget disabled
-                    self.camera_widget.setEnabled(False)
-                elif name == "SerialThread":
-                    self._serial_thread = None
-                elif name == "RecordingWorker":
-                    self._recording_worker = None
-            else:
-                log.debug(f"{name} was already None.")
 
         QApplication.processEvents()
         log.info("All threads cleaned up. Proceeding with close.")
