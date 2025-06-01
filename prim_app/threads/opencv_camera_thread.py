@@ -27,7 +27,7 @@ class OpenCVCameraThread(QThread):
             log.info(
                 f"Attempting to open OpenCV camera at index {self.device_index}..."
             )
-            self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+            self.cap = cv2.VideoCapture(self.device_index, cv2.CAP_DSHOW)
 
             if not self.cap.isOpened():
                 self.camera_error.emit("OpenCV could not open camera.")

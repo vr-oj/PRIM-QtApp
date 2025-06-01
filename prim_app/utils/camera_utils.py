@@ -26,7 +26,7 @@ def _load_camera_profile(model_name):
             "safe_fallback_resolution": tuple(
                 data.get("safe_fallback_resolution", [1280, 720])
             ),
-            "default_fps": data.get("default_fps", 30),
+            "default_fps": data.get("default_fps", 10),
             "max_resolution": tuple(data.get("max_resolution", [1920, 1080])),
             "max_fps": data.get("max_fps", 60),
         }
