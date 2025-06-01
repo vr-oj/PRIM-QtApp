@@ -49,7 +49,6 @@ class OpenCVCameraThread(QThread):
         # Emit current camera properties
         props = {
             "Gain": self.cap.get(cv2.CAP_PROP_GAIN),
-            "Brightness": self.cap.get(cv2.CAP_PROP_BRIGHTNESS),
             "AutoExposure": self.cap.get(cv2.CAP_PROP_AUTO_EXPOSURE),
             "Exposure": self.cap.get(cv2.CAP_PROP_EXPOSURE),
             "Width": self.cap.get(cv2.CAP_PROP_FRAME_WIDTH),

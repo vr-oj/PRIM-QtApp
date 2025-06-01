@@ -40,30 +40,17 @@ class CameraControlPanel(QWidget):
         self.layout.addWidget(QLabel("Gain"))
         self.layout.addWidget(self.gain_slider)
 
-        # Brightness
-        self.brightness_slider = QSlider(Qt.Horizontal)
-        self.brightness_slider.setMinimum(0)
-        self.brightness_slider.setMaximum(255)
-        self.brightness_slider.setValue(0)
-        self.brightness_slider.setTickInterval(1)
-        self.brightness_slider.valueChanged.connect(self._on_brightness_changed)
-        self.layout.addWidget(QLabel("Brightness"))
-        self.layout.addWidget(self.brightness_slider)
-
     def update_controls_from_camera(self, prop_dict: dict):
         """Update the UI to reflect camera properties."""
         ae = prop_dict.get("AutoExposure", 1.0)
         ae = 1.0 if ae in [1, 1.0, True] else 0.0  # Normalize value
         gain = prop_dict.get("Gain", 0)
-        brightness = prop_dict.get("Brightness", 0)
 
         self.auto_exposure_checkbox.blockSignals(True)
         self.gain_slider.blockSignals(True)
-        self.brightness_slider.blockSignals(True)
 
         self.auto_exposure_checkbox.setChecked(ae > 0)
         self.gain_slider.setValue(int(gain))
-        self.brightness_slider.setValue(int(brightness))
 
         self.setEnabled(True)
         self.auto_exposure_checkbox.setEnabled(True)
@@ -72,7 +59,7 @@ class CameraControlPanel(QWidget):
         self.auto_exposure_checkbox.blockSignals(False)
         self.gain_slider.blockSignals(False)
 
-        log.debug(f"[UI Sync] AE={ae > 0}, Gain={gain}, Brightness={brightness}")
+        log.debug(f"[UI Sync] AE={ae > 0}, Gain={gain}")
 
     def _on_auto_exposure_changed(self, state):
         value = 1.0 if state == Qt.Checked else 0.0
@@ -82,7 +69,3 @@ class CameraControlPanel(QWidget):
     def _on_gain_changed(self, value):
         self.property_changed.emit("Gain", float(value))
         log.debug(f"[UI → Cam] Gain set to {value}")
-
-    def _on_brightness_changed(self, value):
-        self.property_changed.emit("Brightness", float(value))
-        log.debug(f"[UI → Cam] Brightness set to {value}")
