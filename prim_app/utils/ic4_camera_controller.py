@@ -1,3 +1,5 @@
+# prim_app/utils/ic4_camera_controller.py
+
 import logging
 import imagingcontrol4 as ic4
 
@@ -5,93 +7,82 @@ log = logging.getLogger(__name__)
 
 
 class IC4CameraController:
-    PROPERTY_NAME_MAP = {
-        "AutoExposure": "Auto Exposure",
-        "Gain": "Gain",
-        "Exposure": "Exposure",
-        "Brightness": "Brightness",
-        "FrameRate": "Frame Rate",
-    }
-
     def __init__(self, model_hint="DMK 33"):
         self.device = None
         self.model_hint = model_hint
 
+        # Ensure library is initialized
         try:
-            ic4.Library.init()
+            ic4.library.init()
+            log.info("[IC4] Library initialized.")
         except Exception as e:
             log.error(f"[IC4] Failed to initialize library: {e}")
 
-    def _resolve_property_name(self, name: str):
-        return self.PROPERTY_NAME_MAP.get(name, name)
-
-    def is_ready(self):
-        return self.device is not None
-
     def open_camera(self):
         """Open the first available camera that matches the model hint."""
-        devices = ic4.enumerate_devices()
+        try:
+            devices = ic4.devenum.get_device_list()
+        except Exception as e:
+            log.error(f"[IC4] Failed to get device list: {e}")
+            return False
+
         if not devices:
-            log.error("No IC4-compatible devices found.")
+            log.warning("No IC4-compatible cameras found.")
             return False
 
         for dev_info in devices:
             if self.model_hint.lower() in dev_info.name.lower():
-                self.device = dev_info.open_device()
-                log.info(f"IC4 device opened: {dev_info.name}")
-                return True
+                try:
+                    self.device = dev_info.open_device()
+                    log.info(f"[IC4] Device opened: {dev_info.name}")
+                    return True
+                except Exception as e:
+                    log.error(f"[IC4] Failed to open device: {e}")
+                    return False
 
-        log.warning("No matching IC4 camera found.")
+        log.warning(f"No camera matched model hint: {self.model_hint}")
         return False
 
     def close_camera(self):
         if self.device:
-            self.device.close()
-            log.info("[IC4] Device closed.")
+            try:
+                self.device.close()
+                log.info("IC4 device closed.")
+            except Exception as e:
+                log.warning(f"[IC4] Error while closing camera: {e}")
             self.device = None
 
     def set_property(self, name: str, value):
-        """Set a camera property via IC4."""
         if not self.device:
-            log.warning("[IC4] Cannot set property; device not open.")
+            log.warning("Attempted to set property with no IC4 device open.")
             return
-
-        resolved = self._resolve_property_name(name)
         try:
-            prop = self.device[resolved]
+            prop = self.device[name]
             prop.value = value
-            log.debug(f"[IC4] Set {resolved} to {value}")
+            log.debug(f"[IC4] Set {name} to {value}")
         except Exception as e:
-            log.error(f"[IC4] Failed to set {resolved}: {e}")
+            log.error(f"[IC4] Failed to set {name}: {e}")
 
     def get_property(self, name: str):
-        """Retrieve a camera property value via IC4."""
         if not self.device:
-            log.warning("[IC4] Cannot get property; device not open.")
+            log.warning("Attempted to get property with no IC4 device open.")
             return None
-
-        resolved = self._resolve_property_name(name)
         try:
-            value = self.device[resolved].value
-            log.debug(f"[IC4] {resolved} = {value}")
+            value = self.device[name].value
+            log.debug(f"[IC4] {name} = {value}")
             return value
         except Exception as e:
-            log.error(f"[IC4] Failed to get {resolved}: {e}")
+            log.error(f"[IC4] Failed to get {name}: {e}")
             return None
 
     def get_all_properties(self):
-        """Fetch a dictionary of commonly used camera properties."""
         if not self.device:
             return {}
 
         props = {}
-        for key in self.PROPERTY_NAME_MAP.values():
+        for name in ["Gain", "Exposure", "Auto Exposure", "Brightness", "Frame Rate"]:
             try:
-                props[key] = self.device[key].value
+                props[name] = self.device[name].value
             except Exception as e:
-                log.warning(f"[IC4] Property '{key}' not available: {e}")
+                log.warning(f"[IC4] Property '{name}' not available: {e}")
         return props
-
-    def set_auto_exposure(self, enabled: bool):
-        """Convenience method for AE control."""
-        self.set_property("AutoExposure", bool(enabled))
