@@ -604,8 +604,21 @@ class MainWindow(QMainWindow):
             self.plot_control_panel.setEnabled(True)
 
     # ─── Camera/Recording Dialogs & Methods ──────────────────────────────────
-    # (Implement _trigger_start_recording_dialog, _trigger_stop_recording, etc.
-    #   just as they were in your “old” file.)
+    # ─── Placeholder Stubs for Recording Actions ───────────────────────────────
+    def _trigger_start_recording_dialog(self):
+        """
+        Stub for “Start Recording” action.
+        Eventually this should pop up your record‐settings dialog; for now, do nothing.
+        """
+        # You can log or show a message, if you want:
+        log.info("Start Recording requested (stub).")
+
+    def _trigger_stop_recording(self):
+        """
+        Stub for “Stop Recording” action.
+        Eventually this should stop your RecordingWorker; for now, do nothing.
+        """
+        log.info("Stop Recording requested (stub).")
 
     # ─── Menu Actions & Dialog Slots ──────────────────────────────────────────
     def _export_plot_data_as_csv(self):
