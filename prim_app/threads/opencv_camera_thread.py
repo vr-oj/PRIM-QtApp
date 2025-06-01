@@ -14,14 +14,15 @@ class OpenCVCameraThread(QThread):
     camera_properties_updated = pyqtSignal(dict)
     camera_info_reported = pyqtSignal(dict)
 
-    def __init__(self, device_index=0, resolution=(1280, 720), fps=10, parent=None):
+    def __init__(self, index=0, resolution=(640, 480), fps=30, parent=None):
         super().__init__(parent)
-        self.camera_index = device_index
-        self.target_width = resolution[0]
-        self.target_height = resolution[1]
-        self.target_fps = fps
-        self._running = True
-        self.cap = None
+        self.index = index
+        self.resolution = resolution
+        self.fps = fps
+        self._running = False
+        self._camera = None
+        self._frame = None
+        self._property_cache = {}
 
     def run(self):
         log.info(f"Attempting to open OpenCV camera at index {self.camera_index}...")
