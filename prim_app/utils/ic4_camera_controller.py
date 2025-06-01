@@ -17,12 +17,10 @@ class IC4CameraController:
         self.device = None
         self.model_hint = model_hint
 
-        if not ic4.Library.is_initialized():
-            try:
-                ic4.Library.init()
-                log.info("IC4 Library initialized.")
-            except Exception as e:
-                log.error(f"Failed to initialize IC4 Library: {e}")
+        try:
+            ic4.Library.init()
+        except Exception as e:
+            log.error(f"[IC4] Failed to initialize library: {e}")
 
     def _resolve_property_name(self, name: str):
         return self.PROPERTY_NAME_MAP.get(name, name)
