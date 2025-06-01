@@ -17,6 +17,7 @@ class OpenCVCameraThread(QThread):
     def __init__(self, index=0, resolution=(640, 480), fps=30, parent=None):
         super().__init__(parent)
         self.index = index
+        self.camera_index = index
         self.resolution = resolution
         self.fps = fps
         self._running = False
