@@ -2,53 +2,49 @@ import imagingcontrol4 as ic4
 
 
 def probe_first_camera():
-    # ─── Initialize IC4 ─────────────────────────────────────────────
+    # ─── 1) Initialize the IC4 library ───────────────────────────────
     ic4.Library.init()
     try:
-        device_list = ic4.DeviceEnum.devices()
-        if not device_list:
-            print("❌ No IC4 cameras found.")
+        # ─── 2) Get the list of attached camera(s) ─────────────────────
+        dev_list = ic4.DeviceEnum.devices()
+        if not dev_list:
+            print("No IC4 cameras detected.")
             return
 
-        dev = device_list[0]
+        dev = dev_list[0]
         print(f"Found camera: {dev.model_name} (SN {dev.serial})\n")
 
         grab = ic4.Grabber()
         grab.device_open(dev)
 
-        # ─── 1) Force “Continuous” acquisition mode ────────────────────
-        acq_mode_node = grab.device_property_map.find_enumeration("AcquisitionMode")
-        if acq_mode_node is not None:
-            # Print available acquisition‐mode strings for debugging:
-            all_modes = [e.name for e in acq_mode_node.entries]
-            print("Available AcquisitionMode entries:", all_modes)
-            # Try setting one of them—usually "Continuous" or "Video"
-            try:
-                acq_mode_node.value = "Continuous"
-                print("→ Set AcquisitionMode = 'Continuous'")
-            except Exception:
-                # If “Continuous” fails, try first entry in the list:
-                fallback = all_modes[0]
-                acq_mode_node.value = fallback
-                print(f"→ Set AcquisitionMode = '{fallback}' (fallback)")
+        # ─── 3) Force “Continuous” AcquisitionMode (if present) ────────
+        acq_node = grab.device_property_map.find_enumeration("AcquisitionMode")
+        if acq_node is not None:
+            names = [e.name for e in acq_node.entries]
+            print("Available AcquisitionMode entries:", names)
+            # Try setting “Continuous” if it exists, otherwise pick the first
+            if "Continuous" in names:
+                acq_node.value = "Continuous"
+                print("→ Set AcquisitionMode = 'Continuous'\n")
+            else:
+                acq_node.value = names[0]
+                print(f"→ Set AcquisitionMode = '{names[0]}' (fallback)\n")
         else:
-            print("  • Warning: no ‘AcquisitionMode’ node found on this camera.")
+            print("  (No ‘AcquisitionMode’ node found.)\n")
 
-        print("\nSupported PixelFormat entries (attempting each)…\n")
-
-        # ─── 2) Find the PixelFormat node ───────────────────────────────
+        # ─── 4) Find PixelFormat enumeration node ───────────────────────
         pf_node = grab.device_property_map.find_enumeration("PixelFormat")
         if pf_node is None:
-            print("❌ Could not find a ‘PixelFormat’ node at all.")
+            print("No ‘PixelFormat’ node on this camera.")
             grab.device_close()
             return
 
-        # Print all enumeration‐names for PixelFormat:
-        all_pf_names = [entry.name for entry in pf_node.entries]
-        print("All PixelFormat entries (names):", all_pf_names)
-        print("")
+        # Print all names for debugging:
+        all_pf = [e.name for e in pf_node.entries]
+        print("All PixelFormat entries (names):", all_pf, "\n")
+        print("Supported PixelFormat → resolution:\n")
 
-        # ─── 3) Try setting each PixelFormat by name ───────────────────
+        # ─── 5) Try each PixelFormat by name, then read Width/Height ───
         for entry in pf_node.entries:
             name = entry.name
             print(f" → Trying PixelFormat = {name!r} … ", end="", flush=True)
@@ -56,23 +52,24 @@ def probe_first_camera():
             try:
                 pf_node.value = name
 
-                # If that succeeded, read back width & height:
-                w_node = grab.device_property_map.find_integer("ImageWidth")
-                h_node = grab.device_property_map.find_integer("ImageHeight")
-                if (w_node is None) or (h_node is None):
-                    print(" OK (but no ImageWidth/ImageHeight nodes).")
+                # Read back “Width”/“Height” (not ImageWidth/ImageHeight)
+                w_prop = grab.device_property_map.find_integer("Width")
+                h_prop = grab.device_property_map.find_integer("Height")
+
+                if (w_prop is None) or (h_prop is None):
+                    print("OK (but no Width/Height nodes to query).")
                 else:
-                    w = w_node.value
-                    h = h_node.value
-                    print(f" OK → {w}×{h}")
+                    w = w_prop.value
+                    h = h_prop.value
+                    print(f"OK → {w}×{h}")
 
             except Exception as e:
-                print(f"─ failed: {e!s}")
+                print(f"── failed: {e!s}")
 
         grab.device_close()
 
     finally:
-        # ─── 4) Clean up IC4 ─────────────────────────────────────────────
+        # ─── 6) Tear down IC4 ───────────────────────────────────────────
         ic4.Library.exit()
 
 
