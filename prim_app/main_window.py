@@ -310,6 +310,34 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
     # ─── Camera Device & Resolution Enumeration ─────────────────────────────────
+    def _populate_device_list(self):
+        """
+        Enumerate all connected IC4 cameras using DeviceEnum.devices(),
+        then fill self.device_combo.
+        """
+        try:
+            # → This returns a Python list of ic4.DeviceInfo objects
+            device_list = ic4.DeviceEnum.devices()
+        except Exception as e:
+            log.error(f"Failed to enumerate IC4 devices: {e}")
+            device_list = []
+
+        # DEBUG: log exactly what we got
+        if not device_list:
+            log.info("DEBUG: DeviceEnum.devices() returned ZERO devices.")
+        else:
+            for idx, dev in enumerate(device_list):
+                log.info(f"DEBUG: Device {idx} = {dev.model_name!r} (S/N {dev.serial!r})")
+
+        # Clear the combo and add a placeholder
+        self.device_combo.clear()
+        self.device_combo.addItem("Select Device...", None)
+
+        # Populate with DeviceInfo objects from DeviceEnum
+        for dev in device_list:
+            display_str = f"{dev.model_name}  (S/N: {dev.serial})"
+            self.device_combo.addItem(display_str, dev)
+            
     @pyqtSlot(int)
     def _on_device_selected(self, index):
         """
