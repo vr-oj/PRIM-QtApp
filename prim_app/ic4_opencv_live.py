@@ -84,7 +84,7 @@ def main():
                 buf = sink.pop_output_buffer()
             except ic4.IC4Exception as e:
                 # If there really is no data yet, we get ErrorCode.NoData → loop again
-                if e.code == ic4.Error.NoData:
+                if e.code == ic4.ErrorCode.NoData:
                     continue
                 print(f"Grab error: {e}")
                 break
