@@ -357,12 +357,14 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int)
     def _on_device_selected(self, index):
         """
-        When the user selects a camera device, we first dump all enumeration‐type nodes
-        from grab.device_property_map, so we can spot which one controls pixel‐format/resolution.
+        When the user selects a camera device, enumerate its supported resolutions.
+        We discovered that the correct enumeration node is "PixelFormat". For each
+        entry in PixelFormat.entries, we set that format and then read ImageWidth
+        and ImageHeight so we can show "W×H (FormatName)" in the combo.
         """
         dev_info = self.device_combo.itemData(index)
 
-        # Reset the “Resolution” combo immediately
+        # Clear out and reset the Resolution dropdown
         self.resolution_combo.clear()
         self.resolution_combo.addItem("Select Resolution...", None)
 
@@ -370,20 +372,47 @@ class MainWindow(QMainWindow):
             return
 
         try:
+            # 1) Open the grabber on the selected DeviceInfo
             grab = ic4.Grabber()
             grab.device_open(dev_info)
 
-            # ─── DEBUG: list every PropEnumeration in device_property_map ──────────
-            print(">>> Enumerations in device_property_map:")
-            for node in grab.device_property_map.all:
-                if isinstance(node, ic4.PropEnumeration):
-                    print("   •", node.name)
-            # ─────────────────────────────────────────────────────────────────────────
+            # 2) Find the "PixelFormat" enumeration node under device_property_map
+            pf_node = grab.device_property_map.find_enumeration("PixelFormat")
+            if pf_node is None:
+                raise RuntimeError(
+                    "Could not find 'PixelFormat' enumeration on camera."
+                )
 
+            # 3) Loop through each possible PixelFormat entry
+            for entry in pf_node.entries:
+                try:
+                    # 3a) Set PixelFormat = this entry's numeric value
+                    pf_node.value = entry.value
+                except Exception:
+                    # If this entry cannot be set right now, skip it
+                    continue
+
+                # 3b) Once PixelFormat is set, read back width & height
+                w_node = grab.device_property_map.find_integer("ImageWidth")
+                h_node = grab.device_property_map.find_integer("ImageHeight")
+                if w_node is None or h_node is None:
+                    continue
+
+                w = w_node.value
+                h = h_node.value
+
+                # 3c) Build a friendly display string, e.g. "2048×1536 (Mono8)"
+                fmt_name = getattr(entry, "name", str(entry.value))
+                display_str = f"{w}×{h} ({fmt_name})"
+
+                # 3d) Add to the combo; store (w, h, pixelFormatValue)
+                self.resolution_combo.addItem(display_str, (w, h, entry.value))
+
+            # 4) Close the device when done
             grab.device_close()
 
         except Exception as e:
-            log.error(f"Error dumping enumeration nodes for {dev_info!r}: {e}")
+            log.error(f"Failed to get formats for {dev_info!r}: {e}")
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
