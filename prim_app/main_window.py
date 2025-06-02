@@ -541,7 +541,7 @@ class MainWindow(QMainWindow):
         self.serial_port_combobox = QComboBox()
         self.serial_port_combobox.setToolTip("Select Serial Port")
         self.serial_port_combobox.setMinimumWidth(200)
-        self.serial_port_combobox.addItem("⌨️ Simulated Data", QVariant())
+        self.serial_port_combobox.addItem("🔌 Simulated Data", QVariant())
         ports = list_serial_ports()
         if ports:
             for p_dev, p_desc in ports:
@@ -648,142 +648,145 @@ class MainWindow(QMainWindow):
 
     # ─── Toggle Serial Connection / Simulated Data ────────────────────────────
     def _toggle_serial_connection(self):
-        """
-        If not connected: read the selected combo data. If None → start simulated thread.
-        Else → open a SerialThread on that port. Wire up the signals, update UI.
-        If already connected: stop + clean up, revert toolbar back to “Connect PRIM Device.”
-        """
-        # If there's no thread running, we will attempt to start one:
-        if not self._serial_thread or not self._serial_thread.isRunning():
-            selected_port = self.serial_port_combobox.currentData()
-            # If user chose “Simulated Data” (data is None), start simulation:
-            if selected_port is None:
-                self._serial_thread = SerialThread(simulated=True)
-            else:
-                # Pass the actual COM port string into your SerialThread:
-                # (SerialThread’s constructor should accept a port name, e.g. "COM3")
-                self._serial_thread = SerialThread(port=selected_port)
-
-            # Connect signals from SerialThread → UI slots:
-            #   You will need to adjust the signal names to match your SerialThread implementation.
-            #   Here we assume the thread has signals:
-            #     - connected(bool)    → emits True/False when serial open/closed
-            #     - new_data(float, float) → emits (timestamp_sec, pressure_value)
-            #     - error(str)         → emits error message if something goes wrong
-            self._serial_thread.connected.connect(self._on_serial_connected)
-            self._serial_thread.new_data.connect(self._on_serial_data)
-            self._serial_thread.error.connect(self._on_serial_error)
-
-            # Start the thread:
-            self._serial_thread.start()
-
-            # Update toolbar action to show “Disconnect”
-            self.connect_serial_action.setIcon(self.icon_disconnect)
-            self.connect_serial_action.setText("&Disconnect PRIM Device")
-
-            # Disable port combo so user cannot re‐select mid‐stream
-            self.serial_port_combobox.setEnabled(False)
-
-            # Optional: disable “Start Recording” until data actually arrives
-            if hasattr(self, "start_recording_action"):
-                self.start_recording_action.setEnabled(False)
-
-            self.statusBar().showMessage("Connecting to PRIM Device...", 2000)
-
+        if self._serial_thread and self._serial_thread.isRunning():
+            log.info("Stopping serial thread...")
+            self._serial_thread.stop()  # stop() will emit finished when done
         else:
-            # Already running → user clicked “Disconnect”
+            data = self.serial_port_combobox.currentData()
+            port = data.value() if isinstance(data, QVariant) else data
+            if (
+                port is None
+                and self.serial_port_combobox.currentText() != "🔌 Simulated Data"
+            ):
+                QMessageBox.warning(self, "Serial Connection", "Please select a port.")
+                return
+
+            log.info(f"Starting serial thread on port: {port or 'Simulation'}")
             try:
-                self._serial_thread.stop()  # your SerialThread should implement a stop() method
+                # Clean up previous thread if it wasn’t fully deleted
+                if self._serial_thread:
+                    if self._serial_thread.isRunning():
+                        log.warning(
+                            "Previous serial thread still running, forcing stop."
+                        )
+                        self._serial_thread.stop()
+                        if not self._serial_thread.wait(1000):
+                            self._serial_thread.terminate()
+                            self._serial_thread.wait(500)
+                    self._serial_thread.deleteLater()
+                    self._serial_thread = None
+
+                self._serial_thread = SerialThread(port=port, parent=self)
+                self._serial_thread.data_ready.connect(self._handle_new_serial_data)
+                self._serial_thread.error_occurred.connect(self._handle_serial_error)
+                self._serial_thread.status_changed.connect(
+                    self._handle_serial_status_change
+                )
+                self._serial_thread.finished.connect(
+                    self._handle_serial_thread_finished
+                )
+                self._serial_thread.start()
             except Exception as e:
-                log.warning(f"Error stopping SerialThread: {e}")
-
-            # Clean up the thread reference
-            self._serial_thread = None
-
-            # Revert toolbar icon/text
-            self.connect_serial_action.setIcon(self.icon_connect)
-            self.connect_serial_action.setText("&Connect PRIM Device")
-
-            # Re‐enable the port combo
-            self.serial_port_combobox.setEnabled(True)
-
-            # Reset TopControlPanel status labels
-            self.top_ctrl.update_connection_status("Disconnected", False)
-            self.top_ctrl.update_device_frame("#N/A")
-            self.top_ctrl.update_device_time("N/A")
-            self.top_ctrl.update_current_pressure("N/A")
-
-            # If you had “Start Recording” button enabled previously, disable it again
-            if hasattr(self, "start_recording_action"):
-                self.start_recording_action.setEnabled(False)
-
-            self.statusBar().showMessage("PRIM Device disconnected.", 2000)
-
-    @pyqtSlot(bool)
-    def _on_serial_connected(self, ok: bool):
-        """
-        Slot called by SerialThread when it has successfully opened (or failed to open) a connection.
-        ok == True means “open” succeeded, False means “open” failed.
-        """
-        if ok:
-            # Update the TopControlPanel to show “Connected to COMX”
-            port_label = self.serial_port_combobox.currentText()
-            self.top_ctrl.update_connection_status(f"Connected to {port_label}", True)
-
-            # Now that we have a real connection, enable “Start Recording”
-            if hasattr(self, "start_recording_action"):
-                self.start_recording_action.setEnabled(True)
-        else:
-            # Connection attempt failed: show a message and revert toolbar
-            QMessageBox.critical(
-                self,
-                "Serial Connection Failed",
-                "Could not open selected COM port. Please check cable/port and try again.",
-            )
-            # Emulate “Disconnect” cleanup:
-            self._serial_thread = None
-            self.connect_serial_action.setIcon(self.icon_connect)
-            self.connect_serial_action.setText("&Connect PRIM Device")
-            self.serial_port_combobox.setEnabled(True)
-            self.top_ctrl.update_connection_status("Disconnected", False)
-
-    @pyqtSlot(float, float)
-    def _on_serial_data(self, timestamp: float, pressure: float):
-        """
-        Every time SerialThread emits a new_data(timestamp, pressure), update:
-          1) TopControlPanel labels (frame count, time, current pressure), and
-          2) PressurePlotWidget with the new (timestamp, pressure) pair for live plotting.
-        """
-        # ── 1) Update TopControlPanel ───────────────────────────────────
-        # TopControlPanel needs methods like update_device_frame(), update_device_time(), update_current_pressure()
-        # If your TopControlPanel labels are named differently, adjust accordingly.
-
-        # Increment frame count label:
-        try:
-            frame_count = int(self.top_ctrl.lbl_frame_num.text())
-        except Exception:
-            frame_count = 0
-        frame_count += 1
-        self.top_ctrl(lbl_frame_num=frame_count)  # or whatever your setter is
-        # OR if TopControlPanel has a method, e.g. set_frame_number(count):
-        # self.top_ctrl.set_frame_number(frame_count)
-
-        # Update device time and current pressure
-        self.top_ctrl.update_device_time(f"{timestamp:.2f} s")
-        self.top_ctrl.update_current_pressure(f"{pressure:.2f} mmHg")
-
-        # ── 2) Push to the live plot ────────────────────────────────────
-        # Your PressurePlotWidget likely has a method add_data_point(time, pressure)
-        if hasattr(self.pressure_plot_widget, "add_data_point"):
-            self.pressure_plot_widget.add_data_point(timestamp, pressure)
+                log.exception("Failed to start SerialThread.")
+                QMessageBox.critical(self, "Serial Error", str(e))
+                if self._serial_thread:
+                    self._serial_thread.deleteLater()
+                self._serial_thread = None
+                self._update_recording_actions_enable_state()
 
     @pyqtSlot(str)
-    def _on_serial_error(self, errmsg: str):
-        """
-        If SerialThread emits an error (e.g. framing/parsing), show a dialog or status text.
-        """
-        log.error(f"Serial error: {errmsg}")
-        QMessageBox.warning(self, "Serial Thread Error", errmsg)
+    def _handle_serial_status_change(self, status: str):
+        log.info(f"Serial status: {status}")
+        self.statusBar().showMessage(f"PRIM Device: {status}", 4000)
+
+        connected = (
+            "connected" in status.lower() or "opened serial port" in status.lower()
+        )
+        self.top_ctrl.update_connection_status(status, connected)
+        if connected:
+            self.connect_serial_action.setIcon(self.icon_disconnect)
+            self.connect_serial_action.setText("Disconnect PRIM Device")
+            self.serial_port_combobox.setEnabled(False)
+            self.pressure_plot_widget.clear_plot()
+        else:
+            self.connect_serial_action.setIcon(self.icon_connect)
+            self.connect_serial_action.setText("Connect PRIM Device")
+            self.serial_port_combobox.setEnabled(True)
+            if self._is_recording:
+                QMessageBox.information(
+                    self,
+                    "Recording Stopped",
+                    "PRIM device disconnected during recording.",
+                )
+                self._trigger_stop_recording()
+        self._update_recording_actions_enable_state()
+
+    @pyqtSlot(str)
+    def _handle_serial_error(self, msg: str):
+        log.error(f"Serial error: {msg}")
+        self.statusBar().showMessage(f"Serial Error: {msg}", 6000)
+        self._update_recording_actions_enable_state()
+
+    @pyqtSlot()
+    def _handle_serial_thread_finished(self):
+        log.info("SerialThread finished signal received.")
+        sender_thread = self.sender()
+        if self._serial_thread is sender_thread:
+            current_status_text = (
+                self.top_ctrl.conn_lbl.text().lower()
+                if hasattr(self.top_ctrl, "conn_lbl")
+                else ""
+            )
+            is_ui_connected = (
+                "connected" in current_status_text
+                or "opened serial port" in current_status_text
+            )
+
+            if is_ui_connected:
+                self._handle_serial_status_change("Disconnected by thread finishing")
+
+            if self._serial_thread:
+                self._serial_thread.deleteLater()
+            self._serial_thread = None
+            log.info("SerialThread instance cleaned up.")
+        else:
+            log.warning(
+                "Received 'finished' from an unknown/old SerialThread instance."
+            )
+
+        self._update_recording_actions_enable_state()
+
+    @pyqtSlot(int, float, float)
+    def _handle_new_serial_data(self, idx: int, t: float, p: float):
+        # Exactly as before: feed TopControlPanel and PressurePlotWidget
+        self.top_ctrl.update_prim_data(idx, t, p)
+
+        ax = self.top_ctrl.plot_controls.auto_x_cb.isChecked()
+        ay = self.top_ctrl.plot_controls.auto_y_cb.isChecked()
+        self.pressure_plot_widget.update_plot(t, p, ax, ay)
+
+        if self.dock_console.isVisible():
+            self.console_out_textedit.append(
+                f"PRIM Data: Idx={idx}, Time={t:.3f}s, P={p:.2f}"
+            )
+
+        if self._is_recording and self._recording_worker:
+            try:
+                self._recording_worker.add_csv_data(t, idx, p)
+            except Exception:
+                log.exception("Error queueing CSV data for recording.")
+                self.statusBar().showMessage(
+                    "CSV queue error. Stopping recording.", 5000
+                )
+                self._trigger_stop_recording()
+
+    def _update_recording_actions_enable_state(self):
+        serial_ready = (
+            self._serial_thread is not None and self._serial_thread.isRunning()
+        )
+        can_start = serial_ready and not self._is_recording
+        self.start_recording_action.setEnabled(bool(can_start))
+        self.stop_recording_action.setEnabled(bool(self._is_recording))
 
     # ─── Window Close Cleanup ──────────────────────────────────────────────────
     def closeEvent(self, event):
