@@ -8,6 +8,16 @@ import csv
 import json
 
 import imagingcontrol4 as ic4
+
+try:
+    ic4.Library.init(
+        api_log_level=ic4.LogLevel.INFO,
+        log_targets=ic4.LogTarget.STDERR,
+    )
+    log.info("DEBUG: IC4 library initialized successfully.")
+except Exception as exc:
+    log.error(f"Could not initialize IC4 library: {exc}")
+
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -323,25 +333,36 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
     # ─── Camera Device & Resolution Enumeration ─────────────────────────────────
-
     def _populate_device_list(self):
         """
-        Enumerate all connected IC4 cameras and fill self.device_combo.
+        Enumerate all connected IC4 cameras using DeviceEnum.devices(),
+        then fill self.device_combo.
         """
         try:
-            grab = ic4.Grabber()
-            devices = grab.device_info.enumerate()
+            # → This returns a Python list of ic4.DeviceInfo objects
+            device_list = ic4.DeviceEnum.devices()
         except Exception as e:
             log.error(f"Failed to enumerate IC4 devices: {e}")
-            devices = []
+            device_list = []
 
-        # Clear any existing items, then re-add the placeholder
+        # DEBUG: log exactly what we got
+        if not device_list:
+            log.info("DEBUG: DeviceEnum.devices() returned ZERO devices.")
+        else:
+            for idx, dev in enumerate(device_list):
+                log.info(
+                    f"DEBUG: Device {idx} = {dev.model_name!r} (S/N {dev.serial!r})"
+                )
+
+        # Clear the combo and add a placeholder
         self.device_combo.clear()
         self.device_combo.addItem("Select Device...", None)
 
-        # Populate with actual DeviceInfo objects
-        for dev in devices:
-            self.device_combo.addItem(dev.display_name, dev)
+        # Populate with DeviceInfo objects from DeviceEnum
+        for dev in device_list:
+            # You can choose dev.model_name or dev.display_name; here we show model + serial
+            display_str = f"{dev.model_name}  (S/N: {dev.serial})"
+            self.device_combo.addItem(display_str, dev)
 
     @pyqtSlot(int)
     def _on_device_selected(self, index):
@@ -917,6 +938,11 @@ class MainWindow(QMainWindow):
                 if hasattr(thread_instance, "deleteLater"):
                     thread_instance.deleteLater()
 
+        try:
+            ic4.Library.exit()
+            log.info("DEBUG: IC4 library exited cleanly.")
+        except Exception:
+            pass
         QApplication.processEvents()
         log.info("All threads cleaned up. Proceeding with close.")
         super().closeEvent(event)
