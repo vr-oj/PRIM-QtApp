@@ -1,4 +1,4 @@
-# list_cameras.py
+# File: list_cameras.py
 
 import imagingcontrol4 as ic4
 
@@ -22,10 +22,8 @@ def main():
 
     print("Detected IC4 cameras:")
     for idx, info in enumerate(devices):
-        # DeviceInfo has at least .model_name and .display_name
-        print(
-            f"  [{idx}] model_name = {info.model_name}, display_name = {info.display_name}"
-        )
+        # DeviceInfo has model_name; it might also have uri or other fields you can inspect via dir(info)
+        print(f"  [{idx}] model_name = {info.model_name}")
 
 
 if __name__ == "__main__":
