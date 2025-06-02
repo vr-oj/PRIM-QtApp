@@ -357,12 +357,12 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int)
     def _on_device_selected(self, index):
         """
-        When the user selects a camera device, enumerate its supported resolutions.
-        First: dump every PropEnumeration node name so we can see which one controls pixel-format.
+        When the user selects a camera device, we first dump all enumeration‐type nodes
+        from grab.device_property_map, so we can spot which one controls pixel‐format/resolution.
         """
         dev_info = self.device_combo.itemData(index)
 
-        # Clear the “Resolution” combo immediately
+        # Reset the “Resolution” combo immediately
         self.resolution_combo.clear()
         self.resolution_combo.addItem("Select Resolution...", None)
 
@@ -373,19 +373,17 @@ class MainWindow(QMainWindow):
             grab = ic4.Grabber()
             grab.device_open(dev_info)
 
-            # ─── DEBUG STEP: list all enumeration‐type properties ─────────────
-            print(">>> Enumerations in driver_property_map:")
-            for node in grab.driver_property_map.all:
-                # Each node is an ic4.Property; check if it's actually an enumeration
-                # (ic4.PropEnumeration is the Python class for enum‐type nodes)
+            # ─── DEBUG: list every PropEnumeration in device_property_map ──────────
+            print(">>> Enumerations in device_property_map:")
+            for node in grab.device_property_map.all:
                 if isinstance(node, ic4.PropEnumeration):
-                    print("    •", node.name)
-            # ─────────────────────────────────────────────────────────────────────
+                    print("   •", node.name)
+            # ─────────────────────────────────────────────────────────────────────────
 
             grab.device_close()
 
         except Exception as e:
-            log.error(f"Error while dumping enumeration nodes for {dev_info!r}: {e}")
+            log.error(f"Error dumping enumeration nodes for {dev_info!r}: {e}")
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
