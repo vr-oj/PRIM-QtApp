@@ -51,13 +51,6 @@ class SDKCameraThread(QThread):
           3. Set up grabbing in a loop until self._running is False
         """
 
-        try:
-            # 1) Initialize IC4
-            ic4.Library.init()  # or: with ic4.Library.init_context(): …
-        except ic4.IC4Exception as e:
-            self.error.emit(f"Failed to init IC4: {e}", "IC4_INIT_ERROR")
-            return
-
         # 2) Create a Grabber and open the first device
         self.grabber = ic4.Grabber()
         devices = self.grabber.device_info.enumerate()
@@ -118,10 +111,6 @@ class SDKCameraThread(QThread):
         # Clean up on exit
         try:
             self.grabber.device_close()
-        except Exception:
-            pass
-        try:
-            ic4.Library.close()  # release IC4
         except Exception:
             pass
 
