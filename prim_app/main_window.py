@@ -172,25 +172,29 @@ class MainWindow(QMainWindow):
 
     def _build_central_widget_layout(self):
         """
-        Layout with three sections across the top (Camera Control Tabs | Top Control | Plot Control),
-        and bottom row (QtCameraWidget live feed | PressurePlotWidget).
+        Layout with three sections across the top:
+          [Camera Control Tabs]    [Top Control]    [Plot Control]
+
+        Bottom row:
+          [QtCameraWidget (live feed)] | [PressurePlotWidget (live plot)]
         """
-        # 1) Create the QtCameraWidget (just a QLabel underneath)
+        # ─── Pre-create camera_widget for later use ───────────────────────────
+        # QtCameraWidget now has update_image() and clear_image().
         self.camera_widget = QtCameraWidget(self)
 
-        # 2) Build central container with a vertical layout
+        # ─── Central container & main vertical layout ─────────────────────────
         central = QWidget()
         main_vlay = QVBoxLayout(central)
         main_vlay.setContentsMargins(4, 4, 4, 4)
         main_vlay.setSpacing(6)
 
-        # ─ Top Row: Camera Control Tabs / Top Control / Plot Control ──────
+        # ─── Top Row: Camera Control | Top Control | Plot Control ───────────
         top_row_widget = QWidget()
         top_row_lay = QHBoxLayout(top_row_widget)
         top_row_lay.setContentsMargins(0, 0, 0, 0)
         top_row_lay.setSpacing(10)
 
-        # — Camera Control (Info & Controls tabs) —
+        # --- Camera Control: a QTabWidget with Info & Controls tabs ---
         self.camera_tabs = QTabWidget()
         self.camera_tabs.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
 
@@ -200,30 +204,29 @@ class MainWindow(QMainWindow):
         info_layout.setContentsMargins(6, 6, 6, 6)
         info_layout.setSpacing(4)
 
-        # Connection status
+        # Connection status (read‐only)
         self.lbl_cam_connection = QLabel("Disconnected")
         info_layout.addRow("Camera Status:", self.lbl_cam_connection)
 
-        # Frame count
+        # Frame count (read‐only)
         self.lbl_cam_frame = QLabel("0")
         info_layout.addRow("Frame #:", self.lbl_cam_frame)
 
-        # Resolution (updates after first frame)
+        # Resolution (read‐only; updates after first frame)
         self.lbl_cam_resolution = QLabel("N/A")
         info_layout.addRow("Resolution:", self.lbl_cam_resolution)
 
-        # Device combo
+        # --- Device selection combo and resolution combo ---
         self.device_combo = QComboBox()
         self.device_combo.addItem("Select Device...", None)
         self.device_combo.currentIndexChanged.connect(self._on_device_selected)
         info_layout.addRow("Device:", self.device_combo)
 
-        # Resolution combo
         self.resolution_combo = QComboBox()
         self.resolution_combo.addItem("Select Resolution…", None)
         info_layout.addRow("Resolution:", self.resolution_combo)
 
-        # Start/Stop Camera button
+        # --- Start/Stop Camera button (appears under device/resolution) ---
         self.btn_start_camera = QPushButton("Start Camera")
         self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
         info_layout.addRow("", self.btn_start_camera)
@@ -236,7 +239,7 @@ class MainWindow(QMainWindow):
         controls_layout.setContentsMargins(6, 6, 6, 6)
         controls_layout.setSpacing(6)
 
-        # Pass only `parent=self`.  The SDKCameraThread will later set `camera_control_panel.grabber = grabber`
+        # CameraControlPanel: gain, brightness, auto-exposure sliders
         self.camera_control_panel = CameraControlPanel(parent=self)
         self.camera_control_panel.setEnabled(False)
         controls_layout.addWidget(self.camera_control_panel)
@@ -245,17 +248,17 @@ class MainWindow(QMainWindow):
 
         top_row_lay.addWidget(self.camera_tabs, stretch=2)
 
-        # — Top Control Panel (center) —
+        # --- Top Control Panel (center) ---
         self.top_ctrl = TopControlPanel(self)
         top_row_lay.addWidget(self.top_ctrl, stretch=2)
 
-        # — Plot Control Panel (right) —
+        # --- Plot Control Panel (right) ---
         self.plot_control_panel = PlotControlPanel(self)
         top_row_lay.addWidget(self.plot_control_panel, stretch=2)
 
         main_vlay.addWidget(top_row_widget, stretch=0)
 
-        # ─ Bottom Row: Camera Viewfinder | Live Plot ───────────────────────
+        # ─── Bottom Row: Camera Viewfinder | Live Plot ──────────────────────
         self.bottom_split = QSplitter(Qt.Horizontal)
         self.bottom_split.setChildrenCollapsible(False)
 
@@ -265,7 +268,9 @@ class MainWindow(QMainWindow):
 
         # Right: PressurePlotWidget (live plot)
         self.pressure_plot_widget = PressurePlotWidget(self)
-        self.pressure_plot_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.pressure_plot_widget.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Expanding
+        )
         self.bottom_split.addWidget(self.pressure_plot_widget)
 
         self.bottom_split.setStretchFactor(0, 1)
@@ -273,7 +278,7 @@ class MainWindow(QMainWindow):
 
         main_vlay.addWidget(self.bottom_split, stretch=1)
 
-        # ─── Wire Up PlotControls → PressurePlotWidget ──────────────────
+        # ─── Wire Up PlotControl ↔ PressurePlotWidget (no camera hookups here) ─
         if hasattr(self.pressure_plot_widget, "set_auto_scale_x"):
             self.plot_control_panel.autoscale_x_changed.connect(
                 self.pressure_plot_widget.set_auto_scale_x
@@ -306,7 +311,7 @@ class MainWindow(QMainWindow):
                 self.pressure_plot_widget.clear_plot
             )
 
-        # Make `central` the central widget
+        # ─── Finally, set this “central” widget on the window ───────────────
         self.setCentralWidget(central)
 
     # ─── Camera Device & Resolution Enumeration ─────────────────────────────────
@@ -337,7 +342,7 @@ class MainWindow(QMainWindow):
         for dev in device_list:
             display_str = f"{dev.model_name}  (S/N: {dev.serial})"
             self.device_combo.addItem(display_str, dev)
-            
+
     @pyqtSlot(int)
     def _on_device_selected(self, index):
         """
