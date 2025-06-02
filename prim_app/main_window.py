@@ -694,32 +694,34 @@ class MainWindow(QMainWindow):
                 self._serial_thread = None
                 self._update_recording_actions_enable_state()
 
-    @pyqtSlot(str)
-    def _handle_serial_status_change(self, status: str):
-        log.info(f"Serial status: {status}")
-        self.statusBar().showMessage(f"PRIM Device: {status}", 4000)
+    @pyqtSlot(int, float, float)
+    def _handle_new_serial_data(self, idx: int, t: float, p: float):
+        # 1) Update TopControlPanel with the new data:
+        self.top_ctrl.update_prim_data(idx, t, p)
 
-        connected = (
-            "connected" in status.lower() or "opened serial port" in status.lower()
-        )
-        self.top_ctrl.update_connection_status(status, connected)
-        if connected:
-            self.connect_serial_action.setIcon(self.icon_disconnect)
-            self.connect_serial_action.setText("Disconnect PRIM Device")
-            self.serial_port_combobox.setEnabled(False)
-            self.pressure_plot_widget.clear_plot()
-        else:
-            self.connect_serial_action.setIcon(self.icon_connect)
-            self.connect_serial_action.setText("Connect PRIM Device")
-            self.serial_port_combobox.setEnabled(True)
-            if self._is_recording:
-                QMessageBox.information(
-                    self,
-                    "Recording Stopped",
-                    "PRIM device disconnected during recording.",
+        # 2) Decide whether to auto‐scale or use manual limits by querying PlotControlPanel:
+        ax = self.plot_control_panel.auto_x_cb.isChecked()
+        ay = self.plot_control_panel.auto_y_cb.isChecked()
+
+        # 3) Push the new point into the PressurePlotWidget:
+        self.pressure_plot_widget.update_plot(t, p, ax, ay)
+
+        # 4) If the console is visible, log out the raw values:
+        if self.dock_console.isVisible():
+            self.console_out_textedit.append(
+                f"PRIM Data: Idx={idx}, Time={t:.3f}s, P={p:.2f}"
+            )
+
+        # 5) If we are currently recording, also enqueue this data for the CSV:
+        if self._is_recording and self._recording_worker:
+            try:
+                self._recording_worker.add_csv_data(t, idx, p)
+            except Exception:
+                log.exception("Error queueing CSV data for recording.")
+                self.statusBar().showMessage(
+                    "CSV queue error. Stopping recording.", 5000
                 )
                 self._trigger_stop_recording()
-        self._update_recording_actions_enable_state()
 
     @pyqtSlot(str)
     def _handle_serial_error(self, msg: str):
