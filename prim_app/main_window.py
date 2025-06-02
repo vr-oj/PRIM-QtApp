@@ -362,6 +362,7 @@ class MainWindow(QMainWindow):
         entry in PixelFormat.entries, we set that format and then read ImageWidth
         and ImageHeight so we can show "W×H (FormatName)" in the combo.
         """
+        print(f">>> _on_device_selected fired! index={index}")
         dev_info = self.device_combo.itemData(index)
 
         # Clear out and reset the Resolution dropdown
