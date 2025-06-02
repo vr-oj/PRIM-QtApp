@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import (
     QSlider,
     QGroupBox,
     QMessageBox,
-    QOpenGLWidget,  # <— QOpenGLWidget lives in QtWidgets
+    QOpenGLWidget,  # QOpenGLWidget comes from QtWidgets in PyQt5
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QImage, QPainter
@@ -30,51 +30,47 @@ import numpy as np
 
 class IC4CameraController:
     """
-    Wraps IC4 Grabber + QueueSink to detect, open, and control DMK cameras.
+    Wraps the IC4 Grabber + QueueSink workflow to detect, open, and control DMK cameras.
 
-    Steps on open():
-      1. ic4.Library.init()
-      2. Enumerate devices via DeviceEnum.devices() and pick DMK 33UX250 / 33UP5000  [oai_citation:8‡The Imaging Source](https://www.theimagingsource.com/en-us/documentation/ic4python/api-reference.html?utm_source=chatgpt.com).
-      3. Open with Grabber.device_open().
-      4. Set AcquisitionMode="Continuous", AcquisitionFrameRate=10.0  [oai_citation:9‡The Imaging Source](https://www.theimagingsource.com/en-us/documentation/ic4python/api-reference.html?utm_source=chatgpt.com) [oai_citation:10‡The Imaging Source](https://www.theimagingsource.com/en-us/documentation/ic4python/api-reference.html?utm_source=chatgpt.com).
-      5. Create QueueSink, stream_setup(sink, StreamSetupOption.ACQUISITION_START), alloc_and_queue_buffers().
+    - Uses DeviceEnum.devices() to list cameras.
+    - Opens the first DMK 33UX250 / 33UP5000 (or falls back to the first device).
+    - Configures AcquisitionMode="Continuous" and AcquisitionFrameRate=10.0.
+    - Creates a QueueSink with a SinkListener, allocates buffers, and starts streaming.
+    - Exposes methods to get/set Auto Exposure, Exposure, Gain, Brightness,
+      Auto White Balance, WhiteBalance Red, and WhiteBalance Blue using PropInteger / PropBoolean.
     """
 
     def __init__(self, preferred_models=None):
-        # By default, look for these substrings in each DeviceInfo.model_name:
+        # By default, look for these substrings in DeviceInfo.model_name
         self.preferred_models = preferred_models or ["DMK 33UX250", "DMK 33UP5000"]
         self.grabber = None
         self.sink = None
+        self.listener = None
 
     def list_devices(self):
         """
-        Returns a list of DeviceInfo objects for all video capture devices.
-        Use DeviceInfo.model_name, serial, etc.
+        Return a list of DeviceInfo objects for all video capture devices.
+        Use DeviceInfo.model_name, DeviceInfo.display_name, etc.
         """
-        return (
-            ic4.DeviceEnum.devices()
-        )  #  [oai_citation:11‡The Imaging Source](https://www.theimagingsource.com/en-us/documentation/ic4python/api-reference.html?utm_source=chatgpt.com)
+        return ic4.DeviceEnum.devices()
 
     def open(self):
         """
-        1. Initialize the library (once per process).
-        2. Pick first matching model or fallback to the first device.
-        3. Open it via Grabber().
-        4. Configure AcquisitionMode + frame rate.
-        5. Attach a QueueSink and start streaming at 10 FPS.
-        Returns True on success, False otherwise.
+        1. Initialize the IC4 library.
+        2. Enumerate devices, pick the first matching preferred model (or fallback to the first).
+        3. Open via Grabber.device_open().
+        4. Set AcquisitionMode="Continuous" and AcquisitionFrameRate=10.0.
+        5. Create a SinkListener and QueueSink(listener), attach it, and start acquisition.
+        Returns True on success, False on any failure.
         """
         try:
-            ic4.Library.init()  # Initialize the IC4 library  [oai_citation:12‡The Imaging Source](https://www.theimagingsource.com/en-us/documentation/ic4python/api-reference.html?utm_source=chatgpt.com)
+            ic4.Library.init()  # Must be called once per process
         except ic4.IC4Exception as e:
             QMessageBox.critical(None, "IC4 Error", f"Library.init() failed:\n{e}")
             return False
 
-        # Enumerate all DeviceInfo objects
         try:
-            devices = (
-                ic4.DeviceEnum.devices()
-            )  #  [oai_citation:13‡The Imaging Source](https://www.theimagingsource.com/en-us/documentation/ic4python/api-reference.html?utm_source=chatgpt.com)
+            devices = ic4.DeviceEnum.devices()
         except ic4.IC4Exception as e:
             QMessageBox.critical(
                 None, "IC4 Error", f"Failed to enumerate devices:\n{e}"
@@ -85,10 +81,10 @@ class IC4CameraController:
             QMessageBox.critical(None, "Camera Error", "No IC4 devices found.")
             return False
 
-        # Pick first matching preferred_model, else fallback to devices[0]
+        # Choose the first preferred model, else fallback to devices[0]
         chosen_info = None
         for info in devices:
-            name = info.model_name  # e.g. "DMK 33UX250"
+            name = info.model_name  # e.g., "DMK 33UX250"
             for pref in self.preferred_models:
                 if pref in name:
                     chosen_info = info
@@ -98,7 +94,7 @@ class IC4CameraController:
         if chosen_info is None:
             chosen_info = devices[0]
 
-        # Create Grabber, open device
+        # Create and open the Grabber
         try:
             self.grabber = ic4.Grabber()
             self.grabber.device_open(chosen_info)
@@ -106,41 +102,39 @@ class IC4CameraController:
             QMessageBox.critical(None, "IC4 Error", f"Failed to open device:\n{e}")
             return False
 
-        # Configure AcquisitionMode = "Continuous", and set frame rate to 10.0
+        # Configure Acquisition Mode = "Continuous" and frame rate = 10.0
         pm = self.grabber.device_property_map
         try:
-            # NOTE: PropId.ACQUISITION_MODE is an enumeration; "Continuous" ensures ongoing streaming
             pm.set_value(ic4.PropId.ACQUISITION_MODE, "Continuous")
             pm.set_value(ic4.PropId.ACQUISITION_FRAME_RATE, 10.0)
-        except ic4.IC4Exception as e:
-            QMessageBox.warning(
-                None,
-                "Warning",
-                f"Could not set Acquisition Mode/Rate:\n{e}\nProceeding with defaults.",
-            )
+        except ic4.IC4Exception:
+            # Some cameras may not support setting frame rate explicitly;
+            # if it fails, we proceed with defaults.
+            pass
 
-        # Create a QueueSink, attach it, and immediately start acquisition
+        # Create a SinkListener (needed by QueueSink) and the QueueSink itself
         try:
-            self.sink = ic4.QueueSink()
+            self.listener = ic4.SinkListener()
+            self.sink = ic4.QueueSink(self.listener)
+            # Attach and start acquisition immediately
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
-            )  #  [oai_citation:14‡The Imaging Source](https://www.theimagingsource.com/en-us/documentation/ic4python/api-reference.html?utm_source=chatgpt.com)
-            # Pre‐allocate, say, 10 buffers. The default allocation strategy will size them
+            )
+            # Pre-allocate 10 buffers to minimize drops
             self.sink.alloc_and_queue_buffers(10)
         except ic4.IC4Exception as e:
             QMessageBox.critical(
                 None, "IC4 Error", f"Failed to create or attach QueueSink:\n{e}"
             )
-            self.grabber = None
+            self.close()
             return False
 
         return True
 
     def close(self):
-        """Stop streaming, delete Grabber & Sink."""
+        """Stop acquisition, close the device, and release Grabber & Sink."""
         if self.grabber:
             try:
-                # Stop acquisition first (optional: explicit)
                 self.grabber.acquisition_stop()
             except:
                 pass
@@ -150,18 +144,19 @@ class IC4CameraController:
                 pass
         self.grabber = None
         self.sink = None
+        self.listener = None
 
     def __del__(self):
         self.close()
 
-    # ———————————————————————————————
-    # PROPERTY‐QUERY / PROPERTY‐SET HELPERS
-    # ———————————————————————————————
+    # ----------------------------
+    # PROPERTY-QUERY HELPERS
+    # ----------------------------
 
     def _get_integer_property(self, prop_id):
         """
-        Return the PropInteger object for the given prop_id name (string).
-        E.g. ic4.PropId.EXPOSURE, ic4.PropId.GAIN, etc.
+        Return a PropInteger object for the given prop_id (e.g., PropId.EXPOSURE, PropId.GAIN_RAW, etc.).
+        Returns None if not found.
         """
         pm = self.grabber.device_property_map
         try:
@@ -170,7 +165,10 @@ class IC4CameraController:
             return None
 
     def _get_boolean_property(self, prop_id):
-        """Return the PropBoolean object for the given prop_id (string)."""
+        """
+        Return a PropBoolean object for the given prop_id (e.g., PropId.EXPOSURE_AUTO).
+        Returns None if not found.
+        """
         pm = self.grabber.device_property_map
         try:
             return pm.find_boolean(prop_id)
@@ -179,16 +177,14 @@ class IC4CameraController:
 
     def _get_auto_property(self, auto_id):
         """
-        Many “Auto X” features are enumeration or boolean features:
-         - For auto exposure, PropId.EXPOSURE_AUTO might exist
-         - For auto white balance, PropId.WHITE_BALANCE_AUTO, etc.
-        We attempt to find them as boolean first, else as enumeration.
+        Return either a PropBoolean or PropEnumeration for an "Auto" feature.
+        E.g. PropId.EXPOSURE_AUTO or PropId.WHITE_BALANCE_AUTO.
         """
-        # Try boolean
-        b = self._get_boolean_property(auto_id)
-        if b:
-            return b
-        # If not boolean, try enumeration
+        # Try Boolean first
+        prop_bool = self._get_boolean_property(auto_id)
+        if prop_bool:
+            return prop_bool
+        # Fallback to enumeration
         pm = self.grabber.device_property_map
         try:
             return pm.find_enumeration(auto_id)
@@ -196,9 +192,7 @@ class IC4CameraController:
             return None
 
     def get_auto_exposure(self) -> bool:
-        """
-        Return True if Auto Exposure is ON (if the camera supports it).
-        """
+        """Return True if Auto Exposure is ON."""
         prop = self._get_auto_property(ic4.PropId.EXPOSURE_AUTO)
         if not prop:
             return False
@@ -208,32 +202,29 @@ class IC4CameraController:
             return False
 
     def set_auto_exposure(self, enabled: bool):
-        """
-        Toggle Auto Exposure ON / OFF. If OFF, one can set Exposure manually.
-        """
+        """Toggle Auto Exposure ON/OFF."""
         prop = self._get_auto_property(ic4.PropId.EXPOSURE_AUTO)
         if not prop:
             return
         try:
             prop.value = bool(enabled)
-        except ic4.IC4Exception as e:
-            print(f"[IC4] Failed to set AutoExposure: {e}")
+        except ic4.IC4Exception:
+            pass
 
     def get_exposure_range(self):
         """
-        Return (valid_values_list) for Exposure. We will use valid_value_set,
-        which returns a list of allowed integer exposure values.
+        Return a sorted list of valid Exposure values (PropInteger.valid_value_set).
         """
         prop = self._get_integer_property(ic4.PropId.EXPOSURE)
         if not prop:
             return []
         try:
-            return list(prop.valid_value_set)
+            return sorted(list(prop.valid_value_set))
         except:
             return []
 
     def get_current_exposure(self) -> int:
-        """Return current Exposure (as int) or 0 if unavailable."""
+        """Return the current Exposure value as an integer."""
         prop = self._get_integer_property(ic4.PropId.EXPOSURE)
         if not prop:
             return 0
@@ -243,21 +234,20 @@ class IC4CameraController:
             return 0
 
     def set_exposure(self, value: int):
-        """
-        Turn off AutoExposure, then set Exposure to value (one of valid_value_set).
-        """
+        """Turn off Auto Exposure, then set Exposure to the given value."""
         self.set_auto_exposure(False)
         prop = self._get_integer_property(ic4.PropId.EXPOSURE)
         if not prop:
             return
         try:
             prop.value = int(value)
-        except ic4.IC4Exception as e:
-            print(f"[IC4] Failed to set Exposure: {e}")
+        except ic4.IC4Exception:
+            pass
 
     def get_gain_range(self):
         """
-        Return list of allowed Gain values (PropInteger.valid_value_set).
+        Return a sorted list of valid Gain values. Some cameras expose GAIN_RAW.
+        Fallback to PropId.GAIN if GAIN_RAW is not found.
         """
         prop = self._get_integer_property(
             ic4.PropId.GAIN_RAW
@@ -265,12 +255,12 @@ class IC4CameraController:
         if not prop:
             return []
         try:
-            return list(prop.valid_value_set)
+            return sorted(list(prop.valid_value_set))
         except:
             return []
 
     def get_current_gain(self) -> int:
-        """Return current Gain (or 0)."""
+        """Return the current Gain (either GAIN_RAW or GAIN)."""
         prop = self._get_integer_property(
             ic4.PropId.GAIN_RAW
         ) or self._get_integer_property(ic4.PropId.GAIN)
@@ -282,9 +272,7 @@ class IC4CameraController:
             return 0
 
     def set_gain(self, value: int):
-        """
-        Set Gain to value (PropId.GAIN or PropId.GAIN_RAW).
-        """
+        """Set Gain (or GainRaw) to the given integer value."""
         prop = self._get_integer_property(
             ic4.PropId.GAIN_RAW
         ) or self._get_integer_property(ic4.PropId.GAIN)
@@ -292,23 +280,23 @@ class IC4CameraController:
             return
         try:
             prop.value = int(value)
-        except ic4.IC4Exception as e:
-            print(f"[IC4] Failed to set Gain: {e}")
+        except ic4.IC4Exception:
+            pass
 
     def get_brightness_range(self):
         """
-        Return list of allowed Brightness values (PropInteger.valid_value_set).
+        Return a sorted list of valid Brightness values (PropInteger.valid_value_set).
         """
         prop = self._get_integer_property(ic4.PropId.BRIGHTNESS)
         if not prop:
             return []
         try:
-            return list(prop.valid_value_set)
+            return sorted(list(prop.valid_value_set))
         except:
             return []
 
     def get_current_brightness(self) -> int:
-        """Return current Brightness (or 0)."""
+        """Return the current Brightness as an integer."""
         prop = self._get_integer_property(ic4.PropId.BRIGHTNESS)
         if not prop:
             return 0
@@ -318,14 +306,14 @@ class IC4CameraController:
             return 0
 
     def set_brightness(self, value: int):
-        """Set Brightness to value (PropId.BRIGHTNESS)."""
+        """Set Brightness to the given integer value."""
         prop = self._get_integer_property(ic4.PropId.BRIGHTNESS)
         if not prop:
             return
         try:
             prop.value = int(value)
-        except ic4.IC4Exception as e:
-            print(f"[IC4] Failed to set Brightness: {e}")
+        except ic4.IC4Exception:
+            pass
 
     def get_auto_white_balance(self) -> bool:
         """Return True if Auto White Balance is ON."""
@@ -338,28 +326,30 @@ class IC4CameraController:
             return False
 
     def set_auto_white_balance(self, enabled: bool):
-        """Toggle Auto White Balance ON / OFF."""
+        """Toggle Auto White Balance ON/OFF."""
         prop = self._get_auto_property(ic4.PropId.WHITE_BALANCE_AUTO)
         if not prop:
             return
         try:
             prop.value = bool(enabled)
-        except ic4.IC4Exception as e:
-            print(f"[IC4] Failed to set WhiteBalanceAuto: {e}")
+        except ic4.IC4Exception:
+            pass
 
     def get_white_balance_range(self):
         """
-        Return two lists: valid Red values and valid Blue values for manual WB.
-        Those come from PropInteger.valid_value_set for PropId.WHITE_BALANCE_RED and PropId.WHITE_BALANCE_BLUE.
+        Return two sorted lists: valid Red values and valid Blue values.
+        Uses PropId.WHITE_BALANCE_RED and PropId.WHITE_BALANCE_BLUE.
         """
         red_prop = self._get_integer_property(ic4.PropId.WHITE_BALANCE_RED)
         blue_prop = self._get_integer_property(ic4.PropId.WHITE_BALANCE_BLUE)
-        reds = list(red_prop.valid_value_set) if red_prop else []
-        blues = list(blue_prop.valid_value_set) if blue_prop else []
+        reds = sorted(list(red_prop.valid_value_set)) if red_prop else []
+        blues = sorted(list(blue_prop.valid_value_set)) if blue_prop else []
         return reds, blues
 
     def get_current_white_balance(self):
-        """Return (current_red, current_blue), or (0, 0)."""
+        """
+        Return a tuple (current_red, current_blue) as integers.
+        """
         red_val, blue_val = 0, 0
         red_prop = self._get_integer_property(ic4.PropId.WHITE_BALANCE_RED)
         blue_prop = self._get_integer_property(ic4.PropId.WHITE_BALANCE_BLUE)
@@ -377,7 +367,7 @@ class IC4CameraController:
 
     def set_white_balance(self, red: int, blue: int):
         """
-        Turn off Auto White Balance, then set WHITE_BALANCE_RED and WHITE_BALANCE_BLUE.
+        Turn off Auto White Balance, then set the Red and Blue channels.
         """
         self.set_auto_white_balance(False)
         red_prop = self._get_integer_property(ic4.PropId.WHITE_BALANCE_RED)
@@ -387,17 +377,17 @@ class IC4CameraController:
                 red_prop.value = int(red)
             if blue_prop:
                 blue_prop.value = int(blue)
-        except ic4.IC4Exception as e:
-            print(f"[IC4] Failed to set WhiteBalance(R,B): {e}")
+        except ic4.IC4Exception:
+            pass
 
 
 class IC4CameraThread(QThread):
     """
     QThread that continuously pops the newest ImageBuffer from a QueueSink
-    and emits it as a NumPy array (dtype=uint8, or uint16 depending on pixel format).
+    and emits a NumPy array for display.
     """
 
-    frame_ready = pyqtSignal(object)  # will emit a NumPy ndarray
+    frame_ready = pyqtSignal(object)  # emits a NumPy ndarray
 
     def __init__(self, sink: ic4.QueueSink, parent=None):
         super().__init__(parent)
@@ -408,99 +398,81 @@ class IC4CameraThread(QThread):
         self._running = True
         while self._running:
             try:
-                buf = (
-                    self.sink.try_pop_output_buffer()
-                )  #  [oai_citation:15‡The Imaging Source](https://www.theimagingsource.com/en-us/documentation/ic4python/api-reference.html?utm_source=chatgpt.com)
+                buf = self.sink.try_pop_output_buffer()  # non-blocking
             except ic4.IC4Exception as e:
                 print(f"[IC4Thread] Error popping buffer: {e}")
                 buf = None
 
             if buf is None:
-                # No frame available right now; just loop
                 time.sleep(0.001)
                 continue
 
-            # Convert ImageBuffer → NumPy (shares memory)
             try:
-                arr = (
-                    buf.numpy_wrap()
-                )  #  [oai_citation:16‡The Imaging Source](https://www.theimagingsource.com/en-us/documentation/ic4python/api-reference.html?utm_source=chatgpt.com)
-                # arr is an (H,W,channels) array of dtype c_ubyte or c_ushort
-                # Convert to a contiguous uint8/uint16 array in case downstream code expects it
+                # numpy_wrap() returns a memoryview over the buffer’s data
+                arr = buf.numpy_wrap()  # may be uint8 or uint16, (H, W, C)
                 np_img = np.array(arr, copy=False)
-                # Emit that frame
                 self.frame_ready.emit(np_img)
             except Exception as e:
                 print(f"[IC4Thread] Failed to numpy_wrap(): {e}")
             finally:
-                # Always release the buffer so it can be reused
                 try:
-                    buf.release()
+                    buf.release()  # return the buffer to the free queue
                 except:
                     pass
 
-        # End of run, nothing else to do
-
     def stop(self):
-        """Request thread to stop, then wait() for it to finish."""
+        """Stop the thread’s loop and wait for it to finish."""
         self._running = False
         self.wait()
 
 
 class CameraOpenGLWidget(QOpenGLWidget):
     """
-    A QOpenGLWidget that draws incoming NumPy frames (uint8/uint16) with QPainter.
+    A QOpenGLWidget that draws incoming NumPy frames using QPainter.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumSize(640, 480)
-        self.current_image = None  # QImage
+        self.current_image = None  # holds a QImage for painting
 
     def update_frame(self, np_img):
         """
-        Convert a NumPy array (H×W×C) to QImage and schedule repaint.
-        We assume np_img.dtype is uint8 or uint16, and channels=1 or 3 or 4.
-        For simplicity, we convert to 8‐bit RGB for display.
+        Convert a NumPy array (H×W×C, dtype=uint8 or uint16) to QImage,
+        scale it to fit the widget (keeping aspect ratio), and schedule a repaint.
         """
         if np_img is None:
             return
 
         h, w, c = np_img.shape
 
-        # If it’s 10/12/16‐bit grayscale or Bayer/Mono16, we scale down to 8‐bit
+        # Handle 16-bit grayscale by downshifting to 8-bit
         if np_img.dtype == np.uint16 and c == 1:
-            # Normalize 16→8
             arr8 = (np_img >> 8).astype(np.uint8)
-            # Create QImage Format_Grayscale8 (1 channel)
             image = QImage(arr8.data, w, h, w, QImage.Format_Grayscale8)
+
+        # 8-bit single-channel → QImage.Format_Grayscale8
         elif np_img.dtype == np.uint8 and c == 1:
-            # Single‐channel 8‐bit → QImage.Format_Grayscale8
             image = QImage(np_img.data, w, h, w, QImage.Format_Grayscale8)
+
+        # 8-bit BGR → convert to RGB888
         elif np_img.dtype == np.uint8 and c == 3:
-            # BGR8 → RGB888 explicitly
-            rgb = np_img[..., ::-1]
+            rgb = np_img[..., ::-1]  # BGR→RGB
             bytes_per_line = 3 * w
             image = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+
+        # 8-bit BGRA → convert to RGBA
         elif np_img.dtype == np.uint8 and c == 4:
-            # BGRA8 → RGBA8888
             rgba = np_img[..., [2, 1, 0, 3]]
             bytes_per_line = 4 * w
             image = QImage(rgba.data, w, h, bytes_per_line, QImage.Format_RGBA8888)
-        else:
-            # Other formats not explicitly handled—attempt generic 8‐bit copy to RGB
-            np8 = np_img.astype(np.uint8)
-            if c == 2:
-                # hypothetical case: 2 channel, drop alpha
-                rgb = np.dstack((np8[:, :, 0], np8[:, :, 0], np8[:, :, 0]))
-                bytes_per_line = 3 * w
-                image = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
-            else:
-                # Last resort: flatten into grayscale8
-                gray = cv2.cvtColor(np8, cv2.COLOR_BGR2GRAY)
-                image = QImage(gray.data, w, h, w, QImage.Format_Grayscale8)
 
-        # Scale image to fit widget, keeping aspect ratio
+        else:
+            # Fallback: convert to grayscale 8-bit
+            gray = (np_img[..., 0] if c > 1 else np_img).astype(np.uint8)
+            image = QImage(gray.data, w, h, w, QImage.Format_Grayscale8)
+
+        # Scale to fit widget, preserving aspect ratio
         self.current_image = image.scaled(
             self.width(), self.height(), Qt.KeepAspectRatio
         )
@@ -508,7 +480,7 @@ class CameraOpenGLWidget(QOpenGLWidget):
 
     def paintGL(self):
         """
-        Called whenever Qt decides the widget needs repainting. We draw the QImage centered.
+        Called whenever Qt repaints this widget. We draw the current QImage centered.
         """
         self.makeCurrent()
         painter = QPainter(self)
@@ -521,7 +493,7 @@ class CameraOpenGLWidget(QOpenGLWidget):
 
     def resizeGL(self, w, h):
         """
-        When the widget resizes, re‐scale the last image to fit the new size.
+        On resize, re‐scale the current image (if any) to fit the new size.
         """
         if self.current_image:
             self.current_image = self.current_image.scaled(w, h, Qt.KeepAspectRatio)
@@ -540,17 +512,17 @@ class CameraAppMainWindow(QMainWindow):
         self._build_ui()
 
     def _build_ui(self):
-        # Central widget & layout
+        # Central widget & horizontal layout
         central = QWidget()
         main_layout = QHBoxLayout()
         central.setLayout(main_layout)
         self.setCentralWidget(central)
 
-        # Left: OpenGL preview
+        # Left side: OpenGL preview
         self.opengl_widget = CameraOpenGLWidget()
         main_layout.addWidget(self.opengl_widget)
 
-        # Right: Controls
+        # Right side: Controls
         controls_container = QWidget()
         controls_layout = QVBoxLayout()
         controls_container.setLayout(controls_layout)
@@ -579,7 +551,7 @@ class CameraAppMainWindow(QMainWindow):
         self.ae_checkbox.stateChanged.connect(self.on_toggle_ae)
         ae_layout.addWidget(self.ae_checkbox)
 
-        # Manual Exposure slider
+        # Manual Exposure slider + label
         self.exposure_label = QLabel("Exposure: N/A")
         self.exposure_slider = QSlider(Qt.Horizontal)
         self.exposure_slider.setEnabled(False)
@@ -587,7 +559,7 @@ class CameraAppMainWindow(QMainWindow):
         ae_layout.addWidget(self.exposure_label)
         ae_layout.addWidget(self.exposure_slider)
 
-        # Gain slider
+        # Gain slider + label
         self.gain_label = QLabel("Gain: N/A")
         self.gain_slider = QSlider(Qt.Horizontal)
         self.gain_slider.setEnabled(False)
@@ -595,7 +567,7 @@ class CameraAppMainWindow(QMainWindow):
         ae_layout.addWidget(self.gain_label)
         ae_layout.addWidget(self.gain_slider)
 
-        # Brightness slider
+        # Brightness slider + label
         self.brightness_label = QLabel("Brightness: N/A")
         self.brightness_slider = QSlider(Qt.Horizontal)
         self.brightness_slider.setEnabled(False)
@@ -616,7 +588,7 @@ class CameraAppMainWindow(QMainWindow):
         self.wb_auto_checkbox.stateChanged.connect(self.on_toggle_wb_auto)
         wb_layout.addWidget(self.wb_auto_checkbox)
 
-        # Manual WB Red slider
+        # Manual WB Red slider + label
         self.wb_red_label = QLabel("WB Red: N/A")
         self.wb_red_slider = QSlider(Qt.Horizontal)
         self.wb_red_slider.setEnabled(False)
@@ -624,7 +596,7 @@ class CameraAppMainWindow(QMainWindow):
         wb_layout.addWidget(self.wb_red_label)
         wb_layout.addWidget(self.wb_red_slider)
 
-        # Manual WB Blue slider
+        # Manual WB Blue slider + label
         self.wb_blue_label = QLabel("WB Blue: N/A")
         self.wb_blue_slider = QSlider(Qt.Horizontal)
         self.wb_blue_slider.setEnabled(False)
@@ -632,15 +604,15 @@ class CameraAppMainWindow(QMainWindow):
         wb_layout.addWidget(self.wb_blue_label)
         wb_layout.addWidget(self.wb_blue_slider)
 
-        # Spacer to push controls upward
+        # Spacer so controls stay at top
         controls_layout.addStretch()
 
     def on_connect(self):
         """
-        Called when “Connect Camera” is clicked.
-        1. Instantiate IC4CameraController, open the camera.
-        2. If success: enable controls, populate sliders from each property’s valid_value_set.
-        3. Start IC4CameraThread to feed frames to the OpenGL widget.
+        When “Connect Camera” is clicked:
+         1. Instantiate IC4CameraController and open the camera.
+         2. If successful, populate each slider’s range/value from valid_value_set.
+         3. Start IC4CameraThread to receive frames and display them.
         """
         self.ic4_ctrl = IC4CameraController(
             preferred_models=["DMK 33UX250", "DMK 33UP5000"]
@@ -654,13 +626,12 @@ class CameraAppMainWindow(QMainWindow):
         self.connect_btn.setEnabled(False)
         self.disconnect_btn.setEnabled(True)
 
-        # Enable/disable checkboxes
+        # Enable AE / WB checkboxes
         self.ae_checkbox.setEnabled(True)
         self.wb_auto_checkbox.setEnabled(True)
 
-        # Set initial AE / WB checkbox states
+        # Initialize AE checkbox state
         self.ae_checkbox.setChecked(self.ic4_ctrl.get_auto_exposure())
-        self.wb_auto_checkbox.setChecked(self.ic4_ctrl.get_auto_white_balance())
 
         # Populate Exposure slider
         exp_vals = self.ic4_ctrl.get_exposure_range()
@@ -673,7 +644,6 @@ class CameraAppMainWindow(QMainWindow):
             curr_e = self.ic4_ctrl.get_current_exposure()
             self.exposure_slider.setValue(curr_e)
             self.exposure_label.setText(f"Exposure: {curr_e}")
-            # Initially disable if auto exposure is ON
             self.exposure_slider.setEnabled(not self.ic4_ctrl.get_auto_exposure())
         else:
             self.exposure_label.setText("Exposure: N/A")
@@ -712,7 +682,7 @@ class CameraAppMainWindow(QMainWindow):
             self.brightness_slider.setEnabled(False)
 
         # Populate White Balance sliders
-        (r_vals, bl_vals) = self.ic4_ctrl.get_white_balance_range()
+        r_vals, bl_vals = self.ic4_ctrl.get_white_balance_range()
         if r_vals and bl_vals:
             r_min, r_max = r_vals[0], r_vals[-1]
             r_step = r_vals[1] - r_vals[0] if len(r_vals) > 1 else 1
@@ -731,7 +701,6 @@ class CameraAppMainWindow(QMainWindow):
             self.wb_blue_slider.setValue(curr_b)
             self.wb_blue_label.setText(f"WB Blue: {curr_b}")
 
-            # Disable both if auto WB is ON
             enabled_manual_wb = not self.ic4_ctrl.get_auto_white_balance()
             self.wb_red_slider.setEnabled(enabled_manual_wb)
             self.wb_blue_slider.setEnabled(enabled_manual_wb)
@@ -742,13 +711,13 @@ class CameraAppMainWindow(QMainWindow):
             self.wb_blue_label.setText("WB Blue: N/A")
             self.wb_blue_slider.setEnabled(False)
 
-        # Start the IC4CameraThread
+        # Start the IC4CameraThread to pull frames and emit them
         self.ic4_thread = IC4CameraThread(self.ic4_ctrl.sink)
         self.ic4_thread.frame_ready.connect(self.on_frame_ready)
         self.ic4_thread.start()
 
     def on_disconnect(self):
-        """Stop the IC4 thread, teardown IC4, and reset UI."""
+        """Stop the IC4 thread, close the camera, and reset UI state."""
         if self.ic4_thread:
             self.ic4_thread.stop()
             self.ic4_thread = None
@@ -757,7 +726,7 @@ class CameraAppMainWindow(QMainWindow):
             self.ic4_ctrl.close()
             self.ic4_ctrl = None
 
-        # Reset UI
+        # Reset all UI elements
         self.connect_btn.setEnabled(True)
         self.disconnect_btn.setEnabled(False)
 
@@ -780,7 +749,7 @@ class CameraAppMainWindow(QMainWindow):
             return
         ae_on = state == Qt.Checked
         self.ic4_ctrl.set_auto_exposure(ae_on)
-        # Enable manual sliders only if AE is off
+        # Enable manual sliders only if AE = off
         enabled = not ae_on
         self.exposure_slider.setEnabled(enabled)
         self.gain_slider.setEnabled(enabled)
@@ -818,33 +787,32 @@ class CameraAppMainWindow(QMainWindow):
         self.wb_blue_slider.setEnabled(enabled)
 
     def on_wb_red_change(self, val):
-        """User dragged WB Red slider."""
+        """User dragged the White Balance Red slider."""
         if not self.ic4_ctrl:
             return
-        # Always disable auto WB when user picks a manual red
         self.ic4_ctrl.set_auto_white_balance(False)
-        curr_b = self.ic4_ctrl.get_current_white_balance()[1]
+        curr_r, curr_b = self.ic4_ctrl.get_current_white_balance()
         self.ic4_ctrl.set_white_balance(red=val, blue=curr_b)
         self.wb_red_label.setText(f"WB Red: {val}")
 
     def on_wb_blue_change(self, val):
-        """User dragged WB Blue slider."""
+        """User dragged the White Balance Blue slider."""
         if not self.ic4_ctrl:
             return
         self.ic4_ctrl.set_auto_white_balance(False)
-        curr_r = self.ic4_ctrl.get_current_white_balance()[0]
+        curr_r, curr_b = self.ic4_ctrl.get_current_white_balance()
         self.ic4_ctrl.set_white_balance(red=curr_r, blue=val)
         self.wb_blue_label.setText(f"WB Blue: {val}")
 
     def on_frame_ready(self, np_img):
         """
-        Receive a NumPy array (H×W×C), pass to OpenGL widget for rendering.
+        Receive a new NumPy frame (H×W×C), pass it to the OpenGL widget.
         """
         self.opengl_widget.update_frame(np_img)
 
     def closeEvent(self, event):
         """
-        When the window is closed, ensure we disconnect the camera cleanly.
+        Ensure we disconnect the camera cleanly when the window closes.
         """
         self.on_disconnect()
         event.accept()
