@@ -50,16 +50,16 @@ class QtCameraWidget(QWidget):
          # (Disabled: MainWindow now toggles the camera thread instead)
          pass
 
-    @pyqtSlot(QImage)
     def update_image(self, image: QImage):
         """
-        EXPLICIT SLOT for MainWindow to send us each new frame as a QImage.
+        Public slot for MainWindow (or anyone) to push a new QImage into this viewfinder.
         """
-        self._on_frame_ready(image, None)
+        pix = QPixmap.fromImage(image)
+        self._label.setPixmap(pix.scaled(self._label.size(), Qt.KeepAspectRatio))
 
     def clear_image(self):
         """
-        Reset the viewfinder to “Camera Off.”
+        Public helper: clear the pixmap and show “Camera Off” again.
         """
         self._label.clear()
         self._label.setText("Camera Off")
