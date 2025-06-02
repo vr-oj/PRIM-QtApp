@@ -962,6 +962,11 @@ class MainWindow(QMainWindow):
                     thread_instance.deleteLater()
 
         try:
+            self.device_combo.clear()
+        except Exception:
+            pass
+
+        try:
             ic4.Library.exit()
             log.info("DEBUG: IC4 library exited cleanly.")
         except Exception:
