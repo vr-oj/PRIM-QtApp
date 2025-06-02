@@ -11,7 +11,7 @@ class MinimalListener(ic4.QueueSinkListener):
         pass
 
     def sink_connected(self, sink, *args):
-        # Return True so the sink actually attaches
+        # Must return True so the sink actually attaches
         return True
 
 
@@ -50,18 +50,11 @@ def main():
     # 4) Force PixelFormat → Mono8
     try:
         pi = pm.find_enumeration(ic4.PropId.PIXEL_FORMAT)
-        if "Mono8" in pi.valid_value_strings:
-            pi.value_string = "Mono8"
-            print("Set PIXEL_FORMAT to Mono8")
-        else:
-            print(
-                "Mono8 not supported! Valid PixelFormat options:",
-                pi.valid_value_strings,
-            )
-            grabber.device_close()
-            return
+        # Directly attempt to set Mono8, without checking valid_value_strings
+        pi.value_string = "Mono8"
+        print("Set PIXEL_FORMAT to Mono8")
     except ic4.IC4Exception as e:
-        print("Could not set PIXEL_FORMAT:", e)
+        print("Could not set PIXEL_FORMAT to Mono8:", e)
         grabber.device_close()
         return
 
