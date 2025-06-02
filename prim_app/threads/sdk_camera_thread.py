@@ -179,6 +179,17 @@ class SDKCameraThread(QThread):
         except:
             pass
 
+
+    def frames_queued(self, sink: ic4.QueueSink):
+        try:
+            buf = sink.pop_output_buffer()  # old code: timeout=…, new API takes no timeout
+        except ic4.IC4Exception as e:
+            if e.code == ic4.ErrorCode.NoData:
+                return  # nothing to do—loop back and wait for the next callback
+            else:
+                self.error.emit(f"Grab error: {e}", str(e.code))
+                return
+
     def stop(self):
         """Signal the loop to end; then wait for thread to finish."""
         self._running = False
