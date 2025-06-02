@@ -367,9 +367,11 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            grab = ic4.Grabber()
-            grab.device_info = dev_info
+            # ─── Create Grabber by passing dev_info into the constructor ─────────────────
+            grab = ic4.Grabber(dev_info)
             grab.device_open()
+
+            # ─── Enumerate all supported video formats (pixel formats) ──────────────────
             pf_list = grab.format_video.enumerate()
             for pv in pf_list:
                 w = grab.format_video.get_value(ic4.PropId.IMAGE_WIDTH, pv)
@@ -377,9 +379,11 @@ class MainWindow(QMainWindow):
                 pixfmt = grab.format_video.get_value(ic4.PropId.PIXEL_FORMAT, pv)
                 display_str = f"{w}×{h} ({pv.name if hasattr(pv, 'name') else pixfmt})"
                 self.resolution_combo.addItem(display_str, (w, h, pixfmt))
+
             grab.device_close()
+
         except Exception as e:
-            log.error(f"Failed to get formats for {dev_info}: {e}")
+            log.error(f"Failed to get formats for {dev_info!r}: {e}")
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
