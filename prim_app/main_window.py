@@ -379,6 +379,7 @@ class MainWindow(QMainWindow):
 
             # 2) Find the "PixelFormat" enumeration node under device_property_map
             pf_node = grab.device_property_map.find_enumeration("PixelFormat")
+            print(">>> pf_node is:", pf_node)
             if pf_node is None:
                 raise RuntimeError(
                     "Could not find 'PixelFormat' enumeration on camera."
