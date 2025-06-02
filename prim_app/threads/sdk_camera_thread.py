@@ -1,154 +1,201 @@
-# File: threads/sdk_camera_thread.py
+# prim_app/threads/sdk_camera_thread.py
+
 import time
+import ctypes
 import imagingcontrol4 as ic4
 import numpy as np
-from PyQt5.QtCore import QThread, pyqtSignal, Qt
+from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 
 class SDKCameraThread(QThread):
     """
-    QThread that:
-      1. Opens the requested IC4 device.
-      2. Sets resolution and pixel format.
-      3. Calls Grabber.acquisition_start().
-      4. Loops in image_buffer_get_next() until stopped.
-      5. Emits `frame_ready(QImage, np.ndarray)` for each new frame.
-      6. Emits `grabber_ready()` once acquisition has started successfully.
-      7. Emits `error(str, str)` on any IC4 exception.
+    QThread that opens a chosen IC4 device, sets resolution (if requested),
+    establishes a QueueSink, then continuously pops frames and emits them.
+    Emits:
+      - grabber_ready(): once camera is open and streaming
+      - frame_ready(QImage, numpy.ndarray): each new frame
+      - error(str, str): on any error (message, error_code)
     """
 
-    # Emitted once the Grabber is fully opened and acquisition has begun
+    # Signal emitted as soon as the stream has started successfully
     grabber_ready = pyqtSignal()
 
-    # Emitted for each new frame: (QImage_for_display, raw_numpy_array)
+    # Signal emitted for each new frame: QImage (for display) and raw NumPy array (BGRA or GRAY)
     frame_ready = pyqtSignal(QImage, object)
 
-    # Emitted if any error occurs: (message, error_code)
+    # Signal for errors: (message, error_code)
     error = pyqtSignal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.grabber = None
         self._running = False
-        self.device_info_to_open = None   # will be set by MainWindow
-        self.resolution_to_use = None     # tuple (width, height, pixel_format_name)
+        self.grabber = None
+        self.device_info_to_open = None
+        self.resolution_to_use = None
+        self.queue_sink = None
 
-    def set_device_info(self, dev_info: ic4.DeviceInfo):
-        """
-        Store which DeviceInfo to open when the thread starts.
-        """
+    def set_device_info(self, dev_info):
+        """Store which DeviceInfo to open when the thread starts."""
         self.device_info_to_open = dev_info
 
     def set_resolution(self, resolution_tuple):
         """
         Store which resolution/pixel format to use.
-        resolution_tuple = (width:int, height:int, pixel_format_name:str)
+        `resolution_tuple` should be (width, height, pixel_format_name).
         """
         self.resolution_to_use = resolution_tuple
 
     def run(self):
         """
-        Called when thread.start() is invoked.
-        This will:
-          1. Open the camera.
-          2. Set pixel‐format, width, height.
-          3. Start acquisition.
-          4. Loop and grab frames via image_buffer_get_next().
+        Called when thread.start() is invoked. Steps:
+          1) Create Grabber and open chosen device.
+          2) Set pixel format & resolution if requested.
+          3) Create a silent QueueSink and call stream_setup().
+          4) Emit grabber_ready(), then loop popping buffers and emitting frame_ready().
         """
-        # 1) Sanity check: did MainWindow call set_device_info() and set_resolution()?
-        if not self.device_info_to_open or not self.resolution_to_use:
-            self.error.emit("Camera or resolution not configured", "CONFIG_ERR")
+        # 1) Create a Grabber and open the chosen device
+        try:
+            self.grabber = ic4.Grabber()
+            if self.device_info_to_open is None:
+                raise RuntimeError("No DeviceInfo specified")
+            self.grabber.device_open(self.device_info_to_open)
+        except Exception as e:
+            self.error.emit(f"Failed to open camera: {e}", str(getattr(e, "code", "")))
             return
 
-        try:
-            # Create and open the Grabber
-            grab = ic4.Grabber()
-            grab.device_open(self.device_info_to_open)
+        # 2) If the user requested a particular (w, h, pixelFormatName), set it now
+        if self.resolution_to_use is not None:
+            try:
+                w, h, pf_name = self.resolution_to_use
+                prop_map = self.grabber.device_property_map
 
-            # 2) Configure pixel format & ROI (Width/Height) before starting acquisition.
-            #    resolution_to_use = (w, h, pf_name)
-            w, h, pf_name = self.resolution_to_use
+                # 2a) Set PixelFormat to the chosen name
+                pf_node = prop_map.find_enumeration("PixelFormat")
+                if pf_node and pf_name in [e.name for e in pf_node.entries]:
+                    pf_node.value = pf_name
 
-            # Find and set PixelFormat enumeration node
-            pf_node = grab.device_property_map.find_enumeration("PixelFormat")
-            if pf_node:
-                pf_node.value = pf_name
+                # 2b) Now set Width/Height
+                w_node = prop_map.find_integer("Width")
+                h_node = prop_map.find_integer("Height")
+                if w_node:
+                    w_node.value = w
+                if h_node:
+                    h_node.value = h
 
-            # Set the Width and Height integer nodes
-            w_prop = grab.device_property_map.find_integer("Width")
-            h_prop = grab.device_property_map.find_integer("Height")
-            if w_prop and h_prop:
-                w_prop.value = w
-                h_prop.value = h
-
-            # 3) Start acquisition
-            grab.acquisition_start()
-
-            # Keep a reference to the open grabber so main thread can hand it to the control panel
-            self.grabber = grab
-
-            # Notify MainWindow that grabber is open and streaming is active
-            self.grabber_ready.emit()
-
-            # 4) Enter grab‐loop
-            self._running = True
-            while self._running:
+                # 2c) (Optional) force continuous mode
+                acq_node = prop_map.find_enumeration("AcquisitionMode")
+                if acq_node and "Continuous" in [e.name for e in acq_node.entries]:
+                    acq_node.value = "Continuous"
+            except Exception as e:
+                # If something goes wrong here, bail out
+                self.error.emit(f"Failed to set resolution: {e}", str(getattr(e, "code", "")))
                 try:
-                    # Pull the next frame (blocking up to 1000 ms)
-                    frame = grab.image_buffer_get_next(timeout=1000)
-                except ic4.IC4Exception as e:
-                    # Possibly timed out or device lost
-                    self.error.emit(f"Grab error: {e}", str(e.code))
-                    break
-
-                # Retrieve raw pointer & metadata
-                raw_ptr = frame.get_buffer()   # pointer to raw BGRA bytes
-                width = frame.width
-                height = frame.height
-                stride = frame.stride         # bytes per row
-
-                # Build a numpy array view on that pointer
-                buf = np.frombuffer(raw_ptr, dtype=np.uint8, count=height * stride)
-                buf = buf.reshape((height, stride))
-                buf = buf[:, : (width * 4)]   # drop any padding
-                arr = buf.reshape((height, width, 4))  # shape = (h, w, BGRA)
-
-                # Convert BGRA → QImage.  We use Format_BGR32 (alias for BGRA8888) and swap to RGB so correct colors appear.
-                # Note: If your PyQt5 version supports QImage.Format.Format_BGRA8888, use that (as below); if not, use Format.Format_RGB32 but reorder bytes.
-                try:
-                    qt_image = QImage(
-                        arr.data, width, height, stride, QImage.Format.Format_BGRA8888
-                    ).rgbSwapped()
+                    self.grabber.device_close()
                 except:
-                    # Fallback if BGRA8888 is not available
-                    qt_image = QImage(
-                        arr.data, width, height, stride, QImage.Format.Format_RGB32
-                    )
+                    pass
+                return
 
-                # 5) Emit this frame out
-                self.frame_ready.emit(qt_image.copy(), arr.copy())
+        # 3) Create a silent QueueSink → pass None as listener (we’ll poll manually)
+        try:
+            # The “formats” list must match one of the camera’s available pixel formats.
+            # If you want grayscale (Mono8), change to PixelFormat.Mono8. Here we pick BGRA8 first.
+            # (Mono8 cameras often also can output “BGRa8” or similar; use whichever works for you.)
+            desired_formats = [ic4.PixelFormat.BGRa8, ic4.PixelFormat.Mono8]
+            self.queue_sink = ic4.QueueSink(
+                None,                         # no callback/listener
+                formats=desired_formats,      # ask IC4 to hand us either BGRA8 or Mono8
+                max_output_buffers=2
+            )
 
-                # Throttle a tiny bit (optional)
-                time.sleep(0.005)
-
-            # 6) Clean up when loop ends or stop() called
-            try:
-                grab.acquisition_stop()
-            except Exception:
-                pass
-            try:
-                grab.device_close()
-            except Exception:
-                pass
+            # 3b) Establish the data stream → this also starts acquisition by default
+            self.grabber.stream_setup(self.queue_sink)
 
         except ic4.IC4Exception as e:
-            # Any failure to open, configure, or start acquisition
-            self.error.emit(f"Failed to open camera: {e}", str(e.code))
+            self.error.emit(f"Failed to set up streaming: {e}", str(e.code))
+            try:
+                self.grabber.device_close()
+            except:
+                pass
+            return
+        except Exception as e:
+            self.error.emit(f"Unexpected error in stream_setup: {e}", "")
+            try:
+                self.grabber.device_close()
+            except:
+                pass
             return
 
+        # 4) We’re now streaming. Emit grabber_ready so MainWindow can enable sliders, etc.
+        self.grabber_ready.emit()
+
+        # 5) Enter main grab loop
+        self._running = True
+        while self._running:
+            try:
+                # pop_output_buffer() will block until a buffer is available
+                buf = self.queue_sink.pop_output_buffer()
+            except ic4.IC4Exception as e:
+                # NoData or device lost → “NoData” code is 9. Other codes may mean disconnect.
+                self.error.emit(f"Grab error: {e}", str(e.code))
+                break
+            except Exception as e:
+                self.error.emit(f"Unexpected pop error: {e}", "")
+                break
+
+            # The returned buf is an ImageBuffer. We can query:
+            #   buf.width, buf.height, buf.stride, buf.get_buffer()
+            try:
+                width = buf.width
+                height = buf.height
+                stride = buf.stride
+
+                # 1D view of all bytes:
+                raw_ptr = buf.get_buffer()
+                arr = np.frombuffer(raw_ptr, dtype=np.uint8, count=height * stride)
+                arr = arr.reshape((height, stride))
+                arr = arr[:, : (width * 4)]      # if BGRA, 4 bytes per pixel
+                arr = arr.reshape((height, width, 4))
+
+                # Convert to QImage (BGRA8888).  If your camera is mono, you could do a 1‐channel
+                # conversion instead (e.g. use QImage.Format_Grayscale8).
+                image = QImage(
+                    arr.data,
+                    width,
+                    height,
+                    stride,
+                    QImage.Format.Format_BGRA8888
+                )
+
+                # Emit a copy (so IC4 buffer can get released)
+                self.frame_ready.emit(image.copy(), arr.copy())
+
+            except Exception as e:
+                # If something fails converting → still release and continue
+                self.error.emit(f"Frame‐processing error: {e}", "")
+
+            # Return the buffer to the sink’s free queue:
+            try:
+                buf.release()
+            except:
+                pass
+
+            # Small throttle so the loop isn’t 100% CPU locked
+            time.sleep(0.005)
+
+        # 6) Clean up when _running becomes False
+        try:
+            if self.queue_sink:
+                self.grabber.stream_stop()
+        except:
+            pass
+
+        try:
+            self.grabber.device_close()
+        except:
+            pass
+
     def stop(self):
-        """
-        Signal the grab loop to end cleanly.  Wait for the thread to finish.
-        """
+        """Signal the thread to end the grab loop cleanly."""
         self._running = False
+        # wait for run() loop to exit
         self.wait()

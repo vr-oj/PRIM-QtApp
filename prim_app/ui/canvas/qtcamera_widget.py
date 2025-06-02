@@ -11,32 +11,55 @@ class QtCameraWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setLayout(QVBoxLayout())
 
         # Use a single QVBoxLayout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # The QLabel where frames will be painted
+        # Inside QtCameraWidget.__init__ or setup:
         self._label = QLabel("Camera Off", self)
         self._label.setAlignment(Qt.AlignCenter)
         # Fix the label’s “logical” size (you can adjust if you want a different preview size).
         self._label.setFixedSize(640, 480)
-
         layout.addWidget(self._label)
+
+    @pyqtSlot(QImage, object)
+    def _on_frame_ready(self, image: QImage, raw):
+         """
+         Receives QImage + numpy array from SDKCameraThread.
+         Converts QImage → QPixmap and displays it.
+         """
+         pix = QPixmap.fromImage(image)
+         self._label.setPixmap(pix.scaled(
+            self._label.size(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+         ))
+    @pyqtSlot(str, str)
+    def _on_error(self, msg: str, code: str):
+         """
+         If anything goes wrong, show the error text in the QLabel.
+         """
+         self._label.setText(f"❗ {msg}")
+
+    def _toggle_camera(self):
+         """
+         Start or stop the camera thread on button click.
+         """
+         # (Disabled: MainWindow now toggles the camera thread instead)
+         pass
 
     @pyqtSlot(QImage)
     def update_image(self, image: QImage):
         """
-        Public slot: receives a QImage from SDKCameraThread.  Convert → QPixmap and display.
+        EXPLICIT SLOT for MainWindow to send us each new frame as a QImage.
         """
-        pix = QPixmap.fromImage(image)
-        # Scale to fit the QLabel, preserving aspect ratio
-        scaled = pix.scaled(self._label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self._label.setPixmap(scaled)
+        self._on_frame_ready(image, None)
 
     def clear_image(self):
         """
-        Public method: clear the QLabel back to “Camera Off”.
+        Reset the viewfinder to “Camera Off.”
         """
-        self._label.setPixmap(QPixmap())
-        self._label.setText("⏺ Camera Off")
+        self._label.clear()
+        self._label.setText("Camera Off")
