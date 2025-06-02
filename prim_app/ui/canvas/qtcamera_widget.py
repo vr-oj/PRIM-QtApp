@@ -27,14 +27,11 @@ class QtCameraWidget(QWidget):
         self._label.setFixedSize(640, 480)  # adjust if you want a different size
         self.layout().addWidget(self._label)
 
-        # 3) Camera thread (not started yet)
+        # 2) Camera thread (not started yet)
         self._cam_thread = SDKCameraThread()
         # Connect signals from the thread to our slots
         self._cam_thread.frame_ready.connect(self._on_frame_ready)
         self._cam_thread.error.connect(self._on_error)
-
-        # 4) Button toggles camera on/off
-        self._btn.clicked.connect(self._toggle_camera)
 
     @pyqtSlot(QImage, object)
     def _on_frame_ready(self, image: QImage, raw):
