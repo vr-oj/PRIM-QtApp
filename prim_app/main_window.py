@@ -387,35 +387,42 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_start_stop_camera(self):
         if self.camera_thread is None or not self.camera_thread.isRunning():
-            # … (setup) …
+            # ─── 1) Read the user’s device/resolution choice ───────────────────────
+            dev_info = self.device_combo.currentData()  # ← must be here
+            w, h, pf_name = self.resolution_combo.currentData()  # ← must be here
+
+            # ─── 2) Create and configure the SDKCameraThread ─────────────────────
             self.camera_thread = SDKCameraThread(parent=self)
             self.camera_thread.set_device_info(dev_info)
             self.camera_thread.set_resolution((w, h, pf_name))
 
-            # 1) When the grabber is open & streaming, enable sliders
+            # ─── 3) Connect grabber_ready → enable your control sliders ───────────
             self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
 
-            # 2) Each time a new frame is ready, extract the QImage and send it to update_image():
+            # ─── 4) Connect frame_ready → paint each QImage on QtCameraWidget ──
             self.camera_thread.frame_ready.connect(
                 lambda qimg, raw: self.camera_widget.update_image(qimg)
             )
-
-            # 2b) Also update the “Frame #” and “Resolution” labels in the Info tab:
+            # ─── 4b) Also bump Frame # and Resolution labels in the Info tab ───
             self.camera_thread.frame_ready.connect(self._update_camera_info)
 
-            # 3) Any camera error → pop up a dialog
+            # ─── 5) Connect any error → pop up dialog & clear viewfinder ────────
             self.camera_thread.error.connect(self._on_camera_error)
 
-            # … UI “Connecting…” … start thread …
+            # ─── 6) Update UI to show “Connecting…” ─────────────────────────────┐
+            self.lbl_cam_connection.setText("Connecting…")
+            self.lbl_cam_frame.setText("0")
+            self.lbl_cam_resolution.setText("N/A")
+            # ─── 7) Start the camera thread … and disable camera‐control sliders ┘
             self.camera_thread.start()
             self.btn_start_camera.setText("Stop Camera")
             self.camera_control_panel.setEnabled(False)
+
         else:
-            # Stop camera
+            # ─── 8) Stop camera & restore “no camera” viewfinder ────────────────
             self.camera_thread.stop()
             self.camera_thread = None
 
-            # Reset UI
             self.btn_start_camera.setText("Start Camera")
             self.camera_control_panel.setEnabled(False)
             self.lbl_cam_connection.setText("Disconnected")
