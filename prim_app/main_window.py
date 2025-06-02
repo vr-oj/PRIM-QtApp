@@ -694,15 +694,14 @@ class MainWindow(QMainWindow):
                 self._serial_thread = None
                 self._update_recording_actions_enable_state()
 
-        @pyqtSlot(str)
+    @pyqtSlot(str)
     def _handle_serial_status_change(self, status: str):
         log.info(f"Serial status: {status}")
         self.statusBar().showMessage(f"PRIM Device: {status}", 4000)
 
         # Determine if the status string means “connected”
         connected = (
-            "connected" in status.lower()
-            or "opened serial port" in status.lower()
+            "connected" in status.lower() or "opened serial port" in status.lower()
         )
         # Update TopControlPanel’s connection label
         self.top_ctrl.update_connection_status(status, connected)
@@ -812,7 +811,7 @@ class MainWindow(QMainWindow):
         can_start = serial_ready and not self._is_recording
         self.start_recording_action.setEnabled(bool(can_start))
         self.stop_recording_action.setEnabled(bool(self._is_recording))
-        
+
     # ─── Window Close Cleanup ──────────────────────────────────────────────────
     def closeEvent(self, event):
         log.info("MainWindow closeEvent triggered.")
