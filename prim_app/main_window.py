@@ -220,6 +220,7 @@ class MainWindow(QMainWindow):
         # --- Device selection combo and resolution combo ---
         self.device_combo = QComboBox()
         self.device_combo.addItem("Select Device...", None)
+        # ← this line now finds a real slot, because it’s defined below
         self.device_combo.currentIndexChanged.connect(self._on_device_selected)
         info_layout.addRow("Device:", self.device_combo)
 
@@ -355,54 +356,57 @@ class MainWindow(QMainWindow):
             display_str = f"{dev.model_name}  (S/N: {dev.serial})"
             self.device_combo.addItem(display_str, dev)
 
+    @pyqtSlot(int)
+    def _on_device_selected(self, index):
+        """
+        When the user selects a camera device, enumerate its supported resolutions
+        by opening the camera, setting PixelFormat, and reading Width/Height.
+        """
+        dev_info = self.device_combo.itemData(index)
+        self.resolution_combo.clear()
+        self.resolution_combo.addItem("Select Resolution…", None)
 
-@pyqtSlot(int)
-def _on_device_selected(self, index):
-    dev_info = self.device_combo.itemData(index)
-    self.resolution_combo.clear()
-    self.resolution_combo.addItem("Select Resolution…", None)
+        if not dev_info:
+            return
 
-    if not dev_info:
-        return
+        try:
+            grab = ic4.Grabber()
 
-    try:
-        grab = ic4.Grabber()
+            # OPEN the camera with the chosen device_info
+            grab.device_open(dev_info)
 
-        # OPEN the camera with the chosen device_info
-        grab.device_open(dev_info)
+            # (Optional) force “Continuous” live‐stream mode
+            acq_node = grab.device_property_map.find_enumeration("AcquisitionMode")
+            if acq_node:
+                names = [e.name for e in acq_node.entries]
+                acq_node.value = "Continuous" if "Continuous" in names else names[0]
 
-        # (Optional) force “Continuous” live‐stream mode
-        acq_node = grab.device_property_map.find_enumeration("AcquisitionMode")
-        if acq_node:
-            names = [e.name for e in acq_node.entries]
-            acq_node.value = "Continuous" if "Continuous" in names else names[0]
+            # Find PixelFormat enumeration
+            pf_node = grab.device_property_map.find_enumeration("PixelFormat")
+            if pf_node:
+                for entry in pf_node.entries:
+                    pf_name = entry.name
+                    try:
+                        pf_node.value = pf_name
 
-        # Find PixelFormat enumeration
-        pf_node = grab.device_property_map.find_enumeration("PixelFormat")
-        if pf_node:
-            for entry in pf_node.entries:
-                pf_name = entry.name
-                try:
-                    pf_node.value = pf_name
+                        # Now read the “Width” and “Height” nodes (not “ImageWidth”/“ImageHeight”)
+                        w_prop = grab.device_property_map.find_integer("Width")
+                        h_prop = grab.device_property_map.find_integer("Height")
 
-                    # Now read the “Width” and “Height” nodes (not “ImageWidth”/“ImageHeight”)
-                    w_prop = grab.device_property_map.find_integer("Width")
-                    h_prop = grab.device_property_map.find_integer("Height")
+                        if w_prop and h_prop:
+                            w = w_prop.value
+                            h = h_prop.value
+                            display_str = f"{w}×{h} ({pf_name})"
+                            # Store a tuple (width, height, pixelFormatName) as the combo’s userData
+                            self.resolution_combo.addItem(display_str, (w, h, pf_name))
+                    except Exception:
+                        # skip any format that fails silently
+                        pass
 
-                    if w_prop and h_prop:
-                        w = w_prop.value
-                        h = h_prop.value
-                        display_str = f"{w}×{h} ({pf_name})"
-                        # Store a tuple (width, height, pixelFormatName) as the combo’s userData
-                        self.resolution_combo.addItem(display_str, (w, h, pf_name))
-                except Exception:
-                    # skip any format that fails silently
-                    pass
+            grab.device_close()
 
-        grab.device_close()
-
-    except Exception as e:
-        log.error(f"Failed to get formats for {dev_info}: {e}")
+        except Exception as e:
+            log.error(f"Failed to get formats for {dev_info}: {e}")
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
