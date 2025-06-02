@@ -84,15 +84,14 @@ class MainWindow(QMainWindow):
 
         # Camera‐related
         self.device_combo = None
-        self._probe_grabber = None
         self.resolution_combo = None
         self.btn_start_camera = None
         self.camera_widget = None
         self.camera_control_panel = None
         self.camera_tabs = None
 
-        # Camera thread handle (we create a new one each time “Start Camera” is clicked)
-        self.camera_thread = None
+        # This is the actual thread that will do grabbing
+        self.camera_thread = Non
 
         # Plot controls
         self.plot_control_panel = None
@@ -204,15 +203,15 @@ class MainWindow(QMainWindow):
         info_layout.setContentsMargins(6, 6, 6, 6)
         info_layout.setSpacing(4)
 
-        # Connection status (read‐only)
+        # Connection status (read-only)
         self.lbl_cam_connection = QLabel("Disconnected")
         info_layout.addRow("Camera Status:", self.lbl_cam_connection)
 
-        # Frame count (read‐only)
+        # Frame count (read-only)
         self.lbl_cam_frame = QLabel("0")
         info_layout.addRow("Frame #:", self.lbl_cam_frame)
 
-        # Resolution (read‐only; updates after first frame)
+        # Resolution (read-only; updates after first frame)
         self.lbl_cam_resolution = QLabel("N/A")
         info_layout.addRow("Resolution:", self.lbl_cam_resolution)
 
@@ -240,7 +239,7 @@ class MainWindow(QMainWindow):
         controls_layout.setSpacing(6)
 
         # CameraControlPanel: gain, brightness, auto-exposure sliders
-        # ─── Remove the old 'camera_thread=self.camera_widget._cam_thread' argument ────
+        # (we no longer pass camera_thread here; it will be set when the grabber opens)
         self.camera_control_panel = CameraControlPanel(parent=self)
         self.camera_control_panel.setEnabled(False)
         controls_layout.addWidget(self.camera_control_panel)
@@ -281,10 +280,10 @@ class MainWindow(QMainWindow):
 
         # ─── Wire Up Signals ─────────────────────────────────────────────────────
 
-        # CameraThread → Info Tab updates (we will connect these later, after we create the thread)
-        # Hence, do NOT connect to self.camera_widget._cam_thread here, since it no longer exists.
+        # We do NOT connect camera_thread signals here.  Those will be connected
+        # in _on_start_stop_camera() when we actually create/start the SDKCameraThread.
 
-        # PlotControlPanel → PressurePlotWidget (only if methods exist)
+        # PlotControlPanel → PressurePlotWidget
         if hasattr(self.pressure_plot_widget, "set_auto_scale_x"):
             self.plot_control_panel.autoscale_x_changed.connect(
                 self.pressure_plot_widget.set_auto_scale_x
@@ -322,31 +321,14 @@ class MainWindow(QMainWindow):
 
     # ─── Camera Device & Resolution Enumeration ─────────────────────────────────
     def _populate_device_list(self):
-        """
-        Enumerate all connected IC4 cameras using DeviceEnum.devices(),
-        then fill self.device_combo.
-        """
         try:
-            # → This returns a Python list of ic4.DeviceInfo objects
             device_list = ic4.DeviceEnum.devices()
         except Exception as e:
             log.error(f"Failed to enumerate IC4 devices: {e}")
             device_list = []
 
-        # DEBUG: log exactly what we got
-        if not device_list:
-            log.info("DEBUG: DeviceEnum.devices() returned ZERO devices.")
-        else:
-            for idx, dev in enumerate(device_list):
-                log.info(
-                    f"DEBUG: Device {idx} = {dev.model_name!r} (S/N {dev.serial!r})"
-                )
-
-        # Clear the combo and add a placeholder
         self.device_combo.clear()
-        self.device_combo.addItem("Select Device...", None)
-
-        # Populate with DeviceInfo objects from DeviceEnum
+        self.device_combo.addItem("Select Device…", None)
         for dev in device_list:
             display_str = f"{dev.model_name}  (S/N: {dev.serial})"
             self.device_combo.addItem(display_str, dev)
@@ -356,167 +338,129 @@ class MainWindow(QMainWindow):
         dev_info = self.device_combo.itemData(index)
         self.resolution_combo.clear()
         self.resolution_combo.addItem("Select Resolution…", None)
-
-        if not dev_info:
+        if dev_info is None:
             return
 
+        # We open+close the camera here _only_ to enumerate available (Width×Height, PixelFormat) combos:
         try:
             grab = ic4.Grabber()
-
-            # OPEN the camera with the chosen device_info
             grab.device_open(dev_info)
 
-            # (Optional) force “Continuous” live‐stream mode
+            # Force continuous mode if available:
             acq_node = grab.device_property_map.find_enumeration("AcquisitionMode")
             if acq_node:
                 names = [e.name for e in acq_node.entries]
                 acq_node.value = "Continuous" if "Continuous" in names else names[0]
 
-            # Find PixelFormat enumeration
+            # Loop through PixelFormat entries → set ↑ read Width/Height:
             pf_node = grab.device_property_map.find_enumeration("PixelFormat")
             if pf_node:
                 for entry in pf_node.entries:
-                    pf_name = entry.name
+                    name = entry.name
                     try:
-                        pf_node.value = pf_name
-
-                        # Now read the “Width” and “Height” nodes (not “ImageWidth”/“ImageHeight”)
+                        pf_node.value = name
                         w_prop = grab.device_property_map.find_integer("Width")
                         h_prop = grab.device_property_map.find_integer("Height")
-
                         if w_prop and h_prop:
                             w = w_prop.value
                             h = h_prop.value
-                            display_str = f"{w}×{h} ({pf_name})"
-                            # Store a tuple (width, height, pixelFormatName) as the combo’s userData
-                            self.resolution_combo.addItem(display_str, (w, h, pf_name))
+                            text = f"{w}×{h} ({name})"
+                            self.resolution_combo.addItem(text, (w, h, name))
                     except Exception:
-                        # skip any format that fails silently
                         pass
-
             grab.device_close()
-
         except Exception as e:
-            log.error(f"Failed to get formats for {dev_info}: {e}")
+            log.error(f"Failed to enumerate resolutions: {e}")
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
-        """
-        Toggle the SDKCameraThread: start grabbing or stop.
-        """
-        # CASE A: No thread running → user clicked “Start Camera”
+        # CASE A: no thread running → start a new SDKCameraThread
         if self.camera_thread is None or not self.camera_thread.isRunning():
-            # Verify selections
-            if (
-                self.device_combo.currentData() is None
-                or self.resolution_combo.currentData() is None
-            ):
+            # ensure a valid device & resolution are selected:
+            if (self.device_combo.currentData() is None
+                or self.resolution_combo.currentData() is None):
                 dlg = QMessageBox(self)
                 dlg.setIcon(QMessageBox.Warning)
                 dlg.setWindowTitle("Camera Not Configured")
-                dlg.setText(
-                    "Please select a valid device and resolution before starting."
-                )
+                dlg.setText("Please select a valid device & resolution first.")
                 dlg.exec_()
                 return
 
             dev_info = self.device_combo.currentData()
-            res_data = self.resolution_combo.currentData()  # (width, height, pf_name)
+            res_data = self.resolution_combo.currentData()   # (w, h, pixelFormatName)
 
-            # Create a brand-new SDKCameraThread
+            # 1) Create a brand‐new SDKCameraThread
             self.camera_thread = SDKCameraThread(parent=self)
-
-            # Tell it which device/resolution to use
             self.camera_thread.set_device_info(dev_info)
             self.camera_thread.set_resolution(res_data)
 
-            # Connect its signals:
-            # 1) When the grabber is ready (opened), call our helper:
+            # 2) Hook up signals:
             self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
-
-            # 2) When each frame arrives:
-            #    a) forward to QtCameraWidget.update_image(QImage)
-            self.camera_thread.frame_ready.connect(
-                lambda img, raw: self.camera_widget.update_image(img)
-            )
-            #    b) also update the Info tab (frame count, resolution)
-            self.camera_thread.frame_ready.connect(self._update_camera_info)
-
-            # 3) Propagate any camera errors back to our existing slot:
+            self.camera_thread.frame_ready.connect(self.camera_widget.update_image)
             self.camera_thread.error.connect(self._on_camera_error)
 
-            # Update UI pre‐flight:
+            # 3) Reset UI in the “Info” tab:
             self.lbl_cam_frame.setText("0")
             self.lbl_cam_resolution.setText("N/A")
             self.lbl_cam_connection.setText("Connecting…")
 
-            # Start the thread:
+            # 4) Start the thread:
             self.camera_thread.start()
 
-            # Change button text:
+            # 5) Update button text:
             self.btn_start_camera.setText("Stop Camera")
-            # CameraControlPanel will be enabled in _on_grabber_ready()
             self.camera_control_panel.setEnabled(False)
 
-        # CASE B: thread is running → user clicked “Stop Camera”
+        # CASE B: thread _is_ running → stop it
         else:
             try:
                 self.camera_thread.stop()
             except Exception as e:
                 log.error(f"Error stopping camera thread: {e}")
-
-            # Reset UI to “off” state
             self.btn_start_camera.setText("Start Camera")
             self.camera_control_panel.setEnabled(False)
             self.lbl_cam_connection.setText("Disconnected")
             self.lbl_cam_frame.setText("0")
             self.lbl_cam_resolution.setText("N/A")
             self.camera_widget.clear_image()
-
-            # Drop our thread reference
             self.camera_thread = None
 
     @pyqtSlot()
     def _on_grabber_ready(self):
         """
-        Called by SDKCameraThread.grabber_ready().
-        At this point, `self.camera_thread.grabber` is an open ic4.Grabber.
-        We hand it off to CameraControlPanel so it can build its sliders.
+        Once the SDKCameraThread has successfully opened the device & programmed
+        resolution, it emits grabber_ready().  At that point, `self.camera_thread.grabber`
+        is a valid, open ic4.Grabber.  We can hand it to our camera_control_panel.
         """
-        if self.camera_thread is None:
-            return
-
         grabber = self.camera_thread.grabber
         if grabber is None or not grabber.is_device_open:
-            log.error("MainWindow: grabber_ready() arrived, but grabber is not open.")
+            log.error("grabber_ready(): grabber is not open!")
             return
 
-        # Provide the open grabber to our control panel:
+        # Let the camera_control_panel build sliders now (gain, exposure, etc.):
         self.camera_control_panel.grabber = grabber
-        # Build dynamic controls now that grabber is ready:
         self.camera_control_panel._on_grabber_ready()
-        # Enable the controls tab
-        self.camera_control_panel.setEnabled(True)
 
-        # Update the “Connected” label in the Info tab:
+        # Finally update the “Connected” label:
         self.lbl_cam_connection.setText("Connected")
 
     @pyqtSlot(QImage, object)
     def _update_camera_info(self, image: QImage, raw):
         """
-        Update the 'Info' tab with frame count and resolution.
-        (This is still useful once streaming begins.)
+        (OPTIONAL) If you still want to update “Frame #” / “Resolution” each time
+        a new frame arrives, hook this up:
+          self.camera_thread.frame_ready.connect(self._update_camera_info)
         """
         try:
-            current_count = int(self.lbl_cam_frame.text())
+            count = int(self.lbl_cam_frame.text())
         except ValueError:
-            current_count = 0
-        current_count += 1
-        self.lbl_cam_frame.setText(str(current_count))
+            count = 0
+        count += 1
+        self.lbl_cam_frame.setText(str(count))
 
-        width = image.width()
-        height = image.height()
-        self.lbl_cam_resolution.setText(f"{width}×{height}")
+        w = image.width()
+        h = image.height()
+        self.lbl_cam_resolution.setText(f"{w}×{h}")
 
         if self.lbl_cam_connection.text() != "Connected":
             self.lbl_cam_connection.setText("Connected")
@@ -524,17 +468,17 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str, str)
     def _on_camera_error(self, msg: str, code: str):
         """
-        Handle camera errors: show a dialog and disable camera panels.
+        If something goes wrong inside the thread, we pop up a dialog & clean up.
         """
         log.error(f"Camera error occurred ({code}): {msg}")
         QMessageBox.critical(self, "Camera Error", msg)
 
-        # If thread is still running, stop it
+        # Stop thread if it’s still running:
         if self.camera_thread and self.camera_thread.isRunning():
             try:
                 self.camera_thread.stop()
-            except Exception as stop_e:
-                log.error(f"Error stopping camera thread after error: {stop_e}")
+            except Exception:
+                pass
 
         self.camera_control_panel.setEnabled(False)
         self.lbl_cam_connection.setText("Error")
@@ -542,6 +486,7 @@ class MainWindow(QMainWindow):
         self.lbl_cam_resolution.setText("N/A")
         self.camera_widget.clear_image()
         self.btn_start_camera.setText("Start Camera")
+        self.camera_thread = None
 
     def _build_menus(self):
         mb = self.menuBar()
