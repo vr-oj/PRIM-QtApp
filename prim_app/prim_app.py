@@ -1,188 +1,194 @@
-# File: prim_app/threads/sdk_camera_thread.py
+# File: prim_app/prim_app.py
 
+import sys
+import os
+import re
+import traceback
 import logging
-import imagingcontrol4 as ic4
-from PyQt5.QtCore import QThread, pyqtSignal
-from PyQt5.QtGui import QImage
+import imagingcontrol4 as ic4  # ← We keep this import, but we no longer call init()/exit() here.
 
+from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
+from PyQt5.QtCore import Qt, QCoreApplication
+from PyQt5.QtGui import QIcon, QSurfaceFormat
+from utils.config import APP_NAME, APP_VERSION as CONFIG_APP_VERSION
+
+# (You can keep or remove matplotlib logging tweaks if you don’t need them)
+import matplotlib
+
+logging.getLogger("matplotlib").setLevel(logging.INFO)
+logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
+logging.getLogger("fontTools").setLevel(logging.WARNING)
+
+
+# ------------------------------
+# Configure Python-level logging
+# ------------------------------
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s [%(name)s:%(lineno)d] - %(message)s",
+)
 log = logging.getLogger(__name__)
 
+# A separate module-level logger for setup steps, if desired:
+module_log = logging.getLogger("prim_app.setup")
+if not module_log.handlers:
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s [%(name)s:%(lineno)d] - %(message)s"
+    )
+    handler.setFormatter(formatter)
+    module_log.addHandler(handler)
+    module_log.setLevel(logging.INFO)
 
-class SDKCameraThread(QThread):
-    # emitted when grabber is open & ready (so UI can build controls, if needed)
-    grabber_ready = pyqtSignal()
 
-    # emitted for each new frame: (QImage, raw_buffer_object)
-    frame_ready = pyqtSignal(QImage, object)
+# === Optional: load_app_setting / save_app_setting stubs if missing ===
+try:
+    from utils.app_settings import load_app_setting, save_app_setting
 
-    # emitted on error: (message, code)
-    error = pyqtSignal(str, str)
+    APP_SETTINGS_AVAILABLE = True
+except ImportError:
+    APP_SETTINGS_AVAILABLE = False
 
-    def __init__(self, parent=None, desired_fps=10):
-        super().__init__(parent)
-        self.grabber = None
-        self._stop_requested = False
-        # We will try to set AcquisitionFrameRate = desired_fps
-        self._desired_fps = desired_fps
+    def load_app_setting(key, default=None):
+        return default
 
-    def run(self):
-        try:
-            # ─── 1) Initialize the IC4 library (each thread must do this exactly once) ──
-            ic4.Library.init(
-                api_log_level=ic4.LogLevel.INFO,
-                log_targets=ic4.LogTarget.STDERR,
-            )
-            log.info("SDKCameraThread: Library.init() succeeded.")
+    def save_app_setting(key, value):
+        pass
 
-            # ─── 2) Enumerate all connected cameras, pick the first one ─────────────────
-            device_list = ic4.DeviceEnum.devices()
-            if not device_list:
-                raise RuntimeError("No IC4 camera devices found on this machine.")
-            dev_info = device_list[0]
-            log.info(
-                f"SDKCameraThread: selected device = {dev_info.model_name!r}, S/N={dev_info.serial!r}"
-            )
+    module_log.warning(
+        "utils.app_settings not found. Persistent settings will not work."
+    )
 
-            # ─── 3) Open that device on a new Grabber ───────────────────────────────────
-            self.grabber = ic4.Grabber()
-            self.grabber.device_open(dev_info)
 
-            # ─── 4) Force “Continuous” mode if possible ─────────────────────────────────
-            acq_mode_node = self.grabber.device_property_map.find_enumeration(
-                "AcquisitionMode"
-            )
-            if acq_mode_node:
-                all_modes = [entry.name for entry in acq_mode_node.entries]
-                if "Continuous" in all_modes:
-                    acq_mode_node.value = "Continuous"
+def load_processed_qss(path):
+    """
+    If you use “@variable: #RRGGBB;” in your QSS, this helper expands them.
+    Returns the final QSS string or "" on error.
+    """
+    var_re = re.compile(r"@([A-Za-z0-9_]+):\s*(#[0-9A-Fa-f]{3,8});")
+    vars_map, lines = {}, []
+    try:
+        with open(path, "r") as f:
+            for line in f:
+                m = var_re.match(line)
+                if m:
+                    vars_map[m.group(1)] = m.group(2)
                 else:
-                    acq_mode_node.value = all_modes[0]
+                    for name, val in vars_map.items():
+                        line = line.replace(f"@{name}", val)
+                    lines.append(line)
+        return "".join(lines)
+    except Exception as e:
+        log.error(f"Error loading/processing QSS file {path}: {e}")
+        return ""
 
-            # ─── 5) AUTOMATICALLY FIND THE “LARGEST” PIXELFORMAT/W×H ───────────────────
-            # We iterate every entry in PixelFormat enumeration, set it, then read W&H,
-            # and keep track of max(width*height).
 
-            best_pf = None
-            best_width = 0
-            best_height = 0
-            pf_node = self.grabber.device_property_map.find_enumeration("PixelFormat")
-            if pf_node:
-                for entry in pf_node.entries:
-                    pf_name = entry.name
-                    try:
-                        # try setting that pixel format
-                        pf_node.value = pf_name
-                        w_node = self.grabber.device_property_map.find_integer("Width")
-                        h_node = self.grabber.device_property_map.find_integer("Height")
-                        if w_node and h_node:
-                            w = int(w_node.value)
-                            h = int(h_node.value)
-                            # track largest area
-                            if (w * h) > (best_width * best_height):
-                                best_width = w
-                                best_height = h
-                                best_pf = pf_name
-                    except Exception:
-                        # skip any format that fails
-                        continue
+def main_app_entry():
+    # ─── Set Default OpenGL 3.3 Core Profile ─────────────────────────────
+    fmt = QSurfaceFormat()
+    fmt.setRenderableType(QSurfaceFormat.OpenGL)
+    fmt.setProfile(QSurfaceFormat.CoreProfile)
+    fmt.setVersion(3, 3)
+    QSurfaceFormat.setDefaultFormat(fmt)
+    log.info(
+        "Attempted to set default QSurfaceFormat to OpenGL 3.3 Core Profile globally."
+    )
+    # ──────────────────────────────────────────────────────────────────────
 
-            if best_pf is None:
-                raise RuntimeError(
-                    "Could not find any PixelFormat/Width/Height combination."
-                )
+    # Enable high-DPI scaling if available
+    if hasattr(Qt, "AA_EnableHighDpiScaling"):
+        QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    if hasattr(Qt, "AA_UseHighDpiPixmaps"):
+        QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
-            # Now set the device to that “best” pixel format and resolution:
-            log.info(
-                f"SDKCameraThread: picked PF={best_pf!r} at W×H={best_width}×{best_height}"
-            )
-            pf_node.value = best_pf
-            w_node = self.grabber.device_property_map.find_integer("Width")
-            h_node = self.grabber.device_property_map.find_integer("Height")
-            w_node.value = best_width
-            h_node.value = best_height
+    # Create the QApplication
+    app = QApplication(sys.argv)
 
-            # ─── 6) TRY TO SET AcquisitionFrameRate = desired FPS (if that node exists) ──
-            fr_node = self.grabber.device_property_map.find_float(
-                "AcquisitionFrameRate"
-            )
-            if fr_node:
-                try:
-                    fr_node.value = float(self._desired_fps)
-                    log.info(
-                        f"SDKCameraThread: forced AcquisitionFrameRate = {self._desired_fps}"
-                    )
-                except Exception as e:
-                    log.warning(
-                        f"SDKCameraThread: could not set AcquisitionFrameRate to {self._desired_fps}: {e}"
-                    )
+    # Log what OpenGL/QSurfaceFormat we actually got
+    actual_fmt = QSurfaceFormat.defaultFormat()
+    profile_str = (
+        "Core"
+        if actual_fmt.profile() == QSurfaceFormat.CoreProfile
+        else (
+            "Compatibility"
+            if actual_fmt.profile() == QSurfaceFormat.CompatibilityProfile
+            else "NoProfile"
+        )
+    )
+    log.info(
+        f"Actual default QSurfaceFormat after QApplication init: "
+        f"Version {actual_fmt.majorVersion()}.{actual_fmt.minorVersion()}, Profile: {profile_str}"
+    )
 
-            # ─── 7) BUILD a QueueSink that hands you BGR8 buffers ───────────────────────
-            listener = self  # we implement frames_queued() in this class
-            sink = ic4.QueueSink(listener, [ic4.PixelFormat.BGR8], max_output_buffers=1)
-            self.grabber.stream_setup(sink)
+    # ─── Load & Apply App Icon ─────────────────────────────────────────────
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    icon_dir = os.path.join(base_dir, "ui", "icons")
+    if not os.path.isdir(icon_dir):
+        alt_icon_dir = os.path.join(
+            os.path.dirname(base_dir), "prim_app", "ui", "icons"
+        )
+        if os.path.isdir(alt_icon_dir):
+            icon_dir = alt_icon_dir
+        else:
+            log.warning(f"Icon directory not found in {icon_dir} or {alt_icon_dir}")
 
-            # ─── 8) SIGNAL “grabber_ready” (UI could build dynamic controls if it cared) ─
-            self.grabber_ready.emit()
+    ico_path = os.path.join(icon_dir, "PRIM.ico")
+    png_path = os.path.join(icon_dir, "PRIM.png")
+    app_icon = QIcon()
+    if os.path.exists(ico_path):
+        app_icon.addFile(ico_path)
+    elif os.path.exists(png_path):
+        app_icon.addFile(png_path)
 
-            # ─── 9) START STREAMING ─────────────────────────────────────────────────────
-            # As of IC4 v1.3.x, the method is grabber.stream_start(), not stream_begin()
-            self.grabber.stream_start()
-            log.info(
-                "SDKCameraThread: stream_start() succeeded. Entering frame loop..."
-            )
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
+    else:
+        log.warning("No application icon file (PRIM.ico or PRIM.png) found.")
 
-            # ─── 10) BUSY-LOOP, POPPING FRAMES until stop() is called ───────────────────
-            while not self._stop_requested:
-                ic4.sleep(
-                    10
-                )  # around 10 ms sleep (≈100 FPS spin-loop). No heavy CPU use.
+    # ─── Install a Custom Exception Hook for Unhandled Errors ─────────────
+    def custom_exception_handler(exc_type, value, tb):
+        err_msg = "".join(traceback.format_exception(exc_type, value, tb))
+        log.critical(f"UNHANDLED PYTHON EXCEPTION:\n{err_msg}")
 
-            # ─── 11) STOP STREAMING & CLOSE DEVICE ─────────────────────────────────────
-            self.grabber.stream_stop()
-            self.grabber.device_close()
-            log.info("SDKCameraThread: streaming stopped, device closed.")
+        dlg = QMessageBox(
+            QMessageBox.Critical,
+            f"{APP_NAME} - Critical Error",
+            "An unexpected error occurred. The application may be unstable.\n"
+            "Check the logs for details.",
+            QMessageBox.Ok,
+        )
+        dlg.setDetailedText(err_msg)
+        dlg.exec_()
 
-        except Exception as e:
-            log.exception("SDKCameraThread: encountered an error in run().")
-            msg = str(e)
-            code = getattr(e, "code", "")
-            self.error.emit(msg, code)
+    sys.excepthook = custom_exception_handler
 
-        finally:
-            # ─── 12) CLEAN UP: call Library.exit() exactly once per thread ──────────────
-            try:
-                ic4.Library.exit()
-                log.info("SDKCameraThread: Library.exit() called.")
-            except Exception:
-                pass
+    # ─── Load Application QSS (if present) ────────────────────────────────
+    style_path = os.path.join(base_dir, "style.qss")
+    if os.path.exists(style_path):
+        qss = load_processed_qss(style_path)
+        if qss:
+            app.setStyleSheet(qss)
+            log.info(f"Applied stylesheet from: {style_path}")
+        else:
+            log.warning(f"Stylesheet was empty or failed to load: {style_path}")
+            app.setStyle(QStyleFactory.create("Fusion"))
+    else:
+        log.info("No style.qss found. Using default 'Fusion' style.")
+        app.setStyle(QStyleFactory.create("Fusion"))
 
-    def stop(self):
-        self._stop_requested = True
+    # ─── Import & Launch MainWindow ───────────────────────────────────────
+    from main_window import MainWindow
 
-    # ← This is the callback from QueueSink when a new frame arrives
-    def frames_queued(self, sink):
-        try:
-            buf = sink.pop_output_buffer()
-            arr = buf.numpy_wrap()  # Numpy view: shape=(H, W, 3)
-            h, w = arr.shape[0], arr.shape[1]
+    main_win = MainWindow()
+    display_version = CONFIG_APP_VERSION or "Unknown"
+    main_win.setWindowTitle(f"{APP_NAME} v{display_version}")
+    main_win.show()
 
-            # Build a QImage from the BGR data
-            # Format_BGR888 is supported in recent PyQt5; adjust if your version needs Format_RGB888 + copy
-            qimg = QImage(
-                arr.data,
-                w,
-                h,
-                arr.strides[0],
-                QImage.Format_BGR888,
-            )
+    exit_code = app.exec_()
+    log.info(f"Application event loop ended with exit code {exit_code}.")
 
-            # Emit the frame to the UI
-            self.frame_ready.emit(qimg, buf)
+    sys.exit(exit_code)
 
-        except Exception as e:
-            log.error(f"SDKCameraThread.frames_queued: Error popping buffer: {e}")
-            self.error.emit(str(e), "")
 
-        finally:
-            # IC4 with max_output_buffers=1 will automatically recycle/queue the buffer again.
-            pass
+if __name__ == "__main__":
+    main_app_entry()
