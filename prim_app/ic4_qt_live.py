@@ -1,218 +1,201 @@
 # File: ic4_qt_live.py
 
 import sys
-import time
-
-import imagingcontrol4 as ic4
-import cv2
 import numpy as np
+import imagingcontrol4 as ic4
 
-from PyQt5.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout
-from PyQt5.QtCore    import Qt, pyqtSignal, pyqtSlot, QThread, QSize
-from PyQt5.QtGui     import QPixmap, QImage
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout
+from PyQt5.QtGui     import QImage, QPixmap
+from PyQt5.QtCore    import Qt
 
 
-class GrabberThread(QThread):
+class QueueSinkDisplay(QWidget):
     """
-    QThread that opens the chosen IC4 device, sets up a QueueSink,
-    calls acquisition_start(), and then continuously emits each frame
-    (as a QImage) back to the main GUI thread.
+    A simple QWidget that owns:
+      - a QLabel (self.label) for showing live frames
+      - a Grabber / QueueSink combo to pull frames from the camera
     """
-    frame_ready = pyqtSignal(QImage)
-    error       = pyqtSignal(str, str)
+    def __init__(self, dev_info):
+        super().__init__()
 
-    def __init__(self, dev_info, parent=None):
-        super().__init__(parent)
-        self.dev_info   = dev_info
-        self._running   = False
-        self.grabber    = None
-        self.queue_sink = None
+        # (1) Basic window setup
+        self.setWindowTitle("IC4 Live View")
+        self.resize(800, 600)
 
-    def run(self):
-        # 1) Create Grabber & open camera
+        # (2) A QLabel to show incoming frames
+        self.label = QLabel("Initializing camera…", self)
+        self.label.setAlignment(Qt.AlignCenter)
+        self.layout = QVBoxLayout(self)
+        self.layout.addWidget(self.label)
+
+        # (3) Create and open the Grabber
+        self.grabber = ic4.Grabber()
         try:
-            self.grabber = ic4.Grabber()
-            self.grabber.device_open(self.dev_info)
-        except Exception as e:
-            self.error.emit(f"Could not open camera: {e}", "OPEN_ERR")
+            self.grabber.device_open(dev_info)
+        except ic4.IC4Exception as e:
+            # If opening fails, show error in label
+            self.label.setText(f"❌ Could not open camera:\n{e}")
             return
 
-        # 2) Define a small QueueSinkListener subclass
-        class _Listener(ic4.QueueSinkListener):
-            def __init__(self, qt_thread: "GrabberThread"):
-                super().__init__()
-                self.qt_thread = qt_thread
-
-            def sink_connected(self, sink, image_type, min_buffers_required) -> bool:
-                # Accept whatever buffers IC4 wants to allocate
-                return True
-
-            def frames_queued(self, sink: ic4.QueueSink):
-                # Called whenever a new frame is available
+        # (4) Pick a PixelFormat that your camera supports.
+        #     In our case, "BGRa8" is generally available on Basler USB 3 Vision devices.
+        #
+        #     You can use device_property_map to print out what your camera really supports,
+        #     but for most Basler GigE / USB3 cameras, "BGRa8" is a safe choice.
+        #
+        pf_node = self.grabber.device_property_map.find_enumeration("PixelFormat")
+        if pf_node:
+            # If BGRa8 is available, set it:
+            entry_names = [e.name for e in pf_node.entries]
+            if "BGRa8" in entry_names:
                 try:
-                    buf = sink.pop_output_buffer()
-                except Exception as pop_err:
-                    # If the device was lost or timed out, emit an error
-                    self.qt_thread.error.emit(f"Grab error: {pop_err}", "GRAB_ERR")
-                    self.qt_thread._running = False
-                    return
+                    pf_node.value = "BGRa8"
+                except Exception:
+                    pass
 
-                # Convert the ImageBuffer to a NumPy array (in‐place BGRA8)
-                arr = buf.numpy_wrap()   # shape = (height, stride)
-                # Slice down to (height, width, 4):
-                h, w, stride = buf.height, buf.width, buf.stride
-                arr = arr.reshape((h, stride))[:, : (w * 4)].reshape((h, w, 4))
+        # (5) Force "Continuous" acquisition mode (if supported)
+        acq_node = self.grabber.device_property_map.find_enumeration("AcquisitionMode")
+        if acq_node:
+            names = [e.name for e in acq_node.entries]
+            if "Continuous" in names:
+                try:
+                    acq_node.value = "Continuous"
+                except Exception:
+                    pass
 
-                # Example processing: blur + draw text
-                cv2.blur(arr, (31, 31), arr)
-                cv2.putText(
-                    arr,
-                    "Blurry Live Feed",
-                    (50, 50),
-                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                    fontScale=1.0,
-                    color=(0, 0, 255),  # red text (BGR)
-                    thickness=2,
-                )
-
-                # Convert BGRA → QImage
-                qimg = QImage(
-                    arr.data,
-                    w,
-                    h,
-                    stride,
-                    QImage.Format.Format_BGRA8888
-                ).rgbSwapped()  # swap B/R so colors appear correctly
-
-                # Emit the QImage back to the main thread
-                self.qt_thread.frame_ready.emit(qimg.copy())
-
-                # Return the buffer back to IC4
-                buf.queue_buffer()
-
-        listener = _Listener(self)
-
-        # 3) Create a QueueSink requesting BGRa8 output (max 2 buffers)
-        #    NOTE: use PixelFormat.BGRa8 (not BGRA8)
-        try:
-            self.queue_sink = ic4.QueueSink(listener, [ic4.PixelFormat.BGRa8], max_output_buffers=2)
-        except Exception as e:
-            self.error.emit(f"Could not create QueueSink: {e}", "SINK_ERR")
-            return
-
-        # 4) Attach the sink to the grabber
-        try:
-            self.grabber.stream_setup(self.queue_sink)
-        except Exception as e:
-            self.error.emit(f"Could not set up streaming: {e}", "STREAM_ERR")
-            return
-
-        # 5) ***START ACQUISITION***  ← This was missing before
+        # (6) Start acquisition before attaching the sink:
         try:
             self.grabber.acquisition_start()
-        except Exception as e:
-            self.error.emit(f"Could not start acquisition: {e}", "ACQ_ERR")
+        except Exception:
+            # if acquisition is already active, ignore
+            pass
+
+        # (7) Create a QueueSinkListener and QueueSink, then hook it up to the grabber
+        self.listener = self.ProcessAndDisplayListener(self)
+        # Pass a list of desired output formats: here we pass [ic4.PixelFormat.BGRa8].
+        # max_output_buffers=2 (or more) is usually fine.
+        self.sink = ic4.QueueSink(self.listener, [ic4.PixelFormat.BGRa8], max_output_buffers=2)
+        try:
+            self.grabber.stream_setup(self.sink)
+        except ic4.IC4Exception as e:
+            self.label.setText(f"❌ Could not setup stream:\n{e}")
             return
 
-        # 6) Enter the run‐loop so the thread doesn’t exit immediately.
-        self._running = True
-        while self._running:
-            time.sleep(0.01)
+    class ProcessAndDisplayListener(ic4.QueueSinkListener):
+        """
+        A QueueSinkListener that:
+          - allocates buffers when sink_connected() is called
+          - in frames_queued(), pops the next buffer, turns it into a NumPy array
+            and then into a QImage→QPixmap to display in the parent QLabel.
+        """
+        def __init__(self, parent_widget: "QueueSinkDisplay"):
+            self.parent = parent_widget
 
-        # 7) Cleanup: stop acquisition, stop stream, close device
-        try:
-            self.grabber.acquisition_stop()
-        except:
+        def sink_connected(self, sink: ic4.QueueSink, image_type: ic4.ImageType, min_buffers_required: int) -> bool:
+            """
+            Called once when the sink is attached to the grabber.
+            We tell it to allocate and queue the minimum number of buffers.
+            """
+            try:
+                sink.alloc_and_queue_buffers(min_buffers_required)
+                return True
+            except ic4.IC4Exception as e:
+                # If buffer allocation fails, show text in the parent label
+                self.parent.label.setText(f"❌ Error allocating buffers:\n{e}")
+                return False
+
+        def frames_queued(self, sink: ic4.QueueSink):
+            """
+            Called every time a new ImageBuffer arrives.
+            We pop it, do a numpy_wrap() → QImage → QPixmap → QLabel.setPixmap(…),
+            then re‐queue the buffer so IC4 can keep filling it.
+            """
+            try:
+                img_buf = sink.pop_output_buffer()
+            except ic4.IC4Exception as e:
+                # If grabbing times out or device lost, you could emit an error. For now, ignore.
+                return
+
+            # Convert to a NumPy array.  This array is (H, W, 4) in BGRa8 format.
+            arr = img_buf.numpy_wrap()  # dtype=uint8, shape=(height, stride, …)
+            # `arr` is typically shape (height, stride) or (height, width*4) if no padding.
+            # But most APIs guarantee arr.shape = (height, stride). If your buffers have no padding,
+            # you can reshape/truncate.  Safe approach: use arr.reshape((H, stride)) then slice to (H, W, 4).
+            #
+            # However, often .numpy_wrap() already returns exactly (height, width*4).  We can do:
+            h, stride = arr.shape[0], arr.shape[1]
+            w = int(stride / 4)  # because BGRa8 = 4 bytes/pixel
+            try:
+                arr2 = arr.reshape((h, stride))[:, : (w * 4)].reshape((h, w, 4))
+            except Exception:
+                # If reshape fails (rare), fall back to directly interpreting shape:
+                arr2 = arr  # hopefully it's already (h, w, 4)
+                h, w = arr2.shape[0], arr2.shape[1]
+
+            # Convert BGR → RGB by slicing:
+            rgb = arr2[:, :, :3][..., ::-1]  # drop alpha and swap B↔R
+
+            # Build a QImage from the numpy array.  Format_RGB888 expects 3 channels.
+            stride_bytes = rgb.strides[0]
+            qimg = QImage(
+                rgb.data, w, h, stride_bytes, QImage.Format.Format_RGB888
+            )
+            pix = QPixmap.fromImage(qimg)
+
+            # Display it (scaled) in the parent widget’s QLabel:
+            self.parent.label.setPixmap(pix.scaled(
+                self.parent.label.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            ))
+
+            # Re‐queue the buffer so IC4 can reuse it:
+            sink.queue_buffer(img_buf)
+
+        def sink_disconnected(self, sink: ic4.QueueSink):
+            """
+            Called if the sink is ever detached. We could clean up here.
+            """
             pass
-
-        try:
-            self.grabber.stream_stop()
-        except:
-            pass
-
-        try:
-            self.grabber.device_close()
-        except:
-            pass
-
-    def stop(self):
-        """Tell the thread to end its loop and wait."""
-        self._running = False
-        self.wait(2000)
-
-
-class MainWindow(QWidget):
-    """
-    Simple QWidget that contains a QLabel.  Each time GrabberThread.frame_ready
-    fires, we convert the QImage to a QPixmap and show it.
-    """
-    def __init__(self, grabber_thread: GrabberThread):
-        super().__init__()
-        self.grabber_thread = grabber_thread
-
-        self.setWindowTitle("IC4 PyQt Live Demo")
-        self.setFixedSize(QSize(800, 600))
-        self.setLayout(QVBoxLayout())
-
-        self.video_label = QLabel("Starting camera...", self)
-        self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setStyleSheet("background-color: black; color: white;")
-        self.layout().addWidget(self.video_label)
-
-        # Hook signals
-        self.grabber_thread.frame_ready.connect(self.update_label)
-        self.grabber_thread.error.connect(self.on_error)
-
-        # Start the grabbing thread now that signals are connected
-        self.grabber_thread.start()
-
-    @pyqtSlot(QImage)
-    def update_label(self, img: QImage):
-        pix = QPixmap.fromImage(img)
-        self.video_label.setPixmap(pix.scaled(
-            self.video_label.size(),
-            Qt.KeepAspectRatio,
-            Qt.FastTransformation
-        ))
-
-    @pyqtSlot(str, str)
-    def on_error(self, msg: str, code: str):
-        # Show error in the QLabel and stop the thread
-        self.video_label.setText(f"Error ({code}): {msg}")
-        self.grabber_thread.stop()
 
     def closeEvent(self, event):
-        # Make sure the thread stops if the window closes
-        if self.grabber_thread.isRunning():
-            self.grabber_thread.stop()
-        super().closeEvent(event)
+        """
+        When the window is closed, stop the stream and close the device.
+        """
+        try:
+            self.grabber.stream_stop()
+        except Exception:
+            pass
+        try:
+            self.grabber.device_close()
+        except Exception:
+            pass
+        event.accept()
+
 
 
 def main():
-    # Initialize IC4 once at startup
-    ic4.Library.init(api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR)
+    # 1) Initialize the IC4 library (do this exactly once!)
+    ic4.Library.init()
 
-    # Choose a device from the console
-    devices = ic4.DeviceEnum.devices()
-    if not devices:
-        print("No IC4 devices found. Exiting.")
+    # 2) Enumerate all attached devices:
+    device_list = ic4.DeviceEnum.devices()
+    if not device_list:
+        print("❌ No IC4 devices found.  Exiting.")
         ic4.Library.exit()
         return
 
-    print("Available IC4 devices:")
-    for i, d in enumerate(devices):
-        print(f"  [{i}] {d.model_name}  (S/N: {d.serial})  [{d.interface.display_name}]")
-    idx = int(input(f"Select index [0..{len(devices)-1}]: "))
-    dev_info = devices[idx]
+    # For simplicity, just pick the first camera:
+    dev0 = device_list[0]
+    print(f"Using device 0: {dev0.model_name} (S/N {dev0.serial})")
 
-    # Build the GrabberThread and the PyQt application
-    grab_thread = GrabberThread(dev_info)
+    # 3) Start Qt in order to show live frames:
     app = QApplication(sys.argv)
-    window = MainWindow(grab_thread)
-    window.show()
+    win = QueueSinkDisplay(dev0)
+    win.show()
     app.exec()
 
-    # Clean up IC4 on exit
+    # 4) After the Qt loop exits, be sure to call Library.exit()
     ic4.Library.exit()
 
 
