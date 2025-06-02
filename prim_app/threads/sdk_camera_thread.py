@@ -44,14 +44,14 @@ class SDKCameraThread(QThread):
         self.resolution_to_use = resolution_tuple
 
     def run(self):
-        # 1) Initialize IC4 library (if not already done)
+        # 1) Initialize IC4 library (if not already called)
         try:
             ic4.Library.init()
-        except ic4.IC4Exception as e:
-            # If already initialized, ignore
-            if e.code != ic4.ErrorCode.LibraryNotInitialized and "already called" not in str(e).lower():
-                self.error.emit(f"IC4 init failed: {e}", str(e.code))
-                return
+        except RuntimeError as e:
+            # “Library.init was already called” → ignore
+            if "already called" not in str(e).lower():
+                # If it wasn’t the “already called” message, re‐raise it
+                raise
 
         # 2) Create Grabber and open device
         self.grabber = ic4.Grabber()
