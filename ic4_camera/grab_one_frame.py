@@ -50,7 +50,6 @@ def main():
     # 4) Force PixelFormat → Mono8
     try:
         pi = pm.find_enumeration(ic4.PropId.PIXEL_FORMAT)
-        # Directly attempt to set Mono8, without checking valid_value_strings
         pi.value_string = "Mono8"
         print("Set PIXEL_FORMAT to Mono8")
     except ic4.IC4Exception as e:
@@ -65,23 +64,21 @@ def main():
     except ic4.IC4Exception:
         pass
 
-    # 6) Attach a QueueSink, but do NOT start acquisition yet
+    # 6) Attach a QueueSink and start acquisition immediately
     listener = MinimalListener()
     sink = ic4.QueueSink(listener)
-    grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.NONE)
-
-    # 7) Pre‐allocate and queue 5 buffers BEFORE acquisition_start()
-    sink.alloc_and_queue_buffers(5)
-
-    # 8) Explicitly start acquisition
     try:
-        grabber.acquisition_start()
+        # stream_setup(sink) defaults to setup_option=ACQUISITION_START
+        grabber.stream_setup(sink)
     except ic4.IC4Exception as e:
-        print("acquisition_start() failed:", e)
+        print("stream_setup() failed:", e)
         grabber.device_close()
         return
 
-    # 9) Pop exactly one buffer (with a 5 s timeout)
+    # 7) Now that acquisition is running, allocate and queue 5 buffers
+    sink.alloc_and_queue_buffers(5)
+
+    # 8) Pop exactly one buffer (with a 5 s timeout)
     buf = None
     start = time.time()
     while time.time() - start < 5.0:
@@ -97,11 +94,11 @@ def main():
     if buf is None:
         print("Timed out waiting for a frame.")
     else:
-        # 10) Convert the ImageBuffer to a NumPy array (Mono8 → uint8)
+        # 9) Convert the ImageBuffer to a NumPy array (Mono8 → uint8)
         arr = buf.numpy_wrap()
         img8 = np.array(arr, copy=False)
 
-        # 11) Display in OpenCV
+        # 10) Display in OpenCV
         cv2.imshow("Mono8 Frame", img8)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
@@ -111,7 +108,7 @@ def main():
         except:
             pass
 
-    # 12) Cleanup
+    # 11) Cleanup
     try:
         grabber.acquisition_stop()
     except:
