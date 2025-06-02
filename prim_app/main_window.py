@@ -358,8 +358,15 @@ class MainWindow(QMainWindow):
     def _on_device_selected(self, index):
         """
         When the user selects a camera device, enumerate its supported resolutions.
+        We no longer use a non‐existent `format_video` API. Instead:
+          1) open the Grabber on that DeviceInfo
+          2) grab.driver_property_map.find_enumeration("PixelFormat")
+             returns a PropEnumeration object with .entries (all PF entries)
+          3) for each entry, set PixelFormat to that value
+          4) read back ImageWidth and ImageHeight
         """
         dev_info = self.device_combo.itemData(index)
+        # Clear and reset the “Resolution” dropdown
         self.resolution_combo.clear()
         self.resolution_combo.addItem("Select Resolution...", None)
 
@@ -370,17 +377,44 @@ class MainWindow(QMainWindow):
             grab = ic4.Grabber()
             grab.device_open(dev_info)
 
-            # ─── DEBUG DUMPS ─────────────────────────────────────────────────────────
-            print(">>> Grabber members:", dir(grab))
-            print(">>> driver_property_map members:", dir(grab.driver_property_map))
-            # ─────────────────────────────────────────────────────────────────────────────
+            # 1) Find the “PixelFormat” enumeration node in this device’s GenICam map
+            pf_node = grab.driver_property_map.find_enumeration("PixelFormat")
+            if pf_node is None:
+                raise RuntimeError(
+                    "Could not find 'PixelFormat' enumeration on camera."
+                )
 
-            # For now, bail out immediately so you can see the dump:
+            # 2) Walk through every entry in pf_node.entries
+            for entry in pf_node.entries:
+                try:
+                    # 2a) Set PixelFormat to this entry’s value
+                    pf_node.value = entry.value
+                except Exception:
+                    # If this particular format can’t be set, skip it
+                    continue
+
+                # 2b) Once PF is set, read width/height from ImageWidth & ImageHeight
+                #     These are integer‐type nodes in the same device_property_map.
+                w_node = grab.driver_property_map.find_integer("ImageWidth")
+                h_node = grab.driver_property_map.find_integer("ImageHeight")
+                if w_node is None or h_node is None:
+                    continue
+
+                w = w_node.value
+                h = h_node.value
+
+                # 2c) Build a user‐friendly string: “2048×1536 (Mono8)” etc.
+                #     Some GenICam entries provide a ‘name’ attribute, but if not, fallback to the raw numeric value.
+                pixfmt_name = getattr(entry, "name", str(entry.value))
+                display_str = f"{w}×{h} ({pixfmt_name})"
+
+                # 2d) Add into the Resolution combo. Store a tuple of (width, height, pixfmt_value)
+                self.resolution_combo.addItem(display_str, (w, h, entry.value))
+
             grab.device_close()
-            return
 
         except Exception as e:
-            log.error(f"Failed to inspect Grabber for {dev_info!r}: {e}")
+            log.error(f"Failed to get formats for {dev_info!r}: {e}")
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
