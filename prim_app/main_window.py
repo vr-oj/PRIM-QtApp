@@ -88,6 +88,7 @@ class MainWindow(QMainWindow):
 
         # Camera‐related
         self.device_combo = None
+        self._probe_grabber = None
         self.resolution_combo = None
         self.btn_start_camera = None
         self.camera_widget = None
@@ -357,61 +358,91 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int)
     def _on_device_selected(self, index):
         """
-        When the user selects a camera in the Device combo, enumerate that camera’s
-        supported PixelFormat → (width, height).  Populate resolution_combo with those.
+        1) Close any previous probe‐grabber
+        2) Open the newly selected camera immediately (default resolution).
+        3) Read back which pixel formats are available, and fill `resolution_combo`.
         """
         dev_info = self.device_combo.itemData(index)
 
-        # Always clear and re‐add the placeholder
+        # 0) Always clear the Resolution combo and re-add the placeholder
         self.resolution_combo.clear()
         self.resolution_combo.addItem("Select Resolution...", None)
 
+        # If user clicked "Select Device..." (i.e. no real DeviceInfo), bail out.
         if not dev_info:
-            # If the user chose “Select Device…” (i.e. itemData is None), do nothing.
+            # Also close any old grabber if leftover
+            if self._probe_grabber:
+                try:
+                    self._probe_grabber.device_close()
+                except Exception:
+                    pass
+                self._probe_grabber = None
             return
 
+        # 1) If there was a previous probe‐grabber, close it cleanly
+        if self._probe_grabber:
+            try:
+                self._probe_grabber.device_close()
+            except Exception:
+                pass
+            self._probe_grabber = None
+
         try:
-            # 1) Create & open a Grabber on the chosen device
+            # 2) Create a new Grabber and open the camera immediately with default settings
             grab = ic4.Grabber()
             grab.device_open(dev_info)
 
-            # 2) Find the PixelFormat enumeration node
+            # Keep this around for a moment so we can enumerate pixel formats
+            self._probe_grabber = grab
+
+            # 3) Now enumerate “PixelFormat” entries.  (Your standalone script confirmed “PixelFormat” exists.)
             pf_node = grab.device_property_map.find_enumeration("PixelFormat")
             if pf_node is None:
-                raise RuntimeError("Could not find ‘PixelFormat’ on this camera.")
+                raise RuntimeError("Camera does not expose a ‘PixelFormat’ node.")
 
-            # 3) Loop through every entry in PixelFormat
             for entry in pf_node.entries:
+                # Try to set the camera to each pixel‐format; if it fails, skip it.
                 try:
-                    # 3a) Set PixelFormat = entry.value
                     pf_node.value = entry.value
                 except Exception:
-                    # Skip any format that isn’t currently available
                     continue
 
-                # 3b) Now read back ImageWidth & ImageHeight
+                # Once set, read back “ImageWidth” and “ImageHeight”
                 w_node = grab.device_property_map.find_integer("ImageWidth")
                 h_node = grab.device_property_map.find_integer("ImageHeight")
                 if (w_node is None) or (h_node is None):
-                    # If either of those nodes is missing, skip this entry
                     continue
 
                 w = w_node.value
                 h = h_node.value
-
-                # 3c) Build a display string
                 fmt_name = getattr(entry, "name", str(entry.value))
                 display_str = f"{w}×{h} ({fmt_name})"
 
-                # 3d) Add to the combo, storing (w, h, pixelFormatValue) as itemData
+                # Store (w, h, pixelFormatValue) as the combo’s userData:
                 self.resolution_combo.addItem(display_str, (w, h, entry.value))
 
-            # 4) Close the grabber
-            grab.device_close()
+            # 4) We do NOT yet start streaming here; we will wait until “Start Camera” is clicked.
+            # Keep the grabber open so that the camera is indeed powered up and responding.
+            # (Some cameras can only enumerate formats if they’re already opened.)
 
         except Exception as ex:
-            log.error(f"Failed to enumerate formats for {dev_info!r}: {ex}")
-            # (You can optionally pop up a QMessageBox here if you want.)
+            log.error(f"[main_window] Failed to open/enumerate {dev_info!r}: {ex}")
+            # Optionally pop up a small warning:
+            dlg = QMessageBox(self)
+            dlg.setIcon(QMessageBox.Warning)
+            dlg.setWindowTitle("Camera Enumeration Error")
+            dlg.setText(
+                f"Could not open '{dev_info.model_name}' for format listing:\n{ex}"
+            )
+            dlg.exec_()
+
+            # Clean up any half-open grabber
+            if self._probe_grabber:
+                try:
+                    self._probe_grabber.device_close()
+                except Exception:
+                    pass
+                self._probe_grabber = None
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
