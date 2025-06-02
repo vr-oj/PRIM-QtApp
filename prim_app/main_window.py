@@ -381,38 +381,58 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
+        """
+        Toggle the SDKCameraThread: start grabbing or stop.
+        """
         # CASE A: No thread running → user clicked “Start Camera”
         if self.camera_thread is None or not self.camera_thread.isRunning():
-            # (… your device+resolution checks …)
+            # Verify that the user has chosen a device and a resolution:
+            if (
+                self.device_combo.currentData() is None
+                or self.resolution_combo.currentData() is None
+            ):
+                dlg = QMessageBox(self)
+                dlg.setIcon(QMessageBox.Warning)
+                dlg.setWindowTitle("Camera Not Configured")
+                dlg.setText(
+                    "Please select a valid device and resolution before starting."
+                )
+                dlg.exec_()
+                return
 
-            # 1) Create a brand-new SDKCameraThread inside QtCameraWidget
+            # Extract the chosen DeviceInfo and resolution tuple:
+            dev_info = self.device_combo.currentData()      # e.g. ic4.DeviceInfo
+            res_data = self.resolution_combo.currentData()  # (width, height, pixelFormatName)
+
+            # Tell QtCameraWidget’s thread which device and resolution to use:
             self.camera_thread = self.camera_widget._cam_thread
             self.camera_thread.set_device_info(dev_info)
             self.camera_thread.set_resolution(res_data)
 
-            # 2) Connect signals:
+            # Connect signals:
             self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
             self.camera_thread.error.connect(self._on_camera_error)
 
-            # (We no longer connect QtCameraWidget.frame_ready here, because QtCameraWidget
-            # already connected inside its own __init__.)
-
-            # Update UI pre-flight…
+            # Reset the Info tab labels:
             self.lbl_cam_frame.setText("0")
             self.lbl_cam_resolution.setText("N/A")
             self.lbl_cam_connection.setText("Connecting…")
+
+            # Actually start the thread (inside QtCameraWidget):
             self.camera_widget.start_camera()
 
+            # Update button text and disable controls until grabber_ready():
             self.btn_start_camera.setText("Stop Camera")
             self.camera_control_panel.setEnabled(False)
 
-        # CASE B: thread is running → user clicked “Stop Camera”
+        # CASE B: thread is already running → user clicked “Stop Camera”
         else:
             try:
                 self.camera_widget.stop_camera()
             except Exception as e:
                 log.error(f"Error stopping camera thread: {e}")
-            # Reset UI…
+
+            # Reset UI to “off” state:
             self.btn_start_camera.setText("Start Camera")
             self.camera_control_panel.setEnabled(False)
             self.lbl_cam_connection.setText("Disconnected")
@@ -420,6 +440,7 @@ class MainWindow(QMainWindow):
             self.lbl_cam_resolution.setText("N/A")
             self.camera_widget.stop_camera()
 
+            # Drop our thread reference so next click re-creates it:
             self.camera_thread = None
 
     @pyqtSlot()
