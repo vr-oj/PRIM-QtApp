@@ -356,6 +356,9 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(int)
     def _on_device_selected(self, index):
+        """
+        When the user selects a camera device, enumerate its supported resolutions.
+        """
         dev_info = self.device_combo.itemData(index)
         self.resolution_combo.clear()
         self.resolution_combo.addItem("Select Resolution...", None)
@@ -367,13 +370,14 @@ class MainWindow(QMainWindow):
             grab = ic4.Grabber()
             grab.device_open(dev_info)
 
-            # --- DEBUG: list all attributes of this Grabber instance ---
+            # ─── DEBUG DUMPS ─────────────────────────────────────────────────────────
             print(">>> Grabber members:", dir(grab))
+            print(">>> driver_property_map members:", dir(grab.driver_property_map))
+            # ─────────────────────────────────────────────────────────────────────────────
 
-            # Then try to find a member that enumerates formats
-            # e.g. "format_video", "video_formats", "available_video_formats", etc.
-
+            # For now, bail out immediately so you can see the dump:
             grab.device_close()
+            return
 
         except Exception as e:
             log.error(f"Failed to inspect Grabber for {dev_info!r}: {e}")
