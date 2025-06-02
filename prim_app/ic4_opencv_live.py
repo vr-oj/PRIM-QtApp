@@ -1,24 +1,24 @@
 # File: ic4_opencv_live.py
+import sys
 import cv2
 import numpy as np
 import imagingcontrol4 as ic4
-import sys
 
 def main():
-    # 1) Initialize the IC 4 library
+    # ─── 1) Initialize IC4 ─────────────────────────────────────────────────────
     ic4.Library.init(api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR)
 
-    # 2) Enumerate and pick the first connected camera
+    # ─── 2) Enumerate and pick the first camera ────────────────────────────────
     device_list = ic4.DeviceEnum.devices()
     if not device_list:
-        print("No IC 4 camera found.")
+        print("No IC4 camera found.")
         ic4.Library.exit()
         sys.exit(1)
 
     dev_info = device_list[0]
     print(f"Found camera: {dev_info.model_name} (SN {dev_info.serial})")
 
-    # 3) Open the Grabber, switch to Continuous acquisition if available
+    # ─── 3) Open grabber and set Continuous mode if available ─────────────────
     grabber = ic4.Grabber()
     try:
         grabber.device_open(dev_info)
@@ -27,7 +27,7 @@ def main():
         ic4.Library.exit()
         sys.exit(1)
 
-    # If there is an “AcquisitionMode” enumeration, force it to “Continuous”
+    # Try to force “Continuous” acquisition if that enum exists
     try:
         acq = grabber.device_property_map.find_enumeration("AcquisitionMode")
         if acq:
@@ -39,8 +39,7 @@ def main():
     except Exception:
         pass
 
-    # 4) Pick a PixelFormat entry. We will use the first one that works.
-    #    In ic4-examples it is called "PixelFormat", and acceptable entries usually include: Mono8, Mono10p, BGRa8, etc.
+    # ─── 4) Pick a PixelFormat (prefer BGRa8) ─────────────────────────────────
     pf_node = grabber.device_property_map.find_enumeration("PixelFormat")
     if pf_node is None:
         print("No PixelFormat enumeration found on this camera.")
@@ -48,25 +47,26 @@ def main():
         ic4.Library.exit()
         sys.exit(1)
 
-    # Try to set PixelFormat = "BGRa8"
-    # (You can also iterate through pf_node.entries if you need to find a working one.)
-    available_pf_names = [e.name for e in pf_node.entries]
-    if "BGRa8" in available_pf_names:
+    available_pf = [e.name for e in pf_node.entries]
+    if "BGRa8" in available_pf:
         pf_node.value = "BGRa8"
-        print("Using PixelFormat = BGRa8")
+        chosen_pf = "BGRa8"
     else:
-        # fall back to whatever the camera reports first
-        pf_node.value = available_pf_names[0]
-        print(f"Using PixelFormat = {available_pf_names[0]}")
+        # fall back to the first reported format (e.g. “Mono8”)
+        chosen_pf = available_pf[0]
+        pf_node.value = chosen_pf
 
-    # 5) Create a QueueSink that requests exactly BGRa8 output buffers (1 buffer).
-    #    max_output_buffers=1 means we always drop older frames if we can't keep up.
+    print(f"Using PixelFormat = {chosen_pf}")
+
+    # ─── 5) Create a QueueSink (no listener, request exactly BGRa8 so we get 4‐byte RGBA)
+    #      If the camera is actually Mono8 only, it will output single‐channel buffers
     sink = ic4.QueueSink(
-        formats=[ic4.PixelFormat.BGRa8],
+        None,                  # no listener callback
+        [ic4.PixelFormat.BGRa8],  # request BGRa8 (4 bytes/pixel) if possible
         max_output_buffers=1
     )
 
-    # 6) Hook up the sink and start streaming
+    # ─── 6) Hook up the sink and start streaming ────────────────────────────────
     grabber.stream_setup(sink)
     try:
         grabber.stream_start()
@@ -76,52 +76,54 @@ def main():
         ic4.Library.exit()
         sys.exit(1)
 
-    # 7) Main loop: pop each new buffer, convert to NumPy, display via OpenCV
-    window_name = f"IC 4 Live View: {dev_info.model_name}"
+    # ─── 7) OpenCV window setup ────────────────────────────────────────────────
+    window_name = f"IC4 Live View: {dev_info.model_name} [{chosen_pf}]"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
     print("Press 'q' in the OpenCV window to quit.")
     while True:
         try:
-            # time-out of 1000 ms → if no frame, we loop and check for 'q'
-            buf = sink.pop_output_buffer(timeout=1000)
+            buf = sink.pop_output_buffer(timeout=1000)  # wait up to 1 s for a frame
         except ic4.IC4Exception as e:
-            # Could be a timeout or device‐lost
             print(f"Grab error (pop_output_buffer): {e}")
             break
 
-        # buf is an ImageBuffer – wrap it as a NumPy array.  
-        # numpy_wrap() returns a (height × stride) uint8 array, so we can slice off any padding.
-        arr = buf.numpy_wrap()
-
-        # The buffer’s “stride” is the number of bytes per row.
-        # We know each pixel is 3 bytes (B, G, R) for BGRa8 → so stride = width × 3
-        # Actually, for BGRa8, each pixel is 4 bytes (B,G,R,alpha), but numpy_wrap() will give a 
-        # (height × (buf.stride)) buffer, so we need to reshape and drop the alpha channel.  
+        # ─── 8) Convert buffer → NumPy → OpenCV image ─────────────────────────────
+        # The ImageBuffer has attributes: width, height, stride, and a .numpy_wrap() method.
         height = buf.height
-        stride = buf.stride  # bytes per row = width × 4
-        width = buf.width
+        width  = buf.width
+        stride = buf.stride  # bytes per row
 
-        # Reshape into (height, stride) then drop alpha column:
-        raw2d = np.frombuffer(arr, dtype=np.uint8).reshape((height, stride))
-        bgr4 = raw2d.reshape((height, width, 4))     # BGRA
-        bgr3 = bgr4[:, :, :3]                        # drop alpha → BGR
+        raw = buf.numpy_wrap()  # returns a 1D uint8 buffer of length (height * stride)
 
-        # Show with OpenCV
-        cv2.imshow(window_name, bgr3)
+        # If we requested BGRa8 but the camera only supports Mono8, we'll get a single‐channel
+        # buffer where stride == width and raw is (height*width) bytes. Otherwise, stride == width*4.
+        if stride == width:
+            # Mono8 case: reshape into (height, width) and show grayscale
+            gray2d = np.frombuffer(raw, dtype=np.uint8).reshape((height, stride))
+            gray_img = gray2d  # shape = (height, width)
+            cv2.imshow(window_name, gray_img)
+
+        else:
+            # BGRa8 case: reshape into (height, stride), then into (height, width, 4), drop alpha
+            arr2d = np.frombuffer(raw, dtype=np.uint8).reshape((height, stride))
+            bgra = arr2d.reshape((height, width, 4))  # BGRA
+            bgr  = bgra[:, :, :3]                     # drop alpha
+            cv2.imshow(window_name, bgr)
+
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
-    # 8) Cleanup
-    print("Stopping stream and closing camera...")
+    # ─── 9) Clean up ───────────────────────────────────────────────────────────
+    print("Stopping stream and closing camera…")
     try:
         grabber.stream_stop()
     except Exception:
         pass
+
     grabber.device_close()
     ic4.Library.exit()
     cv2.destroyAllWindows()
-
 
 if __name__ == "__main__":
     main()
