@@ -1,0 +1,1190 @@
+Python 3.13.3 (tags/v3.13.3:6280bb5, Apr  8 2025, 14:47:33) [MSC v.1943 64 bit (AMD64)] on win32
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import imagingcontrol4 as ic4
+>>> dir(ic4)
+['BufferPool', 'DeviceEnum', 'DeviceInfo', 'Dialogs', 'Display', 'DisplayRenderPosition', 'EmbeddedDisplay', 'ErrorCode', 'ExternalOpenGLDisplay', 'FloatingDisplay', 'Grabber', 'IC4Exception', 'ImageBuffer', 'ImageType', 'Library', 'LogLevel', 'LogTarget', 'PixelFormat', 'PropBoolean', 'PropCategory', 'PropCommand', 'PropDisplayNotation', 'PropEnumEntry', 'PropEnumeration', 'PropFloat', 'PropFloatRepresentation', 'PropId', 'PropIntRepresentation', 'PropInteger', 'PropRegister', 'PropString', 'Property', 'PropertyDialogFlags', 'PropertyIncrementMode', 'PropertyMap', 'PropertyType', 'PropertyVisibility', 'QueueSink', 'QueueSinkListener', 'Sink', 'SinkType', 'SnapSink', 'StreamSetupOption', 'TransportLayerType', 'VersionInfoFlags', 'VideoWriter', 'VideoWriterType', '_HAS_PYSIDE6', '__all_types', '__all_wintypes', '__builtins__', '__cached__', '__doc__', '__file__', '__loader__', '__name__', '__package__', '__path__', '__spec__', 'bufferpool', 'devenum', 'display', 'error', 'grabber', 'gui', 'helper', 'ic4exception', 'imagebuffer', 'imagetype', 'library', 'native', 'native_gui', 'os', 'propconstants', 'properties', 'queuesink', 'sink', 'snapsink', 'videowriter']
+>>> dir(ic4PropId)
+Traceback (most recent call last):
+  File "<python-input-2>", line 1, in <module>
+    dir(ic4PropId)
+        ^^^^^^^^^
+NameError: name 'ic4PropId' is not defined
+>>> dir(ic4.PropId)
+['ACQUISITION_BURST_FRAME_COUNT', 'ACQUISITION_BURST_INTERVAL', 'ACQUISITION_FRAME_RATE', 'ACQUISITION_MODE', 'ACQUISITION_START', 'ACQUISITION_STOP', 'ACTION_DEVICE_KEY', 'ACTION_GROUP_KEY', 'ACTION_GROUP_MASK', 'ACTION_QUEUE_SIZE', 'ACTION_SCHEDULER_CANCEL', 'ACTION_SCHEDULER_COMMIT', 'ACTION_SCHEDULER_INTERVAL', 'ACTION_SCHEDULER_STATUS', 'ACTION_SCHEDULER_TIME', 'ACTION_SELECTOR', 'AUTO_FOCUS_ROI_ENABLE', 'AUTO_FOCUS_ROI_HEIGHT', 'AUTO_FOCUS_ROI_LEFT', 'AUTO_FOCUS_ROI_TOP', 'AUTO_FOCUS_ROI_WIDTH', 'AUTO_FUNCTIONS_ROI_ENABLE', 'AUTO_FUNCTIONS_ROI_HEIGHT', 'AUTO_FUNCTIONS_ROI_LEFT', 'AUTO_FUNCTIONS_ROI_PRESET', 'AUTO_FUNCTIONS_ROI_TOP', 'AUTO_FUNCTIONS_ROI_WIDTH', 'BALANCE_RATIO', 'BALANCE_RATIO_SELECTOR', 'BALANCE_WHITE_AUTO', 'BALANCE_WHITE_AUTO_PRESET', 'BALANCE_WHITE_MODE', 'BALANCE_WHITE_TEMPERATURE', 'BALANCE_WHITE_TEMPERATURE_PRESET', 'BINNING_HORIZONTAL', 'BINNING_VERTICAL', 'BLACK_LEVEL', 'CHUNK_BLOCK_ID', 'CHUNK_ENABLE', 'CHUNK_EXPOSURE_TIME', 'CHUNK_GAIN', 'CHUNK_IMAGE', 'CHUNK_IMX174_FRAME_ID', 'CHUNK_IMX174_FRAME_SET', 'CHUNK_MODE_ACTIVE', 'CHUNK_MULTI_FRAME_SET_FRAME_ID', 'CHUNK_MULTI_FRAME_SET_ID', 'CHUNK_SELECTOR', 'COLOR_TRANSFORMATION_ENABLE', 'COLOR_TRANSFORMATION_SELECTOR', 'COLOR_TRANSFORMATION_VALUE', 'COLOR_TRANSFORMATION_VALUE_SELECTOR', 'CONTRAST', 'DECIMATION_HORIZONTAL', 'DECIMATION_VERTICAL', 'DENOISE', 'DEVICE_EVENT_CHANNEL_COUNT', 'DEVICE_FACTORY_RESET', 'DEVICE_FIRMWARE_VERSION', 'DEVICE_LINK_HEARTBEAT_TIMEOUT', 'DEVICE_LINK_SELECTOR', 'DEVICE_MODEL_NAME', 'DEVICE_RESET', 'DEVICE_SCAN_TYPE', 'DEVICE_SERIAL_NUMBER', 'DEVICE_SFNC_VERSION_MAJOR', 'DEVICE_SFNC_VERSION_MINOR', 'DEVICE_SFNC_VERSION_SUB_MINOR', 'DEVICE_STREAM_CHANNEL_COUNT', 'DEVICE_STREAM_CHANNEL_ENDIANNESS', 'DEVICE_STREAM_CHANNEL_LINK', 'DEVICE_STREAM_CHANNEL_PACKET_SIZE', 'DEVICE_STREAM_CHANNEL_SELECTOR', 'DEVICE_STREAM_CHANNEL_TYPE', 'DEVICE_TEMPERATURE', 'DEVICE_TEMPERATURE_SELECTOR', 'DEVICE_TL_TYPE', 'DEVICE_TL_VERSION_MAJOR', 'DEVICE_TL_VERSION_MINOR', 'DEVICE_TL_VERSION_SUB_MINOR', 'DEVICE_TYPE', 'DEVICE_USER_ID', 'DEVICE_VENDOR_NAME', 'DEVICE_VERSION', 'DISABLE_INFO_OVERLAY', 'EVENT_EXPOSURE_END', 'EVENT_EXPOSURE_END_FRAME_ID', 'EVENT_EXPOSURE_END_TIMESTAMP', 'EVENT_FOCUS_MOVE_COMPLETED', 'EVENT_FOCUS_MOVE_COMPLETED_FOCUS', 'EVENT_FOCUS_MOVE_COMPLETED_TIMESTAMP', 'EVENT_FRAME_TRIGGER_MISSED', 'EVENT_FRAME_TRIGGER_MISSED_TIMESTAMP', 'EVENT_LINE1_FALLING_EDGE', 'EVENT_LINE1_FALLING_EDGE_TIMESTAMP', 'EVENT_LINE1_RISING_EDGE', 'EVENT_LINE1_RISING_EDGE_TIMESTAMP', 'EVENT_NOTIFICATION', 'EVENT_SELECTOR', 'EVENT_TEST', 'EVENT_TEST_TIMESTAMP', 'EVENT_ZOOM_MOVE_COMPLETED', 'EVENT_ZOOM_MOVE_COMPLETED_TIMESTAMP', 'EVENT_ZOOM_MOVE_COMPLETED_ZOOM', 'EXPAND_OUTPUT_RANGE', 'EXPOSURE_AUTO', 'EXPOSURE_AUTO_HIGHLIGHT_REDUCTION', 'EXPOSURE_AUTO_HIGHLIGH_REDUCTION', 'EXPOSURE_AUTO_LOWER_LIMIT', 'EXPOSURE_AUTO_REFERENCE', 'EXPOSURE_AUTO_UPPER_LIMIT', 'EXPOSURE_AUTO_UPPER_LIMIT_AUTO', 'EXPOSURE_TIME', 'FILE_ACCESS_BUFFER', 'FILE_ACCESS_LENGTH', 'FILE_ACCESS_OFFSET', 'FILE_OPEN_MODE', 'FILE_OPERATION_EXECUTE', 'FILE_OPERATION_RESULT', 'FILE_OPERATION_SELECTOR', 'FILE_OPERATION_STATUS', 'FILE_SELECTOR', 'FILE_SIZE', 'FOCUS', 'FOCUS_AUTO', 'GAIN', 'GAIN_AUTO', 'GAIN_AUTO_LOWER_LIMIT', 'GAIN_AUTO_UPPER_LIMIT', 'GAIN_MODE', 'GAMMA', 'GEV_GVSP_EXTENDED_ID_MODE', 'GEV_SCPS_DO_NOT_FRAGMENT', 'GEV_SCPS_PACKET_SIZE', 'GP_IN', 'GP_OUT', 'HEIGHT', 'HEIGHT_MAX', 'HUE', 'IMX174_HARDWARE_WDR_ENABLE', 'IMX174_HARDWARE_WDR_SHUTTER_MODE', 'IMX174_WDR_SHUTTER2', 'IMX_LOW_LATENCY_TRIGGER_MODE', 'INPUT_BITS', 'INPUT_FP1KS', 'INPUT_HEIGHT', 'INPUT_WIDTH', 'IRIS', 'IRIS_AUTO', 'IR_CUT_FILTER_ENABLE', 'LUT_ENABLE', 'LUT_INDEX', 'LUT_SELECTOR', 'LUT_VALUE', 'LUT_VALUE_ALL', 'MULTI_FRAME_SET_OUTPUT_MODE_CUSTOM_GAIN', 'MULTI_FRAME_SET_OUTPUT_MODE_ENABLE', 'MULTI_FRAME_SET_OUTPUT_MODE_EXPOSURE_TIME0', 'MULTI_FRAME_SET_OUTPUT_MODE_EXPOSURE_TIME1', 'MULTI_FRAME_SET_OUTPUT_MODE_EXPOSURE_TIME2', 'MULTI_FRAME_SET_OUTPUT_MODE_EXPOSURE_TIME3', 'MULTI_FRAME_SET_OUTPUT_MODE_FRAME_COUNT', 'MULTI_FRAME_SET_OUTPUT_MODE_GAIN0', 'MULTI_FRAME_SET_OUTPUT_MODE_GAIN1', 'MULTI_FRAME_SET_OUTPUT_MODE_GAIN2', 'MULTI_FRAME_SET_OUTPUT_MODE_GAIN3', 'OFFSET_AUTO_CENTER', 'OFFSET_X', 'OFFSET_Y', 'PAYLOAD_SIZE', 'PIXEL_FORMAT', 'PTP_CLOCK_ACCURACY', 'PTP_ENABLE', 'PTP_STATUS', 'REVERSE_X', 'REVERSE_Y', 'SATURATION', 'SENSOR_HEIGHT', 'SENSOR_PIXEL_HEIGHT', 'SENSOR_PIXEL_WIDTH', 'SENSOR_WIDTH', 'SHARPNESS', 'SIDEBAND_USE', 'SIGNAL_DETECTED', 'SOFTWARE_TRANSFORM_ENABLE', 'SOURCE_CONNECTED', 'STROBE_DELAY', 'STROBE_DURATION', 'STROBE_ENABLE', 'STROBE_OPERATION', 'STROBE_POLARITY', 'TEST_EVENT_GENERATE', 'TEST_PENDING_ACK', 'TIMESTAMP_LATCH', 'TIMESTAMP_LATCH_STRING', 'TIMESTAMP_LATCH_VALUE', 'TIMESTAMP_RESET', 'TL_PARAMS_LOCKED', 'TONE_MAPPING_ENABLE', 'TONE_MAPPING_GLOBAL_BRIGHTNESS', 'TONE_MAPPING_INTENSITY', 'TRIGGER_ACTIVATION', 'TRIGGER_DEBOUNCER', 'TRIGGER_DELAY', 'TRIGGER_DENOISE', 'TRIGGER_MASK', 'TRIGGER_MODE', 'TRIGGER_OPERATION', 'TRIGGER_OVERLAP', 'TRIGGER_SELECTOR', 'TRIGGER_SOFTWARE', 'TRIGGER_SOURCE', 'USER_SET_DEFAULT', 'USER_SET_LOAD', 'USER_SET_SAVE', 'USER_SET_SELECTOR', 'WIDTH', 'WIDTH_MAX', 'ZOOM', '__class__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__firstlineno__', '__format__', '__ge__', '__getattribute__', '__getstate__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__static_attributes__', '__str__', '__subclasshook__', '__weakref__']
+>>>
+>>> help(ic4.Grabber)
+Help on class Grabber in module imagingcontrol4.grabber:
+
+class Grabber(builtins.object)
+ |  Grabber(dev: Union[str, imagingcontrol4.devenum.DeviceInfo, NoneType] = None)
+ |
+ |  Represents an opened video capture device, allowing device configuration and stream setup.
+ |
+ |  The Grabber object is the core component used when working with video capture devices.
+ |
+ |  Some objects, e.g. :py:class:`.ImageBuffer`, can keep the device and/or driver opened as long as they exist,
+ |  since they point into device driver memory. To free all device-related resources,
+ |  all objects references have to be deleted, or ImageBuffer objects have to release their internal
+ |  reference by calling their :py:meth:`.ImageBuffer.release` function.
+ |
+ |  Args:
+ |      dev (DeviceInfo|str|None): An optional identifier or device information object that represents a
+ |                                 video capture device that is to be immediately opened by the Grabber object.
+ |
+ |  Raises:
+ |      TypeError: dev is neither :class:`.DeviceInfo`, `str` nor `None`.
+ |      IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                    for details.
+ |
+ |  Note:
+ |      If the passed identifier does not uniquely identify a connected device by its model name, unique name,
+ |      serial, user-defined name, IPV4 address or MAC address, the function fails with :py:attr:`.ErrorCode.Ambiguous`.
+ |
+ |  Methods defined here:
+ |
+ |  __del__(self)
+ |
+ |  __init__(
+ |      self,
+ |      dev: Union[str, imagingcontrol4.devenum.DeviceInfo, NoneType] = None
+ |  )
+ |      Initialize self.  See help(type(self)) for accurate signature.
+ |
+ |  acquisition_start(self) -> None
+ |      Start the acquisition of images from the video capture device.
+ |
+ |      Raises:
+ |          IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                        for details.
+ |
+ |      Note:
+ |          A data stream has to be established before calling :py:meth:`.acquisition_start` or by
+ |          using :py:meth:`.stream_setup`. This operation is equivalent to executing the `AcquisitionStart` command
+ |          on the video capture device's property map.
+ |
+ |  acquisition_stop(self) -> None
+ |      Stops the acquisition of images from the video capture device.
+ |
+ |      Raises:
+ |          IC4Exception: If the acquisition could not be stopped. Check :attr:`.IC4Exception.code` and
+ |                        :attr:`.IC4Exception.message` for details.
+ |
+ |      Note:
+ |          Acquisition has to be started using :py:meth:`.acquisition_start` or :py:meth:`.stream_setup` before
+ |          calling acquisition_stop. This operation is equivalent to executing the `AcquisitionStop` command on
+ |          the video capture device's property map.
+ |
+ |  device_close(self) -> None
+ |      Close the currently opened video capture device.
+ |
+ |      If there is an aqcuisition active, the acquisition is stopped.
+ |      If there is a stream established, the stream is stopped.
+ |
+ |      Raises:
+ |          IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                        for details.
+ |
+ |  device_open(self, dev: Union[imagingcontrol4.devenum.DeviceInfo, str]) -> None
+ |      Open the video capture device specified by the passed identifier or device information object.
+ |
+ |      Args:
+ |          dev (DeviceInfo|str): A identifier or device information object representing the video capture
+ |                                device to be opened
+ |
+ |      Raises:
+ |          TypeError: dev is neither :class:`.DeviceInfo` nor `str`.
+ |          IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                        for details.
+ |
+ |      Note:
+ |          If the passed identifier does not uniquely identify a connected device by its model name, unique name,
+ |          serial, user-defined name, IPV4 address or MAC address, the function fails with :py:attr:`.ErrorCode.Ambiguous`.
+ |
+ |  device_open_from_state(self, arr: bytearray) -> None
+ |      Restore the opened device and its settings from a memory buffer containing data that was previously written
+ |      by :py:meth:`device_save_state`.
+ |
+ |      Args:
+ |          arr (bytearray): A buffer containing data that was written by device_save_state()
+ |
+ |      Note:
+ |          The grabber must not have a device opened when calling this function.
+ |
+ |      Raises:
+ |          IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                        for details.
+ |
+ |  device_open_from_state_file(self, path: Union[pathlib._local.Path, str]) -> None
+ |      Restore the opened device and its settings from a file that was previously written by
+ |      :py:meth:`device_save_state_to_file`.
+ |
+ |      Args:
+ |          path (Path|str): Path to the file to containing the device state.
+ |
+ |      Note:
+ |          The grabber must not have a device opened when calling this function.
+ |
+ |      Raises:
+ |          IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                        for details.
+ |
+ |  device_save_state(self) -> bytearray
+ |      Saves the opened device and all its settings in a memory buffer.
+ |
+ |      Returns:
+ |          bytearray: A byte array containing the device state information.
+ |
+ |      Note:
+ |          Use :py:meth:`device_open_from_state` to restore the device state at a later time.
+ |
+ |      Raises:
+ |          IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                        for details.
+ |
+ |  device_save_state_to_file(self, path: Union[pathlib._local.Path, str]) -> None
+ |      Save the opened device and all its settings in a file.
+ |
+ |      Args:
+ |          path (Path|str): Path to the file to save the device state in.
+ |
+ |      Note:
+ |          Use :py:meth:`.device_open_from_state_file` to restore the device state at a later time.
+ |
+ |      Raises:
+ |          IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                        for details.
+ |
+ |  event_add_device_lost(
+ |      self,
+ |      handler: Callable[[ForwardRef('Grabber')], NoneType]
+ |  ) -> imagingcontrol4.grabber.Grabber.DeviceLostNotificationToken
+ |      Register a callback function to be called in the event that the currently opened video capture device
+ |      becomes unavailable.
+ |
+ |      Args:
+ |          handler (Callable[[Grabber], None]): The callback function to be called if the device is lost
+ |
+ |      Returns:
+ |          DeviceLostNotificationToken: A token that can be used to unregister the callback using
+ |          :py:meth:`.event_remove_device_lost`.
+ |
+ |      Raises:
+ |          IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                        for details.
+ |
+ |  event_remove_device_lost(
+ |      self,
+ |      token: imagingcontrol4.grabber.Grabber.DeviceLostNotificationToken
+ |  )
+ |      Unregister a device-lost handler that was previously registered using :py:meth:`.event_add_device_lost`.
+ |
+ |      Args:
+ |          token (DeviceLostNotificationToken): The token that was returned from the registration function
+ |
+ |      Raises:
+ |          IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                        for details.
+ |
+ |  stream_setup(
+ |      self,
+ |      sink: Optional[imagingcontrol4.sink.Sink] = None,
+ |      display: Optional[imagingcontrol4.display.Display] = None,
+ |      setup_option: imagingcontrol4.grabber.StreamSetupOption = <StreamSetupOption.ACQUISITION_START: 1>
+ |  ) -> None
+ |      Establish the data stream from the device.
+ |
+ |      A data stream is required for image acquisition from the video capture device,
+ |      and must include a sink, or a display, or both.
+ |
+ |      Args:
+ |          sink (Sink): An object derived from the Sink class
+ |          display (Display): An object derived from the Display class
+ |          setup_option (StreamSetupOption): Specifies whether to immediately start acquisition after the
+ |          data stream was set up successfully (Default: StreamSetupOption.ACQUISITION_START)
+ |
+ |      Note:
+ |          A device has to be opened using :py:meth:`device_open` or one of its sibling functions before
+ |          calling stream_setup.
+ |
+ |      Raises:
+ |          IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                        for details.
+ |
+ |  stream_stop(self) -> None
+ |      Stop the data stream from the device.
+ |
+ |      Raises:
+ |          IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                        for details.
+ |
+ |  ----------------------------------------------------------------------
+ |  Readonly properties defined here:
+ |
+ |  device_info
+ |      Return information about the currently opened video capture device.
+ |
+ |      Returns:
+ |          DeviceInfo
+ |
+ |      Raises:
+ |          IC4Exception: If the Grabber does not have a deviced opened.
+ |
+ |  device_property_map
+ |      Return the property map for the currently opened video capture device.
+ |
+ |      The property map returned from this function is the origin for all device feature manipulation operations.
+ |
+ |      Returns:
+ |          PropertyMap
+ |
+ |      Raises:
+ |          IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                        for details.
+ |
+ |  display
+ |      Return the Display that was passed to stream_setup while the data stream is active.
+ |
+ |      Returns:
+ |          Display
+ |
+ |      Raises:
+ |          RuntimeError: If there was no display set
+ |
+ |  driver_property_map
+ |      Return the property map for the driver of the currently opened video capture device.
+ |
+ |      The property map returned from this function is the origin for driver-related feature manipulation operations.
+ |
+ |      Returns:
+ |          PropertyMap
+ |
+ |      Raises:
+ |          IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                        for details.
+ |
+ |  is_acquisition_active
+ |      True if image acquisition was started, otherwise False.
+ |
+ |  is_device_open
+ |      Check whether a device is opened.
+ |
+ |      Returns:
+ |          bool: True, if there is currently a video capture device opened, otherwise False.
+ |
+ |  is_device_valid
+ |      Check whether the opened device is accessible.
+ |
+ |      Returns:
+ |          bool: True, if the currently opened video capture device is still accessible, otherwise False.
+ |
+ |      Note:
+ |          There are multiple reasons for why this function may return False:
+ |           - No device has been opened
+ |           - The device was disconnected
+ |           - There is a loose hardware connection
+ |           - There was an internal error in the video capture device
+ |           - There was a driver error
+ |
+ |  is_streaming
+ |      Check if a stream is running.
+ |
+ |      Returns:
+ |          bool: True if a data stream has been established, otherwise False.
+ |
+ |  sink
+ |      Return the Sink that was passed to :py:meth:`.stream_setup` while the data stream is active.
+ |
+ |      Returns:
+ |          Sink
+ |
+ |      Raises:
+ |          RuntimeError: If there was no sink set
+ |
+ |  stream_statistics
+ |      Queries statistics for the currently active or previously stopped data stream.
+ |
+ |      Raises:
+ |          IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+ |                        for details.
+ |
+ |  ----------------------------------------------------------------------
+ |  Data descriptors defined here:
+ |
+ |  __dict__
+ |      dictionary for instance variables
+ |
+ |  __weakref__
+ |      list of weak references to the object
+ |
+ |  ----------------------------------------------------------------------
+ |  Data and other attributes defined here:
+ |
+ |  DeviceLostNotificationToken = <class 'imagingcontrol4.grabber.Grabber....
+ |      Represents a registered device-lost callback.
+ |
+ |      When a callback function is registered using :py:meth:`.event_add_device_lost`, a token is returned.
+ |
+ |      The token can then be used to remove the callback using :py:meth:`.event_remove_device_lost` at a later time.
+ |
+ |
+ |  StreamStatistics = <class 'imagingcontrol4.grabber.Grabber.StreamStati...
+ |      Contains statistics about a data stream.
+ |
+ |
+ |  __annotations__ = {'_device_lost_notifications': 'dict[DeviceLostNotif...
+
+>>>>>> dir(pm)
+['__class__', '__del__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__firstlineno__', '__format__', '__ge__', '__getattribute__', '__getitem__', '__getstate__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__iter__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__static_attributes__', '__str__', '__subclasshook__', '__weakref__', '_c_void_pp', '_get_prop_handle', '_handle', 'all', 'connect_chunkdata', 'deserialize', 'deserialize_from_file', 'execute_command', 'find', 'find_boolean', 'find_category', 'find_command', 'find_enumeration', 'find_float', 'find_integer', 'find_register', 'find_string', 'get_value_bool', 'get_value_float', 'get_value_int', 'get_value_str', 'root_category', 'serialize', 'serialize_to_file', 'set_value', 'try_set_value']
+>>>
+>>> help(pm.find_integer)
+Help on method find_integer in module imagingcontrol4.properties:
+
+find_integer(integer_name: str) -> imagingcontrol4.properties.PropInteger method of imagingcontrol4.properties.PropertyMap instance
+    Finds the integer property with a specified name in the property map.
+
+    Args:
+        integer_name (str): The name of the integer property to find
+
+    Returns:
+        PropInteger: The requested integer property object
+
+    Raises:
+        IC4Exception: An error occurred. Check :attr:`.IC4Exception.code` and :attr:`.IC4Exception.message`
+                    for details.
+
+>>>
+>>> dir(ic4.ImageBuffer)
+['MetaData', 'PngCompressionLevel', '_NPArrayParams', '__annotations__', '__class__', '__del__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__firstlineno__', '__format__', '__ge__', '__getattribute__', '__getstate__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__static_attributes__', '__str__', '__subclasshook__', '__weakref__', '_np_array_params', '_numpy_wrap', 'buffer_size', 'copy_from', 'image_type', 'is_writable', 'meta_data', 'numpy_copy', 'numpy_wrap', 'pitch', 'pointer', 'release', 'save_as_bmp', 'save_as_jpeg', 'save_as_png', 'save_as_tiff']
+>>> help(ic4.ImageBuffer.numpy_wrap)
+Help on function numpy_wrap in module imagingcontrol4.imagebuffer:
+
+numpy_wrap(self) -> numpy.ndarray[tuple[int, ...], numpy.dtype[typing.Any]]
+    Create a numpy array using the contents of this image buffer.
+
+    The numpy array can only be accessed while references to the image buffer exist.
+    Trying to access the numpy array after the final reference to the image buffer
+    can lead to unexpected behavior.
+
+    The element type and shape of the `NDArray` depend on the pixel format of the image buffer:
+
+    +------------------------+--------------+----------------------+
+    | Pixel Format           | Element Type | Shape                |
+    +========================+==============+======================+
+    | `Mono8`,               | `c_ubyte`    | `(Height, Width, 1)` |
+    | `BayerBG8`,            |              |                      |
+    | `BayerRG8`,            |              |                      |
+    | `BayerRG8`,            |              |                      |
+    | `BayerGR8`             |              |                      |
+    +------------------------+--------------+----------------------+
+    | `Mono16`,              | `c_ushort`   | `(Height, Width, 1)` |
+    | `BayerBG16`,           |              |                      |
+    | `BayerRG16`,           |              |                      |
+    | `BayerRG16`,           |              |                      |
+    | `BayerGR16`            |              |                      |
+    +------------------------+--------------+----------------------+
+    | `BGR8`                 | `c_ubyte`    | `(Height, Width, 3)` |
+    +------------------------+--------------+----------------------+
+    | `BGRa8`                | `c_ubyte`    | `(Height, Width, 4)` |
+    +------------------------+--------------+----------------------+
+    | `BGRa16`               | `c_ushort`   | `(Height, Width, 4)` |
+    +------------------------+--------------+----------------------+
+
+    Returns:
+        NDArray[Any]: A numpy array using the contents of this image buffer.
+
+    Raises:
+        RuntimeError: The pixel format of the image buffer is not supported.
+
+>>>
+>>> dir(ic4.PixelFormat)
+['AnyBayer10p', 'AnyBayer12p', 'AnyBayer16', 'AnyBayer8', 'BGR8', 'BGRa16', 'BGRa8', 'BayerBG10p', 'BayerBG12Packed', 'BayerBG12p', 'BayerBG16', 'BayerBG8', 'BayerGB10p', 'BayerGB12Packed', 'BayerGB12p', 'BayerGB16', 'BayerGB8', 'BayerGR10p', 'BayerGR12Packed', 'BayerGR12p', 'BayerGR16', 'BayerGR8', 'BayerRG10p', 'BayerRG12Packed', 'BayerRG12p', 'BayerRG16', 'BayerRG8', 'Invalid', 'Mono10p', 'Mono12Packed', 'Mono12p', 'Mono16', 'Mono8', 'PolarizedADIMono16', 'PolarizedADIMono8', 'PolarizedADIRGB16', 'PolarizedADIRGB8', 'PolarizedBayerBG12Packed', 'PolarizedBayerBG12p', 'PolarizedBayerBG16', 'PolarizedBayerBG8', 'PolarizedMono12Packed', 'PolarizedMono12p', 'PolarizedMono16', 'PolarizedMono8', 'Unspecified', 'YCbCr411_8', 'YCbCr411_8_CbYYCrYY', 'YCbCr422_8', 'YUV422_8', '__abs__', '__add__', '__and__', '__bool__', '__ceil__', '__class__', '__contains__', '__delattr__', '__dir__', '__divmod__', '__doc__', '__eq__', '__float__', '__floor__', '__floordiv__', '__format__', '__ge__', '__getattribute__', '__getitem__', '__getnewargs__', '__getstate__', '__gt__', '__hash__', '__index__', '__init__', '__init_subclass__', '__int__', '__invert__', '__iter__', '__le__', '__len__', '__lshift__', '__lt__', '__members__', '__mod__', '__module__', '__mul__', '__name__', '__ne__', '__neg__', '__new__', '__or__', '__pos__', '__pow__', '__qualname__', '__radd__', '__rand__', '__rdivmod__', '__reduce__', '__reduce_ex__', '__repr__', '__rfloordiv__', '__rlshift__', '__rmod__', '__rmul__', '__ror__', '__round__', '__rpow__', '__rrshift__', '__rshift__', '__rsub__', '__rtruediv__', '__rxor__', '__setattr__', '__sizeof__', '__str__', '__sub__', '__subclasshook__', '__truediv__', '__trunc__', '__xor__', 'as_integer_ratio', 'bit_count', 'bit_length', 'conjugate', 'denominator', 'from_bytes', 'imag', 'is_integer', 'numerator', 'real', 'to_bytes']
+>>>
+>>> help(ic4.PixelFormat)
+Help on class PixelFormat in module imagingcontrol4.imagetype:
+
+class PixelFormat(enum.IntEnum)
+ |  PixelFormat(*values)
+ |
+ |  Defines the possible representations of pixels in an image.
+ |
+ |  The pixel format is part of the :py:class:`.ImageType`.
+ |
+ |  Method resolution order:
+ |      PixelFormat
+ |      enum.IntEnum
+ |      builtins.int
+ |      enum.ReprEnum
+ |      enum.Enum
+ |      builtins.object
+ |
+ |  Methods defined here:
+ |
+ |  __format__(self, format_spec, /) from builtins.int
+ |      Convert to a string according to format_spec.
+ |
+ |  __new__(cls, value) from enum.Enum
+ |      Create and return a new object.  See help(type) for accurate signature.
+ |
+ |  ----------------------------------------------------------------------
+ |  Data and other attributes defined here:
+ |
+ |  AnyBayer10p = <PixelFormat.AnyBayer10p: 2164981505>
+ |
+ |  AnyBayer12p = <PixelFormat.AnyBayer12p: 2165112577>
+ |
+ |  AnyBayer16 = <PixelFormat.AnyBayer16: 2165374721>
+ |
+ |  AnyBayer8 = <PixelFormat.AnyBayer8: 2164850433>
+ |
+ |  BGR8 = <PixelFormat.BGR8: 35127317>
+ |
+ |  BGRa16 = <PixelFormat.BGRa16: 37748817>
+ |
+ |  BGRa8 = <PixelFormat.BGRa8: 35651607>
+ |
+ |  BayerBG10p = <PixelFormat.BayerBG10p: 17432658>
+ |
+ |  BayerBG12Packed = <PixelFormat.BayerBG12Packed: 17563693>
+ |
+ |  BayerBG12p = <PixelFormat.BayerBG12p: 17563731>
+ |
+ |  BayerBG16 = <PixelFormat.BayerBG16: 17825841>
+ |
+ |  BayerBG8 = <PixelFormat.BayerBG8: 17301515>
+ |
+ |  BayerGB10p = <PixelFormat.BayerGB10p: 17432660>
+ |
+ |  BayerGB12Packed = <PixelFormat.BayerGB12Packed: 17563692>
+ |
+ |  BayerGB12p = <PixelFormat.BayerGB12p: 17563733>
+ |
+ |  BayerGB16 = <PixelFormat.BayerGB16: 17825840>
+ |
+ |  BayerGB8 = <PixelFormat.BayerGB8: 17301514>
+ |
+ |  BayerGR10p = <PixelFormat.BayerGR10p: 17432662>
+ |
+ |  BayerGR12Packed = <PixelFormat.BayerGR12Packed: 17563690>
+ |
+ |  BayerGR12p = <PixelFormat.BayerGR12p: 17563735>
+ |
+ |  BayerGR16 = <PixelFormat.BayerGR16: 17825838>
+ |
+ |  BayerGR8 = <PixelFormat.BayerGR8: 17301512>
+ |
+ |  BayerRG10p = <PixelFormat.BayerRG10p: 17432664>
+ |
+ |  BayerRG12Packed = <PixelFormat.BayerRG12Packed: 17563691>
+ |
+ |  BayerRG12p = <PixelFormat.BayerRG12p: 17563737>
+ |
+ |  BayerRG16 = <PixelFormat.BayerRG16: 17825839>
+ |
+ |  BayerRG8 = <PixelFormat.BayerRG8: 17301513>
+ |
+ |  Invalid = <PixelFormat.Invalid: -1>
+ |
+ |  Mono10p = <PixelFormat.Mono10p: 17432646>
+ |
+ |  Mono12Packed = <PixelFormat.Mono12Packed: 17563654>
+ |
+ |  Mono12p = <PixelFormat.Mono12p: 17563719>
+ |
+ |  Mono16 = <PixelFormat.Mono16: 17825799>
+ |
+ |  Mono8 = <PixelFormat.Mono8: 17301505>
+ |
+ |  PolarizedADIMono16 = <PixelFormat.PolarizedADIMono16: 2183135489>
+ |
+ |  PolarizedADIMono8 = <PixelFormat.PolarizedADIMono8: 2183135488>
+ |
+ |  PolarizedADIRGB16 = <PixelFormat.PolarizedADIRGB16: 2183135491>
+ |
+ |  PolarizedADIRGB8 = <PixelFormat.PolarizedADIRGB8: 2183135490>
+ |
+ |  PolarizedBayerBG12Packed = <PixelFormat.PolarizedBayerBG12Packed: 2165...
+ |
+ |  PolarizedBayerBG12p = <PixelFormat.PolarizedBayerBG12p: 2165047310>
+ |
+ |  PolarizedBayerBG16 = <PixelFormat.PolarizedBayerBG16: 2165309455>
+ |
+ |  PolarizedBayerBG8 = <PixelFormat.PolarizedBayerBG8: 2164785165>
+ |
+ |  PolarizedMono12Packed = <PixelFormat.PolarizedMono12Packed: 2165047312...
+ |
+ |  PolarizedMono12p = <PixelFormat.PolarizedMono12p: 2165047307>
+ |
+ |  PolarizedMono16 = <PixelFormat.PolarizedMono16: 2165309452>
+ |
+ |  PolarizedMono8 = <PixelFormat.PolarizedMono8: 2164785162>
+ |
+ |  Unspecified = <PixelFormat.Unspecified: 0>
+ |
+ |  YCbCr411_8 = <PixelFormat.YCbCr411_8: 34340954>
+ |
+ |  YCbCr411_8_CbYYCrYY = <PixelFormat.YCbCr411_8_CbYYCrYY: 34340924>
+ |
+ |  YCbCr422_8 = <PixelFormat.YCbCr422_8: 34603067>
+ |
+ |  YUV422_8 = <PixelFormat.YUV422_8: 34603058>
+ |
+ |  ----------------------------------------------------------------------
+ |  Methods inherited from enum.IntEnum:
+ |
+ |  __repr__(self) from enum.Enum
+ |      Return repr(self).
+ |
+ |  __str__ = __repr__(self, /) from builtins.int
+ |      Return repr(self).
+ |
+ |  ----------------------------------------------------------------------
+ |  Methods inherited from builtins.int:
+ |
+ |  __abs__(self, /)
+ |      abs(self)
+ |
+ |  __add__(self, value, /)
+ |      Return self+value.
+ |
+ |  __and__(self, value, /)
+ |      Return self&value.
+ |
+ |  __bool__(self, /)
+ |      True if self else False
+ |
+ |  __ceil__(self, /)
+ |      Ceiling of an Integral returns itself.
+ |
+ |  __divmod__(self, value, /)
+ |      Return divmod(self, value).
+ |
+ |  __eq__(self, value, /)
+ |      Return self==value.
+ |
+ |  __float__(self, /)
+ |      float(self)
+ |
+ |  __floor__(self, /)
+ |      Flooring an Integral returns itself.
+ |
+ |  __floordiv__(self, value, /)
+ |      Return self//value.
+ |
+ |  __ge__(self, value, /)
+ |      Return self>=value.
+ |
+ |  __getattribute__(self, name, /)
+ |      Return getattr(self, name).
+ |
+ |  __getnewargs__(self, /)
+ |
+ |  __gt__(self, value, /)
+ |      Return self>value.
+ |
+ |  __hash__(self, /)
+ |      Return hash(self).
+ |
+ |  __index__(self, /)
+ |      Return self converted to an integer, if self is suitable for use as an index into a list.
+ |
+ |  __int__(self, /)
+ |      int(self)
+ |
+ |  __invert__(self, /)
+ |      ~self
+ |
+ |  __le__(self, value, /)
+ |      Return self<=value.
+ |
+ |  __lshift__(self, value, /)
+ |      Return self<<value.
+ |
+ |  __lt__(self, value, /)
+ |      Return self<value.
+ |
+ |  __mod__(self, value, /)
+ |      Return self%value.
+ |
+ |  __mul__(self, value, /)
+ |      Return self*value.
+ |
+ |  __ne__(self, value, /)
+ |      Return self!=value.
+ |
+ |  __neg__(self, /)
+ |      -self
+ |
+ |  __or__(self, value, /)
+ |      Return self|value.
+ |
+ |  __pos__(self, /)
+ |      +self
+ |
+ |  __pow__(self, value, mod=None, /)
+ |      Return pow(self, value, mod).
+ |
+ |  __radd__(self, value, /)
+ |      Return value+self.
+ |
+ |  __rand__(self, value, /)
+ |      Return value&self.
+ |
+ |  __rdivmod__(self, value, /)
+ |      Return divmod(value, self).
+ |
+ |  __rfloordiv__(self, value, /)
+ |      Return value//self.
+ |
+ |  __rlshift__(self, value, /)
+ |      Return value<<self.
+ |
+ |  __rmod__(self, value, /)
+ |      Return value%self.
+ |
+ |  __rmul__(self, value, /)
+ |      Return value*self.
+ |
+ |  __ror__(self, value, /)
+ |      Return value|self.
+ |
+ |  __round__(self, ndigits=<unrepresentable>, /)
+ |      Rounding an Integral returns itself.
+ |
+ |      Rounding with an ndigits argument also returns an integer.
+ |
+ |  __rpow__(self, value, mod=None, /)
+ |      Return pow(value, self, mod).
+ |
+ |  __rrshift__(self, value, /)
+ |      Return value>>self.
+ |
+ |  __rshift__(self, value, /)
+ |      Return self>>value.
+ |
+ |  __rsub__(self, value, /)
+ |      Return value-self.
+ |
+ |  __rtruediv__(self, value, /)
+ |      Return value/self.
+ |
+ |  __rxor__(self, value, /)
+ |      Return value^self.
+ |
+ |  __sizeof__(self, /)
+ |      Returns size in memory, in bytes.
+ |
+ |  __sub__(self, value, /)
+ |      Return self-value.
+ |
+ |  __truediv__(self, value, /)
+ |      Return self/value.
+ |
+ |  __trunc__(self, /)
+ |      Truncating an Integral returns itself.
+ |
+ |  __xor__(self, value, /)
+ |      Return self^value.
+ |
+ |  as_integer_ratio(self, /)
+ |      Return a pair of integers, whose ratio is equal to the original int.
+ |
+ |      The ratio is in lowest terms and has a positive denominator.
+ |
+ |      >>> (10).as_integer_ratio()
+ |      (10, 1)
+ |      >>> (-10).as_integer_ratio()
+ |      (-10, 1)
+ |      >>> (0).as_integer_ratio()
+ |      (0, 1)
+ |
+ |  bit_count(self, /)
+ |      Number of ones in the binary representation of the absolute value of self.
+ |
+ |      Also known as the population count.
+ |
+ |      >>> bin(13)
+ |      '0b1101'
+ |      >>> (13).bit_count()
+ |      3
+ |
+ |  bit_length(self, /)
+ |      Number of bits necessary to represent self in binary.
+ |
+ |      >>> bin(37)
+ |      '0b100101'
+ |      >>> (37).bit_length()
+ |      6
+ |
+ |  conjugate(self, /)
+ |      Returns self, the complex conjugate of any int.
+ |
+ |  is_integer(self, /)
+ |      Returns True. Exists for duck type compatibility with float.is_integer.
+ |
+ |  to_bytes(self, /, length=1, byteorder='big', *, signed=False)
+ |      Return an array of bytes representing an integer.
+ |
+ |      length
+ |        Length of bytes object to use.  An OverflowError is raised if the
+ |        integer is not representable with the given number of bytes.  Default
+ |        is length 1.
+ |      byteorder
+ |        The byte order used to represent the integer.  If byteorder is 'big',
+ |        the most significant byte is at the beginning of the byte array.  If
+ |        byteorder is 'little', the most significant byte is at the end of the
+ |        byte array.  To request the native byte order of the host system, use
+ |        sys.byteorder as the byte order value.  Default is to use 'big'.
+ |      signed
+ |        Determines whether two's complement is used to represent the integer.
+ |        If signed is False and a negative integer is given, an OverflowError
+ |        is raised.
+ |
+ |  ----------------------------------------------------------------------
+ |  Class methods inherited from builtins.int:
+ |
+ |  from_bytes(bytes, byteorder='big', *, signed=False)
+ |      Return the integer represented by the given array of bytes.
+ |
+ |      bytes
+ |        Holds the array of bytes to convert.  The argument must either
+ |        support the buffer protocol or be an iterable object producing bytes.
+ |        Bytes and bytearray are examples of built-in objects that support the
+ |        buffer protocol.
+ |      byteorder
+ |        The byte order used to represent the integer.  If byteorder is 'big',
+ |        the most significant byte is at the beginning of the byte array.  If
+ |        byteorder is 'little', the most significant byte is at the end of the
+ |        byte array.  To request the native byte order of the host system, use
+ |        sys.byteorder as the byte order value.  Default is to use 'big'.
+ |      signed
+ |        Indicates whether two's complement is used to represent the integer.
+ |
+ |  ----------------------------------------------------------------------
+ |  Data descriptors inherited from builtins.int:
+ |
+ |  denominator
+ |      the denominator of a rational number in lowest terms
+ |
+ |  imag
+ |      the imaginary part of a complex number
+ |
+ |  numerator
+ |      the numerator of a rational number in lowest terms
+ |
+ |  real
+ |      the real part of a complex number
+ |
+ |  ----------------------------------------------------------------------
+ |  Methods inherited from enum.Enum:
+ |
+ |  __dir__(self)
+ |      Returns public methods and other interesting attributes.
+ |
+ |  __init__(self, *args, **kwds)
+ |      Initialize self.  See help(type(self)) for accurate signature.
+ |
+ |  __reduce_ex__(self, proto)
+ |      Helper for pickle.
+ |
+ |  ----------------------------------------------------------------------
+ |  Data descriptors inherited from enum.Enum:
+ |
+ |  name
+ |      The name of the Enum member.
+ |
+ |  value
+ |      The value of the Enum member.
+ |
+ |  ----------------------------------------------------------------------
+ |  Static methods inherited from enum.EnumType:
+ |
+ |  __contains__(value)
+ |      Return True if `value` is in `cls`.
+ |
+ |      `value` is in `cls` if:
+ |      1) `value` is a member of `cls`, or
+ |      2) `value` is the value of one of the `cls`'s members.
+ |      3) `value` is a pseudo-member (flags)
+ |
+ |  __getitem__(name)
+ |      Return the member matching `name`.
+ |
+ |  __iter__()
+ |      Return members in definition order.
+ |
+ |  __len__()
+ |      Return the number of members (no aliases)
+ |
+ |  ----------------------------------------------------------------------
+ |  Readonly properties inherited from enum.EnumType:
+ |
+ |  __members__
+ |      Returns a mapping of member name->value.
+ |
+ |      This mapping lists all enum members, including aliases. Note that this
+ |      is a read-only view of the internal mapping.
+
+>>>
+>>>
+>>> dir(ic4.ImageType)
+['__class__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__firstlineno__', '__format__', '__ge__', '__getattribute__', '__getstate__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__static_attributes__', '__str__', '__subclasshook__', '__weakref__', '_from_native', '_to_native', 'height', 'pixel_format', 'width', 'with_pixel_format', 'with_size']
+>>>
+>>> dir(ic4.QueueSink)
+['Mode', 'QueueSizes', '__abstractmethods__', '__annotations__', '__class__', '__del__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__firstlineno__', '__format__', '__ge__', '__getattribute__', '__getstate__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__slots__', '__static_attributes__', '__str__', '__subclasshook__', '__weakref__', '_abc_impl', 'alloc_and_queue_buffers', 'is_attached', 'is_cancel_requested', 'mode', 'output_image_type', 'pop_output_buffer', 'queue_sizes', 'try_pop_output_buffer', 'type']
+>>> help(ic4.QueueSink.try_pop_output_buffer)
+Help on function try_pop_output_buffer in module imagingcontrol4.queuesink:
+
+try_pop_output_buffer(self) -> Optional[imagingcontrol4.imagebuffer.ImageBuffer]
+    Tries to retrieve a buffer that was filled with image data from the sink's output queue.
+
+    In contrast to :py:meth:`.pop_output_buffer`, this function does not raise an exception
+    in case of an error.
+
+    This operation is only valid while the sink is connected to a device in a data stream.
+
+    The buffers are retrieved in order they were received from the video capture device; the oldest image is
+    returned first.
+
+    After a successfull call, the program owns the image buffer through the :py:class:`.ImageBuffer` reference.
+    The image buffer object must be deleted, or :py:meth:`.ImageBuffer.release` must be called to put the image
+    buffer into the sink's free queue for later reuse.
+
+    Returns:
+        Optional[ImageBuffer]: A filled image buffer, or `None` if no image was available.
+
+>>>
+>>>
+>>>
+>>>
+>>> dir(ic4.StreamSetupOption)
+['ACQUISITION_START', 'DEFER_ACQUISITION_START', '__abs__', '__add__', '__and__', '__bool__', '__ceil__', '__class__', '__contains__', '__delattr__', '__dir__', '__divmod__', '__doc__', '__eq__', '__float__', '__floor__', '__floordiv__', '__format__', '__ge__', '__getattribute__', '__getitem__', '__getnewargs__', '__getstate__', '__gt__', '__hash__', '__index__', '__init__', '__init_subclass__', '__int__', '__invert__', '__iter__', '__le__', '__len__', '__lshift__', '__lt__', '__members__', '__mod__', '__module__', '__mul__', '__name__', '__ne__', '__neg__', '__new__', '__or__', '__pos__', '__pow__', '__qualname__', '__radd__', '__rand__', '__rdivmod__', '__reduce__', '__reduce_ex__', '__repr__', '__rfloordiv__', '__rlshift__', '__rmod__', '__rmul__', '__ror__', '__round__', '__rpow__', '__rrshift__', '__rshift__', '__rsub__', '__rtruediv__', '__rxor__', '__setattr__', '__sizeof__', '__str__', '__sub__', '__subclasshook__', '__truediv__', '__trunc__', '__xor__', 'as_integer_ratio', 'bit_count', 'bit_length', 'conjugate', 'denominator', 'from_bytes', 'imag', 'is_integer', 'numerator', 'real', 'to_bytes']
+>>> help(ic4.StreamSetupOption)
+Help on class StreamSetupOption in module imagingcontrol4.grabber:
+
+class StreamSetupOption(enum.IntEnum)
+ |  StreamSetupOption(*values)
+ |
+ |  Enum describing options to customize the behavior for :meth:`.Grabber.stream_setup`.
+ |
+ |  Method resolution order:
+ |      StreamSetupOption
+ |      enum.IntEnum
+ |      builtins.int
+ |      enum.ReprEnum
+ |      enum.Enum
+ |      builtins.object
+ |
+ |  Methods defined here:
+ |
+ |  __format__(self, format_spec, /) from builtins.int
+ |      Convert to a string according to format_spec.
+ |
+ |  __new__(cls, value) from enum.Enum
+ |      Create and return a new object.  See help(type) for accurate signature.
+ |
+ |  ----------------------------------------------------------------------
+ |  Data and other attributes defined here:
+ |
+ |  ACQUISITION_START = <StreamSetupOption.ACQUISITION_START: 1>
+ |
+ |  DEFER_ACQUISITION_START = <StreamSetupOption.DEFER_ACQUISITION_START: ...
+ |
+ |  ----------------------------------------------------------------------
+ |  Methods inherited from enum.IntEnum:
+ |
+ |  __repr__(self) from enum.Enum
+ |      Return repr(self).
+ |
+ |  __str__ = __repr__(self, /) from builtins.int
+ |      Return repr(self).
+ |
+ |  ----------------------------------------------------------------------
+ |  Methods inherited from builtins.int:
+ |
+ |  __abs__(self, /)
+ |      abs(self)
+ |
+ |  __add__(self, value, /)
+ |      Return self+value.
+ |
+ |  __and__(self, value, /)
+ |      Return self&value.
+ |
+ |  __bool__(self, /)
+ |      True if self else False
+ |
+ |  __ceil__(self, /)
+ |      Ceiling of an Integral returns itself.
+ |
+ |  __divmod__(self, value, /)
+ |      Return divmod(self, value).
+ |
+ |  __eq__(self, value, /)
+ |      Return self==value.
+ |
+ |  __float__(self, /)
+ |      float(self)
+ |
+ |  __floor__(self, /)
+ |      Flooring an Integral returns itself.
+ |
+ |  __floordiv__(self, value, /)
+ |      Return self//value.
+ |
+ |  __ge__(self, value, /)
+ |      Return self>=value.
+ |
+ |  __getattribute__(self, name, /)
+ |      Return getattr(self, name).
+ |
+ |  __getnewargs__(self, /)
+ |
+ |  __gt__(self, value, /)
+ |      Return self>value.
+ |
+ |  __hash__(self, /)
+ |      Return hash(self).
+ |
+ |  __index__(self, /)
+ |      Return self converted to an integer, if self is suitable for use as an index into a list.
+ |
+ |  __int__(self, /)
+ |      int(self)
+ |
+ |  __invert__(self, /)
+ |      ~self
+ |
+ |  __le__(self, value, /)
+ |      Return self<=value.
+ |
+ |  __lshift__(self, value, /)
+ |      Return self<<value.
+ |
+ |  __lt__(self, value, /)
+ |      Return self<value.
+ |
+ |  __mod__(self, value, /)
+ |      Return self%value.
+ |
+ |  __mul__(self, value, /)
+ |      Return self*value.
+ |
+ |  __ne__(self, value, /)
+ |      Return self!=value.
+ |
+ |  __neg__(self, /)
+ |      -self
+ |
+ |  __or__(self, value, /)
+ |      Return self|value.
+ |
+ |  __pos__(self, /)
+ |      +self
+ |
+ |  __pow__(self, value, mod=None, /)
+ |      Return pow(self, value, mod).
+ |
+ |  __radd__(self, value, /)
+ |      Return value+self.
+ |
+ |  __rand__(self, value, /)
+ |      Return value&self.
+ |
+ |  __rdivmod__(self, value, /)
+ |      Return divmod(value, self).
+ |
+ |  __rfloordiv__(self, value, /)
+ |      Return value//self.
+ |
+ |  __rlshift__(self, value, /)
+ |      Return value<<self.
+ |
+ |  __rmod__(self, value, /)
+ |      Return value%self.
+ |
+ |  __rmul__(self, value, /)
+ |      Return value*self.
+ |
+ |  __ror__(self, value, /)
+ |      Return value|self.
+ |
+ |  __round__(self, ndigits=<unrepresentable>, /)
+ |      Rounding an Integral returns itself.
+ |
+ |      Rounding with an ndigits argument also returns an integer.
+ |
+ |  __rpow__(self, value, mod=None, /)
+ |      Return pow(value, self, mod).
+ |
+ |  __rrshift__(self, value, /)
+ |      Return value>>self.
+ |
+ |  __rshift__(self, value, /)
+ |      Return self>>value.
+ |
+ |  __rsub__(self, value, /)
+ |      Return value-self.
+ |
+ |  __rtruediv__(self, value, /)
+ |      Return value/self.
+ |
+ |  __rxor__(self, value, /)
+ |      Return value^self.
+ |
+ |  __sizeof__(self, /)
+ |      Returns size in memory, in bytes.
+ |
+ |  __sub__(self, value, /)
+ |      Return self-value.
+ |
+ |  __truediv__(self, value, /)
+ |      Return self/value.
+ |
+ |  __trunc__(self, /)
+ |      Truncating an Integral returns itself.
+ |
+ |  __xor__(self, value, /)
+ |      Return self^value.
+ |
+ |  as_integer_ratio(self, /)
+ |      Return a pair of integers, whose ratio is equal to the original int.
+ |
+ |      The ratio is in lowest terms and has a positive denominator.
+ |
+ |      >>> (10).as_integer_ratio()
+ |      (10, 1)
+ |      >>> (-10).as_integer_ratio()
+ |      (-10, 1)
+ |      >>> (0).as_integer_ratio()
+ |      (0, 1)
+ |
+ |  bit_count(self, /)
+ |      Number of ones in the binary representation of the absolute value of self.
+ |
+ |      Also known as the population count.
+ |
+ |      >>> bin(13)
+ |      '0b1101'
+ |      >>> (13).bit_count()
+ |      3
+ |
+ |  bit_length(self, /)
+ |      Number of bits necessary to represent self in binary.
+ |
+ |      >>> bin(37)
+ |      '0b100101'
+ |      >>> (37).bit_length()
+ |      6
+ |
+ |  conjugate(self, /)
+ |      Returns self, the complex conjugate of any int.
+ |
+ |  is_integer(self, /)
+ |      Returns True. Exists for duck type compatibility with float.is_integer.
+ |
+ |  to_bytes(self, /, length=1, byteorder='big', *, signed=False)
+ |      Return an array of bytes representing an integer.
+ |
+ |      length
+ |        Length of bytes object to use.  An OverflowError is raised if the
+ |        integer is not representable with the given number of bytes.  Default
+ |        is length 1.
+ |      byteorder
+ |        The byte order used to represent the integer.  If byteorder is 'big',
+ |        the most significant byte is at the beginning of the byte array.  If
+ |        byteorder is 'little', the most significant byte is at the end of the
+ |        byte array.  To request the native byte order of the host system, use
+ |        sys.byteorder as the byte order value.  Default is to use 'big'.
+ |      signed
+ |        Determines whether two's complement is used to represent the integer.
+ |        If signed is False and a negative integer is given, an OverflowError
+ |        is raised.
+ |
+ |  ----------------------------------------------------------------------
+ |  Class methods inherited from builtins.int:
+ |
+ |  from_bytes(bytes, byteorder='big', *, signed=False)
+ |      Return the integer represented by the given array of bytes.
+ |
+ |      bytes
+ |        Holds the array of bytes to convert.  The argument must either
+ |        support the buffer protocol or be an iterable object producing bytes.
+ |        Bytes and bytearray are examples of built-in objects that support the
+ |        buffer protocol.
+ |      byteorder
+ |        The byte order used to represent the integer.  If byteorder is 'big',
+ |        the most significant byte is at the beginning of the byte array.  If
+ |        byteorder is 'little', the most significant byte is at the end of the
+ |        byte array.  To request the native byte order of the host system, use
+ |        sys.byteorder as the byte order value.  Default is to use 'big'.
+ |      signed
+ |        Indicates whether two's complement is used to represent the integer.
+ |
+ |  ----------------------------------------------------------------------
+ |  Data descriptors inherited from builtins.int:
+ |
+ |  denominator
+ |      the denominator of a rational number in lowest terms
+ |
+ |  imag
+ |      the imaginary part of a complex number
+ |
+ |  numerator
+ |      the numerator of a rational number in lowest terms
+ |
+ |  real
+ |      the real part of a complex number
+ |
+ |  ----------------------------------------------------------------------
+ |  Methods inherited from enum.Enum:
+ |
+ |  __dir__(self)
+ |      Returns public methods and other interesting attributes.
+ |
+ |  __init__(self, *args, **kwds)
+ |      Initialize self.  See help(type(self)) for accurate signature.
+ |
+ |  __reduce_ex__(self, proto)
+ |      Helper for pickle.
+ |
+ |  ----------------------------------------------------------------------
+ |  Data descriptors inherited from enum.Enum:
+ |
+ |  name
+ |      The name of the Enum member.
+ |
+ |  value
+ |      The value of the Enum member.
+ |
+ |  ----------------------------------------------------------------------
+ |  Static methods inherited from enum.EnumType:
+ |
+ |  __contains__(value)
+ |      Return True if `value` is in `cls`.
+ |
+ |      `value` is in `cls` if:
+ |      1) `value` is a member of `cls`, or
+ |      2) `value` is the value of one of the `cls`'s members.
+ |      3) `value` is a pseudo-member (flags)
+ |
+ |  __getitem__(name)
+ |      Return the member matching `name`.
+ |
+ |  __iter__()
+ |      Return members in definition order.
+ |
+ |  __len__()
+ |      Return the number of members (no aliases)
+ |
+ |  ----------------------------------------------------------------------
+ |  Readonly properties inherited from enum.EnumType:
+ |
+ |  __members__
+ |      Returns a mapping of member name->value.
+ |
+ |      This mapping lists all enum members, including aliases. Note that this
+ |      is a read-only view of the internal mapping.
+
+>>>
+>>>
+>>>
