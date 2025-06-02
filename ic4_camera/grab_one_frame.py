@@ -16,7 +16,7 @@ class MinimalListener(ic4.QueueSinkListener):
 
 
 def main():
-    # 1) Initialize the IC4 library
+    # 1) Initialize IC4 library
     try:
         ic4.Library.init()
     except ic4.IC4Exception as e:
@@ -37,7 +37,7 @@ def main():
     info = devices[0]
     print(f"Opening camera: {info.model_name}")
 
-    # 3) Open the Grabber
+    # 3) Open Grabber
     try:
         grabber = ic4.Grabber()
         grabber.device_open(info)
@@ -57,14 +57,14 @@ def main():
         grabber.device_close()
         return
 
-    # 5) Set AcquisitionMode → Continuous (required on many DMK cameras)
+    # 5) Set AcquisitionMode → Continuous
     try:
         pm.find_enumeration(ic4.PropId.ACQUISITION_MODE).value_string = "Continuous"
         print("Set ACQUISITION_MODE to Continuous")
     except ic4.IC4Exception as e:
         print("Could not set ACQUISITION_MODE:", e)
 
-    # (Optional) Set a moderate frame rate, e.g. 10 FPS
+    # (Optional) Set ACQUISITION_FRAME_RATE to 10 FPS
     try:
         pm.find_float(ic4.PropId.ACQUISITION_FRAME_RATE).value = 10.0
         print("Set ACQUISITION_FRAME_RATE to 10.0")
@@ -79,25 +79,38 @@ def main():
     except ic4.IC4Exception:
         pass
 
-    # 7) Attach a QueueSink (this will start acquisition by default)
+    # 7) Attach a QueueSink using DEFER_ACQUISITION_START to register but not start
     listener = MinimalListener()
     sink = ic4.QueueSink(listener)
     try:
-        grabber.stream_setup(sink)  # => ACQUISITION_START by default
-        print("Called stream_setup() → acquisition should be running")
+        grabber.stream_setup(
+            sink, setup_option=ic4.StreamSetupOption.DEFER_ACQUISITION_START
+        )
+        print(
+            "Called stream_setup() with DEFER_ACQUISITION_START (sink attached, acquisition not started)."
+        )
     except ic4.IC4Exception as e:
         print("stream_setup() failed:", e)
         grabber.device_close()
         return
 
-    # 8) Now that acquisition is running, pre‐allocate and queue 5 buffers
+    # 8) Pre‐allocate and queue 5 buffers BEFORE calling acquisition_start()
     try:
         sink.alloc_and_queue_buffers(5)
-        print("Queued 5 buffers")
+        print("Queued 5 buffers.")
     except ic4.IC4Exception as e:
         print("alloc_and_queue_buffers failed:", e)
 
-    # 9) Pop exactly one buffer (with a 5 s timeout)
+    # 9) Explicitly start acquisition
+    try:
+        grabber.acquisition_start()
+        print("Called acquisition_start() → camera should now begin streaming.")
+    except ic4.IC4Exception as e:
+        print("acquisition_start() failed:", e)
+        grabber.device_close()
+        return
+
+    # 10) Pop exactly one buffer (with a 5 second timeout)
     buf = None
     start = time.time()
     while time.time() - start < 5.0:
@@ -108,16 +121,16 @@ def main():
             break
         if buf is not None:
             break
-        time.sleep(0.001)
+        time.sleep(0.002)
 
     if buf is None:
         print("Timed out waiting for a frame.")
     else:
-        # 10) Convert the ImageBuffer to a NumPy array (Mono8 → uint8)
+        # 11) Convert ImageBuffer → NumPy array (Mono8 → uint8)
         arr = buf.numpy_wrap()
         img8 = np.array(arr, copy=False)
 
-        # 11) Display in OpenCV
+        # 12) Display via OpenCV
         cv2.imshow("Mono8 Frame", img8)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
@@ -127,7 +140,7 @@ def main():
         except:
             pass
 
-    # 12) Cleanup
+    # 13) Cleanup
     try:
         grabber.acquisition_stop()
     except:
