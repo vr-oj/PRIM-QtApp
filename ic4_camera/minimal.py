@@ -1,4 +1,4 @@
-# File: minimal.py
+# File: minimal_mono8.py
 
 import time
 import imagingcontrol4 as ic4
@@ -11,12 +11,11 @@ class MinimalListener(ic4.QueueSinkListener):
         pass
 
     def sink_connected(self, sink, *args):
-        # Must return True to allow the sink to attach and start streaming
-        return True
+        return True  # must return True so the sink actually attaches
 
 
 def main():
-    # 1) Initialize the IC4 library
+    # 1) Initialize IC4
     try:
         ic4.Library.init()
     except ic4.IC4Exception as e:
@@ -47,36 +46,48 @@ def main():
 
     pm = grabber.device_property_map
 
-    # 4) Query and set ExposureTime via find_float()
+    # 4) Force PixelFormat = Mono8
     try:
-        prop_exp = pm.find_float(ic4.PropId.EXPOSURE_TIME)
-        print("Current ExposureTime (µs):", prop_exp.value)
-        # Optionally set it to the same or a new value, e.g.:
-        # prop_exp.value = 10000.0
-    except ic4.IC4Exception as exc:
-        print("Could not find/set ExposureTime:", exc)
+        pi = pm.find_enumeration(ic4.PropId.PIXEL_FORMAT)
+        if "Mono8" in pi.valid_value_strings:
+            pi.value_string = "Mono8"
+            print("Set PIXEL_FORMAT to Mono8")
+        else:
+            print(
+                "Mono8 not supported! Valid PixelFormat options:",
+                pi.valid_value_strings,
+            )
+            grabber.device_close()
+            return
+    except ic4.IC4Exception as e:
+        print("Could not set PIXEL_FORMAT:", e)
+        grabber.device_close()
+        return
 
-    # 5) Turn off auto‐exposure (if present)
+    # 5) (Optional) Turn off auto‐exposure
     try:
         prop_auto = pm.find_boolean(ic4.PropId.EXPOSURE_AUTO)
         prop_auto.value = False
     except ic4.IC4Exception:
         pass
 
-    # 6) Attach a QueueSink and start acquisition
+    # 6) Attach QueueSink but do NOT start acquisition yet
     listener = MinimalListener()
     sink = ic4.QueueSink(listener)
+    grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.NONE)
+
+    # 7) Pre‐allocate and queue 5 buffers
+    sink.alloc_and_queue_buffers(5)
+
+    # 8) Explicitly start acquisition
     try:
-        grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
+        grabber.acquisition_start()
     except ic4.IC4Exception as e:
-        print("stream_setup failed (sink_connected probably returned false):", e)
+        print("acquisition_start() failed:", e)
         grabber.device_close()
         return
 
-    # 7) Pre‐allocate a few buffers
-    sink.alloc_and_queue_buffers(5)
-
-    # 8) Pop exactly one buffer (with a timeout)
+    # 9) Pop exactly one buffer (with a 5 s timeout)
     buf = None
     start = time.time()
     while time.time() - start < 5.0:
@@ -92,33 +103,21 @@ def main():
     if buf is None:
         print("Timed out waiting for a frame.")
     else:
-        # 9) Convert the ImageBuffer to a NumPy array
+        # 10) Convert ImageBuffer → NumPy (Mono8 → uint8)
         arr = buf.numpy_wrap()
-        np_img = np.array(arr, copy=False)
+        img8 = np.array(arr, copy=False)
 
-        # 10) Down‐shift 16‐bit → 8‐bit if needed
-        if np_img.dtype == np.uint16:
-            img8 = (np_img >> 8).astype(np.uint8)
-        else:
-            img8 = np_img
-
-        # 11) If multi‐channel, assume BGR8; otherwise grayscale
-        if img8.ndim == 3 and img8.shape[2] == 3:
-            display = img8
-        else:
-            display = img8 if img8.ndim == 2 else img8[:, :, 0]
-
-        cv2.imshow("One Frame", display)
+        # Display the grayscale image in OpenCV
+        cv2.imshow("Mono8 Frame", img8)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-        # 12) Release the buffer so the sink can reuse it
         try:
             buf.release()
         except:
             pass
 
-    # 13) Clean up
+    # 11) Cleanup
     try:
         grabber.acquisition_stop()
     except:

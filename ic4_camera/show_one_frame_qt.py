@@ -1,4 +1,4 @@
-# File: show_one_frame_qt.py
+# File: show_one_frame_qt_mono8.py
 
 import sys
 import time
@@ -15,21 +15,20 @@ class MinimalListener(ic4.QueueSinkListener):
         pass
 
     def sink_connected(self, sink, *args):
-        # Return True so the sink actually connects and acquisition can start
-        return True
+        return True  # must return True so the sink can actually attach
 
 
 class SingleFrameWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("IC4: Single Frame Preview")
+        self.setWindowTitle("IC4: Mono8 Single Frame Preview")
         self.label = QLabel("<Waiting for frame…>", alignment=Qt.AlignCenter)
         self.setCentralWidget(self.label)
         self.resize(640, 480)
         self._init_camera_and_grab()
 
     def _init_camera_and_grab(self):
-        # 1) Initialize IC4 Library
+        # 1) Initialize IC4
         try:
             ic4.Library.init()
         except ic4.IC4Exception as e:
@@ -61,13 +60,27 @@ class SingleFrameWindow(QMainWindow):
 
         pm = self.grabber.device_property_map
 
-        # 4) Query and set ExposureTime via find_float()
+        # 4) Force PixelFormat = Mono8
         try:
-            prop_exp = pm.find_float(ic4.PropId.EXPOSURE_TIME)
-            print("Current ExposureTime (µs):", prop_exp.value)
-            # Optionally adjust: prop_exp.value = 10000.0
-        except ic4.IC4Exception:
-            pass
+            pi = pm.find_enumeration(ic4.PropId.PIXEL_FORMAT)
+            if "Mono8" in pi.valid_value_strings:
+                pi.value_string = "Mono8"
+                print("Set PIXEL_FORMAT to Mono8")
+            else:
+                QMessageBox.critical(
+                    self,
+                    "PixelFormat Error",
+                    "Mono8 not supported. Options: "
+                    + ", ".join(pi.valid_value_strings),
+                )
+                self.grabber.device_close()
+                sys.exit(1)
+        except ic4.IC4Exception as e:
+            QMessageBox.critical(
+                self, "PixelFormat Error", f"Could not set PIXEL_FORMAT:\n{e}"
+            )
+            self.grabber.device_close()
+            sys.exit(1)
 
         # 5) Turn off auto‐exposure if available
         try:
@@ -76,27 +89,23 @@ class SingleFrameWindow(QMainWindow):
         except ic4.IC4Exception:
             pass
 
-        # 6) Attach a QueueSink and start acquisition
+        # 6) Attach a QueueSink but do NOT start yet
         listener = MinimalListener()
         self.sink = ic4.QueueSink(listener)
+        self.grabber.stream_setup(self.sink, setup_option=ic4.StreamSetupOption.NONE)
+
+        # 7) Pre‐allocate buffers BEFORE acquisition_start()
+        self.sink.alloc_and_queue_buffers(5)
+
+        # 8) Explicitly start acquisition
         try:
-            self.grabber.stream_setup(
-                self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
-            )
+            self.grabber.acquisition_start()
         except ic4.IC4Exception as e:
-            QMessageBox.critical(
-                self,
-                "IC4 Error",
-                "stream_setup failed (sink_connected probably returned False):\n"
-                + str(e),
-            )
+            QMessageBox.critical(self, "IC4 Error", f"acquisition_start() failed:\n{e}")
             self.grabber.device_close()
             sys.exit(1)
 
-        # 7) Pre‐allocate buffers
-        self.sink.alloc_and_queue_buffers(5)
-
-        # 8) Pop one frame with timeout
+        # 9) Pop one buffer (with a 5 s timeout)
         buf = None
         start = time.time()
         while time.time() - start < 5.0:
@@ -114,52 +123,26 @@ class SingleFrameWindow(QMainWindow):
             self._cleanup()
             sys.exit(1)
 
-        # 9) Convert ImageBuffer → NumPy
+        # 10) Convert ImageBuffer → NumPy
         arr = buf.numpy_wrap()
-        np_img = np.array(arr, copy=False)
+        gray8 = np.array(arr, copy=False)  # already uint8 Mono8
 
-        # Release buffer ASAP
+        # Release buffer
         try:
             buf.release()
         except:
             pass
 
-        # 10) Convert to QImage
-        h, w = np_img.shape[:2]
-        if np_img.dtype == np.uint16:
-            # Downshift to 8‐bit
-            np8 = (np_img >> 8).astype(np.uint8)
-            if np8.ndim == 2:
-                fmt = QImage.Format_Grayscale8
-                qimg = QImage(np8.data, w, h, w, fmt)
-            else:
-                # Assume BGR8 in 3rd dimension
-                rgb = np8[..., ::-1]
-                bytes_per_line = 3 * w
-                fmt = QImage.Format_RGB888
-                qimg = QImage(rgb.data, w, h, bytes_per_line, fmt)
-        elif np_img.dtype == np.uint8:
-            if np_img.ndim == 2:
-                fmt = QImage.Format_Grayscale8
-                qimg = QImage(np_img.data, w, h, w, fmt)
-            else:
-                # BGR8 → RGB for QImage
-                rgb = np_img[..., ::-1]
-                bytes_per_line = 3 * w
-                fmt = QImage.Format_RGB888
-                qimg = QImage(rgb.data, w, h, bytes_per_line, fmt)
-        else:
-            # Fallback: take first channel as grayscale
-            gray = (np_img[..., 0] if np_img.ndim == 3 else np_img).astype(np.uint8)
-            fmt = QImage.Format_Grayscale8
-            qimg = QImage(gray.data, w, h, w, fmt)
+        # 11) Convert the 8-bit grayscale array into a QImage
+        h, w = gray8.shape
+        fmt = QImage.Format_Grayscale8
+        qimg = QImage(gray8.data, w, h, w, fmt)
 
-        # 11) Display in the QLabel
+        # 12) Display in the QLabel
         pix = QPixmap.fromImage(qimg).scaled(self.label.size(), Qt.KeepAspectRatio)
         self.label.setPixmap(pix)
 
     def _cleanup(self):
-        """Stop acquisition and close the device."""
         try:
             self.grabber.acquisition_stop()
         except:
@@ -170,7 +153,6 @@ class SingleFrameWindow(QMainWindow):
             pass
 
     def closeEvent(self, event):
-        """Ensure cleanup on window close."""
         self._cleanup()
         event.accept()
 
