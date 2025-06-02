@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import (
     QSlider,
     QGroupBox,
     QMessageBox,
-    QOpenGLWidget,  # QOpenGLWidget comes from QtWidgets in PyQt5
+    QOpenGLWidget,  # QOpenGLWidget lives in QtWidgets
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QImage, QPainter
@@ -28,16 +28,32 @@ from PyQt5.QtGui import QImage, QPainter
 import numpy as np
 
 
+# ─── Minimal SinkListener Subclass ────────────────────────────────────────────
+class _MinimalSinkListener(ic4.QueueSinkListener):
+    """
+    A no-op implementation of QueueSinkListener.
+    Satisfies the abstract methods so we can construct a QueueSink.
+    """
+
+    def frames_queued(self, sink, count: int):
+        # We don’t need to do anything here for this example.
+        pass
+
+    def sink_connected(self, sink, connected: bool):
+        # No action needed upon sink connect/disconnect.
+        pass
+
+
 class IC4CameraController:
     """
-    Wraps the IC4 Grabber + QueueSink workflow to detect, open, and control DMK cameras.
+    Wraps IC4 Grabber + QueueSink to detect, open, and control DMK cameras.
 
     - Uses DeviceEnum.devices() to list cameras.
     - Opens the first DMK 33UX250 / 33UP5000 (or falls back to the first device).
     - Configures AcquisitionMode="Continuous" and AcquisitionFrameRate=10.0.
-    - Creates a QueueSinkListener + QueueSink, allocates buffers, and starts streaming.
+    - Creates a QueueSinkListener + QueueSink(listener), allocates buffers, and starts streaming.
     - Exposes methods to get/set Auto Exposure, Exposure, Gain, Brightness,
-      Auto White Balance, WhiteBalance Red, and WhiteBalance Blue using PropInteger / PropBoolean.
+      Auto White Balance, WhiteBalance Red, and WhiteBalance Blue via PropInteger / PropBoolean.
     """
 
     def __init__(self, preferred_models=None):
@@ -49,18 +65,16 @@ class IC4CameraController:
     def list_devices(self):
         """
         Return a list of DeviceInfo objects for all video capture devices.
-        Use DeviceInfo.model_name, DeviceInfo.display_name, etc.
         """
         return ic4.DeviceEnum.devices()
 
     def open(self):
         """
-        1. Initialize the IC4 library.
-        2. Enumerate devices, pick the first matching preferred model (or fallback to the first).
+        1. Initialize IC4.
+        2. Enumerate devices, pick the first matching preferred model.
         3. Open via Grabber.device_open().
         4. Set AcquisitionMode="Continuous" and AcquisitionFrameRate=10.0.
-        5. Create a QueueSinkListener + QueueSink(listener), attach it, and start acquisition.
-        Returns True on success, False on any failure.
+        5. Create _MinimalSinkListener + QueueSink(listener), attach, and start streaming.
         """
         try:
             ic4.Library.init()  # Must be called once per process
@@ -76,16 +90,15 @@ class IC4CameraController:
             )
             return False
 
-        if len(devices) == 0:
+        if not devices:
             QMessageBox.critical(None, "Camera Error", "No IC4 devices found.")
             return False
 
-        # Pick first preferred model, fallback to devices[0]
+        # Pick first preferred model, else fallback to devices[0]
         chosen_info = None
         for info in devices:
-            name = info.model_name
             for pref in self.preferred_models:
-                if pref in name:
+                if pref in info.model_name:
                     chosen_info = info
                     break
             if chosen_info:
@@ -101,29 +114,28 @@ class IC4CameraController:
             QMessageBox.critical(None, "IC4 Error", f"Failed to open device:\n{e}")
             return False
 
-        # Configure Acquisition Mode = "Continuous" and frame rate = 10.0
+        # Configure continuous acquisition @ 10 FPS
         pm = self.grabber.device_property_map
         try:
             pm.set_value(ic4.PropId.ACQUISITION_MODE, "Continuous")
             pm.set_value(ic4.PropId.ACQUISITION_FRAME_RATE, 10.0)
         except ic4.IC4Exception:
-            # Some cameras/drivers may ignore frame‐rate setting—proceed anyway.
+            # Some cameras may ignore frame‐rate setting; proceed anyway.
             pass
 
-        # ———  THIS IS THE ONLY LINE THAT CHANGED  ———
-        # Create a QueueSinkListener (instead of a nonexistent SinkListener)
+        # ─── Here’s the fixed part: use our subclass, not the abstract base ─────
         try:
-            self.listener = ic4.QueueSinkListener()
+            self.listener = _MinimalSinkListener()
             self.sink = ic4.QueueSink(self.listener)
-            # Attach and start acquisition immediately
+            # Attach & start acquisition immediately
             self.grabber.stream_setup(
                 self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
             )
-            # Pre-allocate 10 buffers to minimize drops
+            # Pre‐allocate 10 buffers
             self.sink.alloc_and_queue_buffers(10)
         except ic4.IC4Exception as e:
             QMessageBox.critical(
-                None, "IC4 Error", f"Failed to create or attach QueueSink:\n{e}"
+                None, "IC4 Error", f"Failed to create/attach QueueSink:\n{e}"
             )
             self.close()
             return False
@@ -131,7 +143,7 @@ class IC4CameraController:
         return True
 
     def close(self):
-        """Stop acquisition, close the device, and release Grabber & Sink."""
+        """Stop acquisition, close device, and release resources."""
         if self.grabber:
             try:
                 self.grabber.acquisition_stop()
@@ -148,9 +160,7 @@ class IC4CameraController:
     def __del__(self):
         self.close()
 
-    # ----------------------------
-    # PROPERTY-QUERY HELPERS
-    # ----------------------------
+    # ─── Property‐Query Helpers ────────────────────────────────────────────────
 
     def _get_integer_property(self, prop_id):
         pm = self.grabber.device_property_map
@@ -167,11 +177,10 @@ class IC4CameraController:
             return None
 
     def _get_auto_property(self, auto_id):
-        # Try Boolean first
+        # Try boolean first, else enumeration
         prop_bool = self._get_boolean_property(auto_id)
         if prop_bool:
             return prop_bool
-        # Fallback to Enumeration
         pm = self.grabber.device_property_map
         try:
             return pm.find_enumeration(auto_id)
@@ -377,6 +386,7 @@ class IC4CameraThread(QThread):
                     pass
 
     def stop(self):
+        """Stop the loop and wait for the thread to finish."""
         self._running = False
         self.wait()
 
@@ -389,7 +399,7 @@ class CameraOpenGLWidget(QOpenGLWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumSize(640, 480)
-        self.current_image = None
+        self.current_image = None  # Holds a QImage for painting
 
     def update_frame(self, np_img):
         if np_img is None:
@@ -397,27 +407,33 @@ class CameraOpenGLWidget(QOpenGLWidget):
 
         h, w, c = np_img.shape
 
+        # 16-bit grayscale → downshift to 8-bit
         if np_img.dtype == np.uint16 and c == 1:
             arr8 = (np_img >> 8).astype(np.uint8)
             image = QImage(arr8.data, w, h, w, QImage.Format_Grayscale8)
 
+        # 8-bit single-channel → Grayscale8
         elif np_img.dtype == np.uint8 and c == 1:
             image = QImage(np_img.data, w, h, w, QImage.Format_Grayscale8)
 
+        # 8-bit BGR → convert to RGB888
         elif np_img.dtype == np.uint8 and c == 3:
             rgb = np_img[..., ::-1]
             bytes_per_line = 3 * w
             image = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
 
+        # 8-bit BGRA → convert to RGBA8888
         elif np_img.dtype == np.uint8 and c == 4:
             rgba = np_img[..., [2, 1, 0, 3]]
             bytes_per_line = 4 * w
             image = QImage(rgba.data, w, h, bytes_per_line, QImage.Format_RGBA8888)
 
         else:
+            # Fallback: convert to 8-bit grayscale
             gray = (np_img[..., 0] if c > 1 else np_img).astype(np.uint8)
             image = QImage(gray.data, w, h, w, QImage.Format_Grayscale8)
 
+        # Scale to fit widget, preserving aspect ratio
         self.current_image = image.scaled(
             self.width(), self.height(), Qt.KeepAspectRatio
         )
@@ -447,7 +463,7 @@ class CameraAppMainWindow(QMainWindow):
         self.ic4_ctrl = None
         self.ic4_thread = None
 
-        # Build UI
+        # Build the UI
         self._build_ui()
 
     def _build_ui(self):
@@ -649,7 +665,7 @@ class CameraAppMainWindow(QMainWindow):
             self.wb_blue_label.setText("WB Blue: N/A")
             self.wb_blue_slider.setEnabled(False)
 
-        # Start the IC4CameraThread to pull frames and emit them
+        # Start the IC4CameraThread
         self.ic4_thread = IC4CameraThread(self.ic4_ctrl.sink)
         self.ic4_thread.frame_ready.connect(self.on_frame_ready)
         self.ic4_thread.start()

@@ -20,8 +20,9 @@ def main():
         print("No IC4 cameras found.")
         return
 
+    # Just pick the first device in the list
     info = devices[0]
-    print(f"Opening camera: {info.model_name} (serial: {info.serial_number})")
+    print(f"Opening camera: {info.model_name}")
 
     try:
         grabber = ic4.Grabber()
@@ -54,7 +55,7 @@ def main():
             vals = sorted(list(prop_int.valid_value_set))
             print(
                 f"\n• PropInteger {pid_name}: current = {prop_int.value}, "
-                f"valid = [{vals[0]}, {vals[-1]}] (count={len(vals)})"
+                f"valid range = [{vals[0]} .. {vals[-1]}], count={len(vals)}"
             )
             continue
         except ic4.IC4Exception:
@@ -80,8 +81,7 @@ def main():
         except ic4.IC4Exception:
             pass
 
-        # If none matched, the camera doesn’t implement this PropId
-        # (we skip printing those).
+        # If none matched, the camera doesn’t implement this PropId (skip it)
         # print(f"• PropId {pid_name}: NOT supported")
 
     # Close camera
