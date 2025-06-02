@@ -1,4 +1,4 @@
-# show_one_frame_qt.py
+# File: show_one_frame_qt.py
 
 import sys
 import time
@@ -10,30 +10,33 @@ from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt
 
 
-class _MinimalSinkListener(ic4.QueueSinkListener):
+class MinimalListener(ic4.QueueSinkListener):
     def frames_queued(self, sink, *args):
         pass
 
     def sink_connected(self, sink, *args):
-        pass
+        # Return True so the sink actually connects and acquisition can start
+        return True
 
 
 class SingleFrameWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("IC4: Single Frame Preview")
-        self.label = QLabel("<waiting for frame…>", alignment=Qt.AlignCenter)
+        self.label = QLabel("<Waiting for frame…>", alignment=Qt.AlignCenter)
         self.setCentralWidget(self.label)
         self.resize(640, 480)
         self._init_camera_and_grab()
 
     def _init_camera_and_grab(self):
+        # 1) Initialize IC4 Library
         try:
             ic4.Library.init()
         except ic4.IC4Exception as e:
             QMessageBox.critical(self, "IC4 Error", f"Library.init() failed:\n{e}")
             sys.exit(1)
 
+        # 2) Enumerate devices
         try:
             devices = ic4.DeviceEnum.devices()
         except ic4.IC4Exception as e:
@@ -47,6 +50,8 @@ class SingleFrameWindow(QMainWindow):
             sys.exit(1)
 
         info = devices[0]
+
+        # 3) Open Grabber
         try:
             self.grabber = ic4.Grabber()
             self.grabber.device_open(info)
@@ -55,39 +60,63 @@ class SingleFrameWindow(QMainWindow):
             sys.exit(1)
 
         pm = self.grabber.device_property_map
+
+        # 4) Query and set ExposureTime via find_float()
         try:
-            pm.set_value(ic4.PropId.ACQUISITION_MODE, "Continuous")
-            pm.set_value(ic4.PropId.ACQUISITION_FRAME_RATE, 10.0)
-        except:
+            prop_exp = pm.find_float(ic4.PropId.EXPOSURE_TIME)
+            print("Current ExposureTime (µs):", prop_exp.value)
+            # Optionally adjust: prop_exp.value = 10000.0
+        except ic4.IC4Exception:
             pass
 
-        listener = _MinimalSinkListener()
+        # 5) Turn off auto‐exposure if available
+        try:
+            prop_auto = pm.find_boolean(ic4.PropId.EXPOSURE_AUTO)
+            prop_auto.value = False
+        except ic4.IC4Exception:
+            pass
+
+        # 6) Attach a QueueSink and start acquisition
+        listener = MinimalListener()
         self.sink = ic4.QueueSink(listener)
-        self.grabber.stream_setup(
-            self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
-        )
+        try:
+            self.grabber.stream_setup(
+                self.sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START
+            )
+        except ic4.IC4Exception as e:
+            QMessageBox.critical(
+                self,
+                "IC4 Error",
+                "stream_setup failed (sink_connected probably returned False):\n"
+                + str(e),
+            )
+            self.grabber.device_close()
+            sys.exit(1)
+
+        # 7) Pre‐allocate buffers
         self.sink.alloc_and_queue_buffers(5)
 
-        # Pop one buffer
+        # 8) Pop one frame with timeout
         buf = None
         start = time.time()
         while time.time() - start < 5.0:
             try:
                 buf = self.sink.try_pop_output_buffer()
-            except ic4.IC4Exception:
-                buf = None
+            except ic4.IC4Exception as e:
+                print("Error popping buffer:", e)
+                break
             if buf is not None:
                 break
             time.sleep(0.001)
 
         if buf is None:
             QMessageBox.critical(self, "Frame Error", "Timed out waiting for a frame.")
-            self.cleanup()
+            self._cleanup()
             sys.exit(1)
 
-        # Convert to NumPy
+        # 9) Convert ImageBuffer → NumPy
         arr = buf.numpy_wrap()
-        np_img = np.array(arr, copy=False)  # shape = (H, W, C) or (H, W)
+        np_img = np.array(arr, copy=False)
 
         # Release buffer ASAP
         try:
@@ -95,16 +124,16 @@ class SingleFrameWindow(QMainWindow):
         except:
             pass
 
-        # Convert NumPy → QImage
+        # 10) Convert to QImage
         h, w = np_img.shape[:2]
         if np_img.dtype == np.uint16:
-            # shift down to 8-bit for display
+            # Downshift to 8‐bit
             np8 = (np_img >> 8).astype(np.uint8)
             if np8.ndim == 2:
                 fmt = QImage.Format_Grayscale8
                 qimg = QImage(np8.data, w, h, w, fmt)
             else:
-                # assume BGR8 in 3rd channel
+                # Assume BGR8 in 3rd dimension
                 rgb = np8[..., ::-1]
                 bytes_per_line = 3 * w
                 fmt = QImage.Format_RGB888
@@ -114,22 +143,23 @@ class SingleFrameWindow(QMainWindow):
                 fmt = QImage.Format_Grayscale8
                 qimg = QImage(np_img.data, w, h, w, fmt)
             else:
-                # BGR8 → convert to RGB for display
+                # BGR8 → RGB for QImage
                 rgb = np_img[..., ::-1]
                 bytes_per_line = 3 * w
                 fmt = QImage.Format_RGB888
                 qimg = QImage(rgb.data, w, h, bytes_per_line, fmt)
         else:
-            # fallback: take first channel as gray
+            # Fallback: take first channel as grayscale
             gray = (np_img[..., 0] if np_img.ndim == 3 else np_img).astype(np.uint8)
             fmt = QImage.Format_Grayscale8
             qimg = QImage(gray.data, w, h, w, fmt)
 
-        # Show in QLabel
+        # 11) Display in the QLabel
         pix = QPixmap.fromImage(qimg).scaled(self.label.size(), Qt.KeepAspectRatio)
         self.label.setPixmap(pix)
 
-    def cleanup(self):
+    def _cleanup(self):
+        """Stop acquisition and close the device."""
         try:
             self.grabber.acquisition_stop()
         except:
@@ -139,11 +169,16 @@ class SingleFrameWindow(QMainWindow):
         except:
             pass
 
+    def closeEvent(self, event):
+        """Ensure cleanup on window close."""
+        self._cleanup()
+        event.accept()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     win = SingleFrameWindow()
     win.show()
     ret = app.exec_()
-    win.cleanup()
+    win._cleanup()
     sys.exit(ret)
