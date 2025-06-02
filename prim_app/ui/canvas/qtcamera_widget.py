@@ -1,43 +1,42 @@
 # File: prim_app/ui/canvas/qtcamera_widget.py
-
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QPixmap, QImage
 
-
 class QtCameraWidget(QWidget):
     """
-    A simple widget that displays QImage frames in a QLabel.
-    The MainWindow / SDKCameraThread will push each new QImage by calling update_image().
+    Simplest camera widget: a QLabel to show frames, and no button here.
+    MainWindow will drive start/stop via SDKCameraThread.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # 1) Create a QLabel to show frames:
-        self._label = QLabel("Camera Off")
-        self._label.setAlignment(Qt.AlignCenter)
-
-        # 2) Put that QLabel into our layout:
+        # Use a single QVBoxLayout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self._label)
 
-        # 3) Fix a default size so it doesn't collapse; you can change as desired:
+        # The QLabel where frames will be painted
+        self._label = QLabel("Camera Off", self)
+        self._label.setAlignment(Qt.AlignCenter)
+        # Fix the label’s “logical” size (you can adjust if you want a different preview size).
         self._label.setFixedSize(640, 480)
+
+        layout.addWidget(self._label)
 
     @pyqtSlot(QImage)
     def update_image(self, image: QImage):
         """
-        Public slot: when a new QImage arrives from SDKCameraThread, this is called.
-        We convert to QPixmap and scale it to fit the label (with aspect‐ratio).
+        Public slot: receives a QImage from SDKCameraThread.  Convert → QPixmap and display.
         """
         pix = QPixmap.fromImage(image)
-        self._label.setPixmap(pix.scaled(self._label.size(), Qt.KeepAspectRatio))
+        # Scale to fit the QLabel, preserving aspect ratio
+        scaled = pix.scaled(self._label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self._label.setPixmap(scaled)
 
     def clear_image(self):
         """
-        Call this to show “Camera Off” text (or you can set a default pixmap).
+        Public method: clear the QLabel back to “Camera Off”.
         """
+        self._label.setPixmap(QPixmap())
         self._label.setText("⏺ Camera Off")
-        self._label.setPixmap(QPixmap())  # clear any old pixmap
