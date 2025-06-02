@@ -5,7 +5,7 @@ import os
 import re
 import traceback
 import logging
-import imagingcontrol4 as ic4  # ← Needed for IC4 init/exit
+import imagingcontrol4 as ic4  # ← We keep this import, but we no longer call init()/exit() here.
 
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication
@@ -14,6 +14,7 @@ from utils.config import APP_NAME, APP_VERSION as CONFIG_APP_VERSION
 
 # (You can keep or remove matplotlib logging tweaks if you don’t need them)
 import matplotlib
+
 logging.getLogger("matplotlib").setLevel(logging.INFO)
 logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
 logging.getLogger("fontTools").setLevel(logging.WARNING)
@@ -43,6 +44,7 @@ if not module_log.handlers:
 # === Optional: load_app_setting / save_app_setting stubs if missing ===
 try:
     from utils.app_settings import load_app_setting, save_app_setting
+
     APP_SETTINGS_AVAILABLE = True
 except ImportError:
     APP_SETTINGS_AVAILABLE = False
@@ -53,7 +55,9 @@ except ImportError:
     def save_app_setting(key, value):
         pass
 
-    module_log.warning("utils.app_settings not found. Persistent settings will not work.")
+    module_log.warning(
+        "utils.app_settings not found. Persistent settings will not work."
+    )
 
 
 def load_processed_qss(path):
@@ -105,9 +109,11 @@ def main_app_entry():
     profile_str = (
         "Core"
         if actual_fmt.profile() == QSurfaceFormat.CoreProfile
-        else "Compatibility"
-        if actual_fmt.profile() == QSurfaceFormat.CompatibilityProfile
-        else "NoProfile"
+        else (
+            "Compatibility"
+            if actual_fmt.profile() == QSurfaceFormat.CompatibilityProfile
+            else "NoProfile"
+        )
     )
     log.info(
         f"Actual default QSurfaceFormat after QApplication init: "
@@ -118,7 +124,9 @@ def main_app_entry():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     icon_dir = os.path.join(base_dir, "ui", "icons")
     if not os.path.isdir(icon_dir):
-        alt_icon_dir = os.path.join(os.path.dirname(base_dir), "prim_app", "ui", "icons")
+        alt_icon_dir = os.path.join(
+            os.path.dirname(base_dir), "prim_app", "ui", "icons"
+        )
         if os.path.isdir(alt_icon_dir):
             icon_dir = alt_icon_dir
         else:
@@ -168,19 +176,6 @@ def main_app_entry():
         log.info("No style.qss found. Using default 'Fusion' style.")
         app.setStyle(QStyleFactory.create("Fusion"))
 
-    # ─── Initialize the IC4 Library (once) ────────────────────────────────
-    try:
-        ic4.Library.init(api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR)
-        log.info("IC4 Library initialized successfully.")
-    except ic4.IC4Exception as e:
-        log.critical(f"Failed to initialize IC4 library: {e}")
-        QMessageBox.critical(
-            None,
-            f"{APP_NAME} - Camera Initialization Error",
-            f"Could not initialize the IC4 library:\n{e}\n\nThe application will now exit.",
-        )
-        sys.exit(1)
-
     # ─── Import & Launch MainWindow ───────────────────────────────────────
     from main_window import MainWindow
 
@@ -191,12 +186,6 @@ def main_app_entry():
 
     exit_code = app.exec_()
     log.info(f"Application event loop ended with exit code {exit_code}.")
-
-    # ─── Clean up IC4 on exit ────────────────────────────────────────────
-    try:
-        ic4.Library.exit()
-    except Exception:
-        pass
 
     sys.exit(exit_code)
 
