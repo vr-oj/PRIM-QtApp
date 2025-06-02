@@ -434,10 +434,13 @@ class MainWindow(QMainWindow):
             # 1) When the grabber is ready (opened), call our helper:
             self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
 
-            # 2) When each frame arrives, forward to QtCameraWidget.update_image(QImage)
+            # 2) When each frame arrives:
+            #    a) forward to QtCameraWidget.update_image(QImage)
             self.camera_thread.frame_ready.connect(
                 lambda img, raw: self.camera_widget.update_image(img)
             )
+            #    b) also update the Info tab (frame count, resolution)
+            self.camera_thread.frame_ready.connect(self._update_camera_info)
 
             # 3) Propagate any camera errors back to our existing slot:
             self.camera_thread.error.connect(self._on_camera_error)
@@ -452,7 +455,8 @@ class MainWindow(QMainWindow):
 
             # Change button text:
             self.btn_start_camera.setText("Stop Camera")
-            self.camera_control_panel.setEnabled(False)  # will enable once grabber_ready()
+            # CameraControlPanel will be enabled in _on_grabber_ready()
+            self.camera_control_panel.setEnabled(False)
 
         # CASE B: thread is running → user clicked “Stop Camera”
         else:
@@ -469,7 +473,7 @@ class MainWindow(QMainWindow):
             self.lbl_cam_resolution.setText("N/A")
             self.camera_widget.clear_image()
 
-            # Drop our thread reference:
+            # Drop our thread reference
             self.camera_thread = None
 
     @pyqtSlot()
@@ -489,7 +493,10 @@ class MainWindow(QMainWindow):
 
         # Provide the open grabber to our control panel:
         self.camera_control_panel.grabber = grabber
+        # Build dynamic controls now that grabber is ready:
         self.camera_control_panel._on_grabber_ready()
+        # Enable the controls tab
+        self.camera_control_panel.setEnabled(True)
 
         # Update the “Connected” label in the Info tab:
         self.lbl_cam_connection.setText("Connected")
