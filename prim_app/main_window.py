@@ -650,16 +650,39 @@ class MainWindow(QMainWindow):
     # ─── Toggle Serial Connection / Simulated Data ────────────────────────────
     def _toggle_serial_connection(self):
         """
-        Toggle between “Connect PRIM Device” and “Disconnect PRIM Device”
-        by using a simple _serial_connected flag.  We update the QAction’s text/icon
-        immediately, then start or stop the SerialThread.
+        Toggle between Connect vs. Disconnect by checking if self._serial_thread
+        exists and is currently running.
+
+        - If no thread is running, start a new SerialThread (simulation or real port).
+          Immediately set the QAction to “Disconnect PRIM Device.”
+        - If a thread is running, stop it, clear the reference,
+          and immediately set the QAction back to “Connect PRIM Device.”
         """
 
-        if not self._serial_connected:
-            # ── User clicked “Connect PRIM Device” ──────────────────────────────
+        # Case 1: Already running → user wants to disconnect
+        if self._serial_thread is not None and self._serial_thread.isRunning():
+            log.info("Stopping serial thread on user request...")
+            try:
+                self._serial_thread.stop()
+            except Exception as e:
+                log.error(f"Error while stopping SerialThread: {e}")
+            # Immediately flip the toolbar QAction back to “Connect PRIM Device”
+            self.connect_serial_action.setIcon(self.icon_connect)
+            self.connect_serial_action.setText("Connect PRIM Device")
+            # Allow port selection again
+            self.serial_port_combobox.setEnabled(True)
+
+            # Clear out the thread reference so future clicks go to “connect” branch
+            self._serial_thread = None
+
+        # Case 2: Not running → user wants to connect
+        else:
+            # Grab the selected port (None means “Simulated Data”)
             data = self.serial_port_combobox.currentData()
             port = data.value() if isinstance(data, QVariant) else data
 
+            # If the combo shows something other than “Simulated Data” but returns None,
+            # prompt user to pick a port.
             if (
                 port is None
                 and self.serial_port_combobox.currentText() != "🔌 Simulated Data"
@@ -669,7 +692,7 @@ class MainWindow(QMainWindow):
 
             log.info(f"Starting serial thread on port: {port or 'Simulation'}")
             try:
-                # Clean up any old thread object if it exists
+                # If there’s an existing thread object stuck around, clean it up first
                 if self._serial_thread:
                     if self._serial_thread.isRunning():
                         self._serial_thread.stop()
@@ -679,7 +702,7 @@ class MainWindow(QMainWindow):
                     self._serial_thread.deleteLater()
                     self._serial_thread = None
 
-                # Create & start the new thread
+                # Create and start a brand‐new SerialThread
                 self._serial_thread = SerialThread(port=port, parent=self)
                 self._serial_thread.data_ready.connect(self._handle_new_serial_data)
                 self._serial_thread.error_occurred.connect(self._handle_serial_error)
@@ -691,12 +714,10 @@ class MainWindow(QMainWindow):
                 )
                 self._serial_thread.start()
 
-                # Immediately flip the button to “Disconnect PRIM Device”
+                # Immediately flip QAction to “Disconnect PRIM Device”
                 self.connect_serial_action.setIcon(self.icon_disconnect)
                 self.connect_serial_action.setText("Disconnect PRIM Device")
-                self._serial_connected = True
-
-                # Disable the combo so user can’t switch mid‐stream
+                # Prevent switching port mid‐stream
                 self.serial_port_combobox.setEnabled(False)
 
             except Exception as e:
@@ -705,29 +726,9 @@ class MainWindow(QMainWindow):
                 if self._serial_thread:
                     self._serial_thread.deleteLater()
                 self._serial_thread = None
-                self._update_recording_actions_enable_state()
-                # Make sure the flag stays False if we failed
-                self._serial_connected = False
 
-        else:
-            # ── User clicked “Disconnect PRIM Device” ───────────────────────────
-            log.info("Stopping serial thread by user request.")
-
-            try:
-                if self._serial_thread:
-                    self._serial_thread.stop()
-                # Immediately flip the button back to “Connect PRIM Device”
-                self.connect_serial_action.setIcon(self.icon_connect)
-                self.connect_serial_action.setText("Connect PRIM Device")
-                self._serial_connected = False
-
-                # Re‐enable the combo
-                self.serial_port_combobox.setEnabled(True)
-
-            except Exception as e:
-                log.error(f"Error stopping serial thread: {e}")
-
-        # In either case, re‐evaluate the record‐button states
+        # In either branch, recalc whether “Start Recording” / “Stop Recording”
+        # should be enabled:
         self._update_recording_actions_enable_state()
 
     @pyqtSlot(str)
@@ -738,14 +739,12 @@ class MainWindow(QMainWindow):
         connected_flag = (
             "connected" in status.lower() or "opened serial port" in status.lower()
         )
-        # Update TopControlPanel’s connection status
         self.top_ctrl.update_connection_status(status, connected_flag)
 
-        # Don’t touch the QAction’s text/icon here!  The toggle method already did that.
-        # Just handle any side‐effects of a disconnect happening under you:
-        if not connected_flag and self._serial_connected:
-            # If the thread died unexpectedly, make sure our flag stays in sync:
-            self._serial_connected = False
+        # Only handle recording‐stop logic if the device truly dropped:
+        if not connected_flag and self._serial_thread is not None:
+            # Thread died unexpectedly; force UI → “disconnected”
+            self._serial_thread = None
             self.connect_serial_action.setIcon(self.icon_connect)
             self.connect_serial_action.setText("Connect PRIM Device")
             self.serial_port_combobox.setEnabled(True)
