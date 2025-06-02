@@ -367,11 +367,11 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            # ─── Create Grabber by passing dev_info into the constructor ─────────────────
-            grab = ic4.Grabber(dev_info)
-            grab.device_open()
+            # ─── Create a Grabber and open using dev_info ──────────────────────
+            grab = ic4.Grabber()
+            grab.device_open(dev_info)
 
-            # ─── Enumerate all supported video formats (pixel formats) ──────────────────
+            # ─── Enumerate all supported video formats (pixel‐formats) ────────
             pf_list = grab.format_video.enumerate()
             for pv in pf_list:
                 w = grab.format_video.get_value(ic4.PropId.IMAGE_WIDTH, pv)
