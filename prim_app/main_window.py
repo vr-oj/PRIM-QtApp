@@ -7,17 +7,6 @@ import logging
 import csv
 import json
 
-import imagingcontrol4 as ic4
-
-try:
-    ic4.Library.init(
-        api_log_level=ic4.LogLevel.INFO,
-        log_targets=ic4.LogTarget.STDERR,
-    )
-    log.info("DEBUG: IC4 library initialized successfully.")
-except Exception as exc:
-    log.error(f"Could not initialize IC4 library: {exc}")
-
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
