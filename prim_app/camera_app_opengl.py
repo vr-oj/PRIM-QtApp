@@ -28,19 +28,21 @@ from PyQt5.QtGui import QImage, QPainter
 import numpy as np
 
 
-# ─── Minimal SinkListener Subclass ────────────────────────────────────────────
+# ─── Minimal SinkListener Subclass (with *args) ───────────────────────────────
 class _MinimalSinkListener(ic4.QueueSinkListener):
     """
     A no-op implementation of QueueSinkListener.
-    Satisfies the abstract methods so we can construct a QueueSink.
+    We give both methods a *args signature so extra callback parameters are absorbed.
     """
 
-    def frames_queued(self, sink, count: int):
-        # We don’t need to do anything here for this example.
+    def frames_queued(self, sink, *args):
+        # Extra arguments might be: frame_format, buffer_count, timestamp, etc.
+        # We don’t need to do anything here.
         pass
 
-    def sink_connected(self, sink, connected: bool):
-        # No action needed upon sink connect/disconnect.
+    def sink_connected(self, sink, *args):
+        # Extra arguments might be: stream_format, min_buffers_required, etc.
+        # We don’t need to do anything here.
         pass
 
 
@@ -123,7 +125,7 @@ class IC4CameraController:
             # Some cameras may ignore frame‐rate setting; proceed anyway.
             pass
 
-        # ─── Here’s the fixed part: use our subclass, not the abstract base ─────
+        # ─── Use our subclass (with *args) to satisfy the abstract methods ───────
         try:
             self.listener = _MinimalSinkListener()
             self.sink = ic4.QueueSink(self.listener)
