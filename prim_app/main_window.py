@@ -172,51 +172,41 @@ class MainWindow(QMainWindow):
 
     def _build_central_widget_layout(self):
         """
-        Layout with three sections across the top:
-          [Camera Control Tabs]    [Top Control]    [Plot Control]
-
-        Bottom row:
-          [QtCameraWidget (live feed)] | [PressurePlotWidget (live plot)]
+        Top row: [Camera Info/Controls tabs] [TopControlPanel] [PlotControlPanel]
+        Bottom row: [QtCameraWidget (live)] | [PressurePlotWidget (live plot)]
         """
-        # ─── Pre-create camera_widget for later use ───────────────────────────
-        # QtCameraWidget now has update_image() and clear_image().
         self.camera_widget = QtCameraWidget(self)
 
-        # ─── Central container & main vertical layout ─────────────────────────
         central = QWidget()
         main_vlay = QVBoxLayout(central)
         main_vlay.setContentsMargins(4, 4, 4, 4)
         main_vlay.setSpacing(6)
 
-        # ─── Top Row: Camera Control | Top Control | Plot Control ───────────
+        # ─── Top Row ──────────────────────────────────────────────────────
         top_row_widget = QWidget()
         top_row_lay = QHBoxLayout(top_row_widget)
         top_row_lay.setContentsMargins(0, 0, 0, 0)
         top_row_lay.setSpacing(10)
 
-        # --- Camera Control: a QTabWidget with Info & Controls tabs ---
+        # Camera Control Tabs (Info & Controls)
         self.camera_tabs = QTabWidget()
         self.camera_tabs.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
 
-        # ==== Tab 1: Info ====
+        # Info Tab
         info_tab = QWidget()
         info_layout = QFormLayout(info_tab)
         info_layout.setContentsMargins(6, 6, 6, 6)
         info_layout.setSpacing(4)
 
-        # Connection status (read‐only)
         self.lbl_cam_connection = QLabel("Disconnected")
         info_layout.addRow("Camera Status:", self.lbl_cam_connection)
 
-        # Frame count (read‐only)
         self.lbl_cam_frame = QLabel("0")
         info_layout.addRow("Frame #:", self.lbl_cam_frame)
 
-        # Resolution (read‐only; updates after first frame)
         self.lbl_cam_resolution = QLabel("N/A")
         info_layout.addRow("Resolution:", self.lbl_cam_resolution)
 
-        # --- Device selection combo and resolution combo ---
         self.device_combo = QComboBox()
         self.device_combo.addItem("Select Device...", None)
         self.device_combo.currentIndexChanged.connect(self._on_device_selected)
@@ -226,20 +216,18 @@ class MainWindow(QMainWindow):
         self.resolution_combo.addItem("Select Resolution…", None)
         info_layout.addRow("Resolution:", self.resolution_combo)
 
-        # --- Start/Stop Camera button (appears under device/resolution) ---
         self.btn_start_camera = QPushButton("Start Camera")
         self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
         info_layout.addRow("", self.btn_start_camera)
 
         self.camera_tabs.addTab(info_tab, "Info")
 
-        # ==== Tab 2: Controls ====
+        # Controls Tab
         controls_tab = QWidget()
         controls_layout = QVBoxLayout(controls_tab)
         controls_layout.setContentsMargins(6, 6, 6, 6)
         controls_layout.setSpacing(6)
 
-        # CameraControlPanel: gain, brightness, auto-exposure sliders
         self.camera_control_panel = CameraControlPanel(parent=self)
         self.camera_control_panel.setEnabled(False)
         controls_layout.addWidget(self.camera_control_panel)
@@ -248,29 +236,27 @@ class MainWindow(QMainWindow):
 
         top_row_lay.addWidget(self.camera_tabs, stretch=2)
 
-        # --- Top Control Panel (center) ---
+        # TopControlPanel (center)
         self.top_ctrl = TopControlPanel(self)
         top_row_lay.addWidget(self.top_ctrl, stretch=2)
 
-        # --- Plot Control Panel (right) ---
+        # PlotControlPanel (right)
         self.plot_control_panel = PlotControlPanel(self)
         top_row_lay.addWidget(self.plot_control_panel, stretch=2)
 
         main_vlay.addWidget(top_row_widget, stretch=0)
 
-        # ─── Bottom Row: Camera Viewfinder | Live Plot ──────────────────────
+        # ─── Bottom Row ───────────────────────────────────────────────────
         self.bottom_split = QSplitter(Qt.Horizontal)
         self.bottom_split.setChildrenCollapsible(False)
 
-        # Left: QtCameraWidget (live feed)
+        # Left: live viewfinder
         self.camera_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.bottom_split.addWidget(self.camera_widget)
 
-        # Right: PressurePlotWidget (live plot)
+        # Right: live plot
         self.pressure_plot_widget = PressurePlotWidget(self)
-        self.pressure_plot_widget.setSizePolicy(
-            QSizePolicy.Expanding, QSizePolicy.Expanding
-        )
+        self.pressure_plot_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.bottom_split.addWidget(self.pressure_plot_widget)
 
         self.bottom_split.setStretchFactor(0, 1)
@@ -278,7 +264,7 @@ class MainWindow(QMainWindow):
 
         main_vlay.addWidget(self.bottom_split, stretch=1)
 
-        # ─── Wire Up PlotControl ↔ PressurePlotWidget (no camera hookups here) ─
+        # ─── Wire Up PlotControlPanel → PressurePlotWidget ────────────────
         if hasattr(self.pressure_plot_widget, "set_auto_scale_x"):
             self.plot_control_panel.autoscale_x_changed.connect(
                 self.pressure_plot_widget.set_auto_scale_x
@@ -311,7 +297,6 @@ class MainWindow(QMainWindow):
                 self.pressure_plot_widget.clear_plot
             )
 
-        # ─── Finally, set this “central” widget on the window ───────────────
         self.setCentralWidget(central)
 
     # ─── Camera Device & Resolution Enumeration ─────────────────────────────────
@@ -397,17 +382,11 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_start_stop_camera(self):
         """
-        Called when the user clicks the “Start Camera” / “Stop Camera” button.
-        CASE A: No thread → Start a new SDKCameraThread (with device & resolution).
-        CASE B: Thread is running → Stop it and clear the viewfinder.
+        Toggle the SDKCameraThread: start grabbing or stop.
         """
-        # CASE A: Start camera
+        # — CASE A: No thread running → user clicked “Start Camera”
         if self.camera_thread is None or not self.camera_thread.isRunning():
-            # 1) Make sure device & resolution are selected.
-            if (
-                self.device_combo.currentData() is None
-                or self.resolution_combo.currentData() is None
-            ):
+            if self.device_combo.currentData() is None or self.resolution_combo.currentData() is None:
                 dlg = QMessageBox(self)
                 dlg.setIcon(QMessageBox.Warning)
                 dlg.setWindowTitle("Camera Not Configured")
@@ -418,41 +397,37 @@ class MainWindow(QMainWindow):
             dev_info = self.device_combo.currentData()
             res_data = self.resolution_combo.currentData()  # (width, height, pf_name)
 
-            # 2) Create a brand‐new SDKCameraThread
+            # Create a new SDKCameraThread
             self.camera_thread = SDKCameraThread(parent=self)
             self.camera_thread.set_device_info(dev_info)
             self.camera_thread.set_resolution(res_data)
 
-            # 3) Hook up signals from SDKCameraThread:
-            #    a) grabber_ready → call _on_grabber_ready
+            # Connect signals:
             self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
-
-            #    b) frame_ready(QImage, raw) → push into QtCameraWidget
-            self.camera_thread.frame_ready.connect(self.camera_widget.update_image)
-
-            #    c) error → show in existing _on_camera_error slot
+            self.camera_thread.frame_ready.connect(
+                lambda img, raw: self.camera_widget.update_image(img)
+            )
             self.camera_thread.error.connect(self._on_camera_error)
 
-            # 4) Update UI before starting
+            # Reset Info labels
             self.lbl_cam_frame.setText("0")
             self.lbl_cam_resolution.setText("N/A")
             self.lbl_cam_connection.setText("Connecting…")
 
-            # 5) Start capturing in the QThread
+            # Start the thread
             self.camera_thread.start()
 
-            # 6) Change button text, disable camera_control_panel until grabber is ready
+            # Change the button text
             self.btn_start_camera.setText("Stop Camera")
             self.camera_control_panel.setEnabled(False)
 
-        # CASE B: Stop camera
+        # — CASE B: thread is running → user clicked “Stop Camera”
         else:
             try:
                 self.camera_thread.stop()
             except Exception as e:
                 log.error(f"Error stopping camera thread: {e}")
 
-            # Reset UI back to “off” state
             self.btn_start_camera.setText("Start Camera")
             self.camera_control_panel.setEnabled(False)
             self.lbl_cam_connection.setText("Disconnected")
@@ -460,29 +435,28 @@ class MainWindow(QMainWindow):
             self.lbl_cam_resolution.setText("N/A")
             self.camera_widget.clear_image()
 
-            # Drop our reference so next click will create a fresh thread
+            # Discard the thread reference
             self.camera_thread = None
 
     @pyqtSlot()
     def _on_grabber_ready(self):
         """
-        Called when SDKCameraThread.grabber_ready() fires.  At this point, `self.camera_thread.grabber`
-        is a valid, open ic4.Grabber with acquisition running.  We hand it off to CameraControlPanel
-        so the user can tweak sliders (gain, exposure, etc.).
+        Called by SDKCameraThread.grabber_ready().
+        At this point, self.camera_thread.grabber is an open ic4.Grabber.
+        We hand it off to CameraControlPanel so it can build its controls.
         """
         if self.camera_thread is None:
             return
 
         grabber = self.camera_thread.grabber
-        if grabber is None or not grabber.is_device_open:
-            log.error("MainWindow: grabber_ready() but grabber is not open.")
+        if not grabber or not grabber.is_device_open:
+            log.error("MainWindow: grabber_ready() arrived, but grabber is not open.")
             return
 
-        # 1) Give the open grabber to our control panel so it can build dynamic controls
+        # Give the grabber to the control panel and let it build dynamic controls
         self.camera_control_panel.grabber = grabber
         self.camera_control_panel._on_grabber_ready()
 
-        # 2) Update the “Connected” label in the Info tab
         self.lbl_cam_connection.setText("Connected")
 
     @pyqtSlot(QImage, object)

@@ -1,55 +1,123 @@
-# ui/control_panels/camera_control_panel.py
+# File: prim_app/ui/control_panels/camera_control_panel.py
 
 import logging
 import imagingcontrol4 as ic4
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QSlider, QHBoxLayout
-from PyQt5.QtCore import Qt, pyqtSlot
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QSlider, QHBoxLayout, QCheckBox, QFormLayout
+from PyQt5.QtCore import Qt, pyqtSignal
 
 log = logging.getLogger(__name__)
 
 class CameraControlPanel(QWidget):
+    """
+    Builds sliders/checkboxes for gain, exposure, brightness, etc. once the Grabber is open.
+    """
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.grabber = None       # type: ic4.Grabber
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(0,0,0,0)
-        self.layout.setSpacing(4)
+        self.grabber = None
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(self.main_layout)
+
+        # Placeholder label until we build controls:
+        self.info_label = QLabel("Camera controls will appear here.")
+        self.main_layout.addWidget(self.info_label)
 
     def _on_grabber_ready(self):
         """
-        Called by MainWindow once the camera is open.
-        We now have: self.grabber = <ic4.Grabber> and we can 
-        poke at grabber.device_property_map to build sliders.
+        Called by MainWindow once the Grabber is open and streaming is set up.
+        We now have: self.grabber → open ic4.Grabber
+        We want to build dynamic controls for available features (ExposureTime, Gain, etc.)
         """
-        if self.grabber is None:
+
+        if not self.grabber or not self.grabber.is_device_open:
+            log.error("CameraControlPanel: _on_grabber_ready() called, but grabber is not open.")
             return
+
+        # Clear any old widgets:
+        for i in reversed(range(self.main_layout.count())):
+            self.main_layout.itemAt(i).widget().deleteLater()
 
         prop_map = self.grabber.device_property_map
 
-        # Enumerate all enumeration properties
-        enum_names = [p.name for p in prop_map.enumerations()]
-        log.info(f"====== Available Enumeration Properties: {enum_names}")
+        # We will scan all properties in prop_map, and pick out enumeration‐type ones
+        enum_features = []
+        float_features = []
+        int_features = []
 
-        # Example: try to build a Gain slider if it exists
-        try:
-            gain_prop = prop_map.find_float("Gain")
-            if gain_prop:
+        # The current binding lets us iterate over prop_map (each item is a Property)
+        for prop in prop_map:
+            # Each prop has attributes: prop.prop_type (PropType), prop.name, prop.visibility, etc.
+            ptype = prop.prop_type
+            if ptype == ic4.PropertyType.Enumeration:
+                enum_features.append(prop)
+            elif ptype == ic4.PropertyType.Integer:
+                int_features.append(prop)
+            elif ptype == ic4.PropertyType.Float:
+                float_features.append(prop)
+            # you can also catch Boolean or Command if you want checkboxes/buttons
+
+        form = QFormLayout()
+        form.setContentsMargins(4, 4, 4, 4)
+        form.setSpacing(6)
+
+        # Build sliders/combos for enumeration features first:
+        for enum_prop in enum_features:
+            # e.g. PixelFormat, AcquisitionMode, ExposureAuto, GainAuto, etc.
+            try:
+                label = QLabel(enum_prop.name)
+                combo = QComboBox()
+                for entry in enum_prop.entries:
+                    combo.addItem(entry.name)
+                # set current
+                combo.setCurrentText(enum_prop.value)
+                combo.currentTextChanged.connect(
+                    lambda txt, ep=enum_prop: setattr(ep, "value", txt)
+                )
+                form.addRow(label, combo)
+            except Exception as e:
+                log.error(f"Failed to build enum control for {enum_prop.name}: {e}")
+
+        # Build sliders for integer features (if they have increment info)
+        for int_prop in int_features:
+            try:
+                label = QLabel(int_prop.name)
                 slider = QSlider(Qt.Horizontal)
-                slider.setMinimum(int(gain_prop.min))
-                slider.setMaximum(int(gain_prop.max))
-                try:
-                    slider.setSingleStep(int(gain_prop.increment))
-                except ic4.IC4Exception:
-                    pass
-                slider.setValue(int(gain_prop.value))
-                slider.valueChanged.connect(lambda v: gain_prop.set_value(v))
-                label = QLabel("Gain")
-                wnd = QHBoxLayout()
-                wnd.addWidget(label)
-                wnd.addWidget(slider)
-                self.layout.addLayout(wnd)
-        except Exception as e:
-            log.error(f"Failed to build Gain control: {e}")
+                slider.setMinimum(int(int_prop.min))
+                slider.setMaximum(int(int_prop.max))
+                step = int_prop.increment if int_prop.increment else 1
+                slider.setSingleStep(int(step))
+                slider.setValue(int(int_prop.value))
+                slider.valueChanged.connect(
+                    lambda v, ip=int_prop: setattr(ip, "value", v)
+                )
+                form.addRow(label, slider)
+            except Exception as e:
+                log.error(f"Failed to build integer control for {int_prop.name}: {e}")
 
-        # Repeat for ExposureTime, Brightness, Auto‐Exposure, etc.,
-        # always wrapping increment/min/max in try/except GenICamNotImplemented.
+        # Build sliders for float features (if they have increment and min/max)
+        for float_prop in float_features:
+            try:
+                label = QLabel(float_prop.name)
+                slider = QSlider(Qt.Horizontal)
+                # Convert float range into integer steps
+                minv = float_prop.min
+                maxv = float_prop.max
+                inc = float_prop.increment or 1.0
+                steps = int(round((maxv - minv) / inc))
+                slider.setMinimum(0)
+                slider.setMaximum(steps)
+                # map current value → "position"
+                curpos = int(round((float_prop.value - minv) / inc))
+                slider.setValue(curpos)
+
+                def on_float_change(pos, fp=float_prop):
+                    newval = minv + pos * inc
+                    fp.value = newval
+
+                slider.valueChanged.connect(on_float_change)
+                form.addRow(label, slider)
+            except Exception as e:
+                log.error(f"Failed to build float control for {float_prop.name}: {e}")
+
+        self.main_layout.addLayout(form)
