@@ -9,13 +9,14 @@ log = logging.getLogger(__name__)
 
 
 class SDKCameraThread(QThread):
-    # emitted when grabber is open & ready (so UI can build controls)
+    # ─── Signals ──────────────────────────────────────────────────
+    # Emitted once the IC4 Grabber is opened & ready for property‐sliders
     grabber_ready = pyqtSignal()
 
-    # emitted for each new frame: (QImage, raw_buffer_object)
+    # Emitted each time a new frame is ready (carries a QImage + raw buffer)
     frame_ready = pyqtSignal(QImage, object)
 
-    # emitted on error: (message, code)
+    # Emitted on any camera error (message, code)
     error = pyqtSignal(str, str)
 
     def __init__(self, parent=None):
@@ -33,32 +34,32 @@ class SDKCameraThread(QThread):
         self._resolution = resolution_tuple
 
     def run(self):
-        try:
-            # 1) Initialize the library
-            ic4.Library.init(
-                api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
-            )
+        """
+        1) Open & configure the IC4 Grabber
+        2) Create a QueueSink(self, …) so IC4 calls our callbacks
+        3) Emit grabber_ready(), start streaming, loop until stop() is called
+        4) Cleanly stop streaming and close device (no Library.exit() here)
+        """
 
-            # 2) Create grabber and open the device
+        # ─── Step 1: Open Grabber & configure camera ────────────────────
+        try:
+            # (a) Create Grabber & open the camera
             self.grabber = ic4.Grabber()
             self.grabber.device_open(self._device_info)
 
-            # 3) Force “Continuous” mode if possible (same as before)
+            # (b) Force Continuous acquisition mode if available
             acq_node = self.grabber.device_property_map.find_enumeration(
                 "AcquisitionMode"
             )
             if acq_node:
-                vals = [e.name for e in acq_node.entries]
-                if "Continuous" in vals:
-                    acq_node.value = "Continuous"
-                else:
-                    acq_node.value = vals[0]
+                names = [e.name for e in acq_node.entries]
+                acq_node.value = "Continuous" if "Continuous" in names else names[0]
 
-            # 4) Set the chosen PixelFormat, Width, and Height
-            w, h, pf = self._resolution
+            # (c) Apply the chosen resolution/pixel‐format
+            w, h, pf_name = self._resolution
             pf_node = self.grabber.device_property_map.find_enumeration("PixelFormat")
             if pf_node:
-                pf_node.value = pf
+                pf_node.value = pf_name
 
             w_node = self.grabber.device_property_map.find_integer("Width")
             h_node = self.grabber.device_property_map.find_integer("Height")
@@ -66,67 +67,79 @@ class SDKCameraThread(QThread):
                 w_node.value = int(w)
                 h_node.value = int(h)
 
-            # 5) Build a QueueSink that hands you BGR8 buffers
-            listener = self  # implement frames_queued in this class
-            sink = ic4.QueueSink(listener, [ic4.PixelFormat.BGR8], max_output_buffers=1)
+        except Exception as e:
+            log.error("Camera thread encountered an error during setup.", exc_info=e)
+            self.error.emit(str(e), getattr(e, "code", ""))
+            return
+
+        # ─── Step 2: Build a QueueSink that uses this thread as the listener ─────
+        try:
+            sink = ic4.QueueSink(
+                self,  # `self` implements sink_connected() & frames_queued()
+                [ic4.PixelFormat.BGR8],  # request BGR8
+                max_output_buffers=1,
+            )
             self.grabber.stream_setup(sink)
+        except Exception as e:
+            log.error(
+                "Camera thread encountered an error setting up the sink.", exc_info=e
+            )
+            self.error.emit(str(e), getattr(e, "code", ""))
+            return
 
-            # 6) Emit “grabber_ready” so UI can build property‐sliders
-            self.grabber_ready.emit()
-
-            # 7) Start streaming
+        # ─── Step 3: Notify UI that grabber is ready, then start streaming ────
+        self.grabber_ready.emit()
+        try:
             self.grabber.stream_start()
+        except Exception as e:
+            log.error("Camera thread failed to start streaming.", exc_info=e)
+            self.error.emit(str(e), getattr(e, "code", ""))
+            return
 
-            # 8) Busy‐loop until stop requested
-            while not self._stop_requested:
-                ic4.sleep(10)  # or QThread.msleep(10)
+        # ─── Step 4: Main loop—sleep briefly, letting IC4 call frames_queued() ──
+        self._stop_requested = False
+        while not self._stop_requested:
+            self.msleep(10)
 
-            # 9) On exit, stop streaming
+        # ─── Step 5: Clean up on stop request ───────────────────────────────
+        try:
             self.grabber.stream_stop()
             self.grabber.device_close()
+        except Exception:
+            pass
 
-        except Exception as e:
-            log.exception("Camera thread encountered an error.")
-            msg = str(e)
-            code = getattr(e, "code", "")
-            self.error.emit(msg, code)
-
-        finally:
-            try:
-                ic4.Library.exit()
-            except Exception:
-                pass
+        # **DO NOT** call ic4.Library.exit() here.  Your MainWindow.closeEvent()
+        # will call Library.exit() exactly once.
 
     def stop(self):
+        """Call this from the main thread to request the grab loop to exit."""
         self._stop_requested = True
 
-    # ← This is the callback from QueueSink when a new frame arrives
-    def frames_queued(self, sink):
+    # ─── IC4 QueueSinkListener callbacks ───────────────────────────────────
+    def sink_connected(
+        self, sink: ic4.QueueSink, image_type: ic4.ImageType, min_buffers_required: int
+    ) -> bool:
+        """
+        Called once, just before streaming begins.  Return True to accept the negotiated format.
+        """
+        return True
+
+    def frames_queued(self, sink: ic4.QueueSink):
+        """
+        Called by IC4 every time a new buffer is available.  We pop it,
+        wrap it in a NumPy array, convert to QImage, and emit frame_ready.
+        """
         try:
             buf = sink.pop_output_buffer()
+            arr = buf.numpy_wrap()  # shape = (height, width, 3) in BGR8
 
-            # Create a NumPy view
-            arr = buf.numpy_wrap()  # shape = (height, width, channels)
-            h, w = arr.shape[0], arr.shape[1]
+            h, w = arr.shape[:2]
+            # QImage.Format_BGR888 is available in recent PyQt5/PyQt6. If you have an older Qt,
+            # you may have to use Format_RGB888 and swap channels manually.
+            qimg = QImage(arr.data, w, h, arr.strides[0], QImage.Format_BGR888)
 
-            # Build a QImage from the raw BGR data
-            # Note: Format_BGR888 is available in recent PyQt5; adjust if needed
-            qimg = QImage(
-                arr.data,
-                w,
-                h,
-                arr.strides[0],
-                QImage.Format_BGR888,
-            )
-
-            # Emit the frame to the UI
             self.frame_ready.emit(qimg, buf)
 
         except Exception as e:
-            log.error(f"Error popping buffer: {e}")
+            log.error(f"Error popping buffer in frames_queued(): {e}", exc_info=e)
             self.error.emit(str(e), "")
-
-        finally:
-            # In high‐fps scenarios, we don't re‐queue the buffer manually;
-            # the IC4 sink reuses a single max_output_buffer=1 buffer.
-            pass
