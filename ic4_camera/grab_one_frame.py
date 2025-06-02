@@ -1,4 +1,4 @@
-# grab_one_frame.py
+# File: grab_one_frame.py
 
 import time
 import imagingcontrol4 as ic4
@@ -6,21 +6,24 @@ import numpy as np
 import cv2
 
 
-class _MinimalSinkListener(ic4.QueueSinkListener):
+class MinimalListener(ic4.QueueSinkListener):
     def frames_queued(self, sink, *args):
         pass
 
     def sink_connected(self, sink, *args):
-        pass
+        # Return True so the sink actually attaches
+        return True
 
 
 def main():
+    # 1) Initialize the IC4 library
     try:
         ic4.Library.init()
     except ic4.IC4Exception as e:
         print("Library.init() failed:", e)
         return
 
+    # 2) Enumerate devices
     try:
         devices = ic4.DeviceEnum.devices()
     except ic4.IC4Exception as e:
@@ -31,10 +34,10 @@ def main():
         print("No IC4 cameras found.")
         return
 
-    # Pick device #0
     info = devices[0]
     print(f"Opening camera: {info.model_name}")
 
+    # 3) Open the Grabber
     try:
         grabber = ic4.Grabber()
         grabber.device_open(info)
@@ -43,24 +46,52 @@ def main():
         return
 
     pm = grabber.device_property_map
-    # (Optional) Force continuous mode & a moderate frame rate
+
+    # 4) Force PixelFormat → Mono8
     try:
-        pm.set_value(ic4.PropId.ACQUISITION_MODE, "Continuous")
-        pm.set_value(ic4.PropId.ACQUISITION_FRAME_RATE, 10.0)
-    except:
+        pi = pm.find_enumeration(ic4.PropId.PIXEL_FORMAT)
+        if "Mono8" in pi.valid_value_strings:
+            pi.value_string = "Mono8"
+            print("Set PIXEL_FORMAT to Mono8")
+        else:
+            print(
+                "Mono8 not supported! Valid PixelFormat options:",
+                pi.valid_value_strings,
+            )
+            grabber.device_close()
+            return
+    except ic4.IC4Exception as e:
+        print("Could not set PIXEL_FORMAT:", e)
+        grabber.device_close()
+        return
+
+    # 5) Turn off auto‐exposure if available
+    try:
+        prop_auto = pm.find_boolean(ic4.PropId.EXPOSURE_AUTO)
+        prop_auto.value = False
+    except ic4.IC4Exception:
         pass
 
-    # Create sink & start acquisition
-    listener = _MinimalSinkListener()
+    # 6) Attach a QueueSink, but do NOT start acquisition yet
+    listener = MinimalListener()
     sink = ic4.QueueSink(listener)
-    grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
+    grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.NONE)
+
+    # 7) Pre‐allocate and queue 5 buffers BEFORE acquisition_start()
     sink.alloc_and_queue_buffers(5)
 
-    # Try to pop exactly one buffer (blocking until it arrives)
+    # 8) Explicitly start acquisition
+    try:
+        grabber.acquisition_start()
+    except ic4.IC4Exception as e:
+        print("acquisition_start() failed:", e)
+        grabber.device_close()
+        return
+
+    # 9) Pop exactly one buffer (with a 5 s timeout)
     buf = None
-    timeout_s = 5.0
-    t0 = time.time()
-    while time.time() - t0 < timeout_s:
+    start = time.time()
+    while time.time() - start < 5.0:
         try:
             buf = sink.try_pop_output_buffer()
         except ic4.IC4Exception as e:
@@ -73,40 +104,21 @@ def main():
     if buf is None:
         print("Timed out waiting for a frame.")
     else:
-        # Convert to NumPy (this shares the buffer, no copy)
+        # 10) Convert the ImageBuffer to a NumPy array (Mono8 → uint8)
         arr = buf.numpy_wrap()
-        np_img = np.array(arr, copy=False)  # shape = (H, W, C) dtype=uint8 or uint16
+        img8 = np.array(arr, copy=False)
 
-        # If it's 16-bit or single-channel, convert for display:
-        if np_img.dtype == np.uint16:
-            display8 = (np_img >> 8).astype(np.uint8)
-            if display8.ndim == 2:
-                cv2.imshow("Frame (downsampled 16→8)", display8)
-            else:
-                # assume shape (H, W, 3)
-                bgr = cv2.cvtColor(display8, cv2.COLOR_BGR2RGB)
-                cv2.imshow("Frame (downsampled 16→8)", bgr)
-        elif np_img.dtype == np.uint8:
-            if np_img.ndim == 2:
-                cv2.imshow("Frame (gray8)", np_img)
-            else:
-                # IC4 often gives BGR8
-                cv2.imshow("Frame (BGR8)", np_img)
-        else:
-            # fallback: show only the first channel
-            gray = np_img[..., 0].astype(np.uint8)
-            cv2.imshow("Frame (fallback gray)", gray)
-
+        # 11) Display in OpenCV
+        cv2.imshow("Mono8 Frame", img8)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-        # Always release buffer so sink can reuse it
         try:
             buf.release()
         except:
             pass
 
-    # Clean up
+    # 12) Cleanup
     try:
         grabber.acquisition_stop()
     except:
