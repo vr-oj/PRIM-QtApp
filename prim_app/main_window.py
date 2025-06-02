@@ -694,39 +694,49 @@ class MainWindow(QMainWindow):
                 self._serial_thread = None
                 self._update_recording_actions_enable_state()
 
-    @pyqtSlot(int, float, float)
-    def _handle_new_serial_data(self, idx: int, t: float, p: float):
-        # 1) Update TopControlPanel with the new data:
-        self.top_ctrl.update_prim_data(idx, t, p)
+        @pyqtSlot(str)
+    def _handle_serial_status_change(self, status: str):
+        log.info(f"Serial status: {status}")
+        self.statusBar().showMessage(f"PRIM Device: {status}", 4000)
 
-        # 2) Decide whether to auto‐scale or use manual limits by querying PlotControlPanel:
-        ax = self.plot_control_panel.auto_x_cb.isChecked()
-        ay = self.plot_control_panel.auto_y_cb.isChecked()
+        # Determine if the status string means “connected”
+        connected = (
+            "connected" in status.lower()
+            or "opened serial port" in status.lower()
+        )
+        # Update TopControlPanel’s connection label
+        self.top_ctrl.update_connection_status(status, connected)
 
-        # 3) Push the new point into the PressurePlotWidget:
-        self.pressure_plot_widget.update_plot(t, p, ax, ay)
+        if connected:
+            # Switch the toolbar action to “Disconnect PRIM Device”
+            self.connect_serial_action.setIcon(self.icon_disconnect)
+            self.connect_serial_action.setText("Disconnect PRIM Device")
+            self.serial_port_combobox.setEnabled(False)
+            self.pressure_plot_widget.clear_plot()
+        else:
+            # Revert toolbar action to “Connect PRIM Device”
+            self.connect_serial_action.setIcon(self.icon_connect)
+            self.connect_serial_action.setText("Connect PRIM Device")
+            self.serial_port_combobox.setEnabled(True)
 
-        # 4) If the console is visible, log out the raw values:
-        if self.dock_console.isVisible():
-            self.console_out_textedit.append(
-                f"PRIM Data: Idx={idx}, Time={t:.3f}s, P={p:.2f}"
-            )
-
-        # 5) If we are currently recording, also enqueue this data for the CSV:
-        if self._is_recording and self._recording_worker:
-            try:
-                self._recording_worker.add_csv_data(t, idx, p)
-            except Exception:
-                log.exception("Error queueing CSV data for recording.")
-                self.statusBar().showMessage(
-                    "CSV queue error. Stopping recording.", 5000
+            # If we were recording when the device dropped, stop recording
+            if self._is_recording:
+                QMessageBox.information(
+                    self,
+                    "Recording Stopped",
+                    "PRIM device disconnected during recording.",
                 )
                 self._trigger_stop_recording()
+
+        # Enable/disable the Start/Stop Recording actions
+        self._update_recording_actions_enable_state()
 
     @pyqtSlot(str)
     def _handle_serial_error(self, msg: str):
         log.error(f"Serial error: {msg}")
+        # Show it in the status bar so user sees it
         self.statusBar().showMessage(f"Serial Error: {msg}", 6000)
+        # Also re-evaluate whether the recording buttons are enabled
         self._update_recording_actions_enable_state()
 
     @pyqtSlot()
@@ -734,6 +744,7 @@ class MainWindow(QMainWindow):
         log.info("SerialThread finished signal received.")
         sender_thread = self.sender()
         if self._serial_thread is sender_thread:
+            # If the UI still thinks “connected,” force it into “disconnected”
             current_status_text = (
                 self.top_ctrl.conn_lbl.text().lower()
                 if hasattr(self.top_ctrl, "conn_lbl")
@@ -743,7 +754,6 @@ class MainWindow(QMainWindow):
                 "connected" in current_status_text
                 or "opened serial port" in current_status_text
             )
-
             if is_ui_connected:
                 self._handle_serial_status_change("Disconnected by thread finishing")
 
@@ -760,18 +770,27 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(int, float, float)
     def _handle_new_serial_data(self, idx: int, t: float, p: float):
-        # Exactly as before: feed TopControlPanel and PressurePlotWidget
+        """
+        Called whenever SerialThread emits data_ready(idx, t, p).
+        Pushes new data into TopControlPanel and the live plot.
+        """
+        # 1) Update TopControlPanel (frame count, device time, pressure)
         self.top_ctrl.update_prim_data(idx, t, p)
 
-        ax = self.top_ctrl.plot_controls.auto_x_cb.isChecked()
-        ay = self.top_ctrl.plot_controls.auto_y_cb.isChecked()
+        # 2) Read the auto-scale checkboxes from PlotControlPanel
+        ax = self.plot_control_panel.auto_x_cb.isChecked()
+        ay = self.plot_control_panel.auto_y_cb.isChecked()
+
+        # 3) Send the new sample to the PressurePlotWidget
         self.pressure_plot_widget.update_plot(t, p, ax, ay)
 
+        # 4) Also log it to the console dock if visible
         if self.dock_console.isVisible():
             self.console_out_textedit.append(
                 f"PRIM Data: Idx={idx}, Time={t:.3f}s, P={p:.2f}"
             )
 
+        # 5) If we are actively recording, queue it to the CSV
         if self._is_recording and self._recording_worker:
             try:
                 self._recording_worker.add_csv_data(t, idx, p)
@@ -783,13 +802,17 @@ class MainWindow(QMainWindow):
                 self._trigger_stop_recording()
 
     def _update_recording_actions_enable_state(self):
+        """
+        Enable “Start Recording” only if serial is connected and not currently recording.
+        Enable “Stop Recording” only if a recording is in progress.
+        """
         serial_ready = (
             self._serial_thread is not None and self._serial_thread.isRunning()
         )
         can_start = serial_ready and not self._is_recording
         self.start_recording_action.setEnabled(bool(can_start))
         self.stop_recording_action.setEnabled(bool(self._is_recording))
-
+        
     # ─── Window Close Cleanup ──────────────────────────────────────────────────
     def closeEvent(self, event):
         log.info("MainWindow closeEvent triggered.")
