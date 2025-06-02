@@ -256,7 +256,9 @@ class MainWindow(QMainWindow):
 
         # Right: live plot
         self.pressure_plot_widget = PressurePlotWidget(self)
-        self.pressure_plot_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.pressure_plot_widget.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Expanding
+        )
         self.bottom_split.addWidget(self.pressure_plot_widget)
 
         self.bottom_split.setStretchFactor(0, 1)
@@ -317,7 +319,9 @@ class MainWindow(QMainWindow):
             log.info("DEBUG: DeviceEnum.devices() returned ZERO devices.")
         else:
             for idx, dev in enumerate(device_list):
-                log.info(f"DEBUG: Device {idx} = {dev.model_name!r} (S/N {dev.serial!r})")
+                log.info(
+                    f"DEBUG: Device {idx} = {dev.model_name!r} (S/N {dev.serial!r})"
+                )
 
         # Clear the combo and add a placeholder
         self.device_combo.clear()
@@ -379,36 +383,33 @@ class MainWindow(QMainWindow):
         except Exception as e:
             log.error(f"Failed to get formats for {dev_info}: {e}")
 
+    # ─── in MainWindow._on_start_stop_camera ───────────────────────────────
     @pyqtSlot()
     def _on_start_stop_camera(self):
         if self.camera_thread is None or not self.camera_thread.isRunning():
-            # Check device/resolution selections …
-            dev_info = self.device_combo.currentData()
-            w,h,pf_name = self.resolution_combo.currentData()
-
+            # … (setup) …
             self.camera_thread = SDKCameraThread(parent=self)
             self.camera_thread.set_device_info(dev_info)
-            self.camera_thread.set_resolution((w,h,pf_name))
+            self.camera_thread.set_resolution((w, h, pf_name))
 
             # 1) When the grabber is open & streaming, enable sliders
             self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
 
-            # 2) Each time a new frame is ready, tell QtCameraWidget to update
-            self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
+            # 2) Each time a new frame is ready, extract the QImage and send it to update_image():
+            self.camera_thread.frame_ready.connect(
+                lambda qimg, raw: self.camera_widget.update_image(qimg)
+            )
+
+            # 2b) Also update the “Frame #” and “Resolution” labels in the Info tab:
+            self.camera_thread.frame_ready.connect(self._update_camera_info)
 
             # 3) Any camera error → pop up a dialog
             self.camera_thread.error.connect(self._on_camera_error)
 
-            # Show “Connecting…” in the Info tab
-            self.lbl_cam_connection.setText("Connecting…")
-            self.lbl_cam_frame.setText("0")
-            self.lbl_cam_resolution.setText("N/A")
-
-            # Actually start the thread
+            # … UI “Connecting…” … start thread …
             self.camera_thread.start()
             self.btn_start_camera.setText("Stop Camera")
             self.camera_control_panel.setEnabled(False)
-
         else:
             # Stop camera
             self.camera_thread.stop()
