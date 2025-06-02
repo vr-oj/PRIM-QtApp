@@ -58,11 +58,11 @@ class GrabberThread(QThread):
                 self.qt_thread = qt_thread
 
             def sink_connected(self, sink, image_type, min_buffers_required) -> bool:
-                # Accept whatever buffers IC4 wants to allocate
+                # Accept the buffers IC4 wants to allocate
                 return True
 
             def frames_queued(self, sink: ic4.QueueSink):
-                # Called by IC4 whenever a frame is available.
+                # Called whenever a frame is available
                 try:
                     buf = sink.pop_output_buffer()
                 except Exception as pop_err:
@@ -72,7 +72,7 @@ class GrabberThread(QThread):
                     return
 
                 # Convert the ImageBuffer → a NumPy array (in-place BGRA8):
-                arr = buf.numpy_wrap()  # shape = (height, stride) but can slice to (h, w, 4)
+                arr = buf.numpy_wrap()  # shape = (height, stride), slice to (h, w, 4)
 
                 # Example processing: blur + draw text
                 cv2.blur(arr, (31, 31), arr)
@@ -86,7 +86,7 @@ class GrabberThread(QThread):
                     thickness=2,
                 )
 
-                # Convert BGRA → QImage.  We assume BGRA8888 layout:
+                # Convert BGRA → QImage (we assume BGRA layout):
                 h, w, stride = buf.height, buf.width, buf.stride
                 qimg = QImage(
                     arr.data,
@@ -99,13 +99,14 @@ class GrabberThread(QThread):
                 # Emit the QImage to the main GUI thread
                 self.qt_thread.frame_ready.emit(qimg.copy())
 
-                # Return the buffer back to IC4 (so it can reuse it)
+                # Return the buffer back to IC4 so it can reuse it
                 buf.queue_buffer()
 
         listener = _Listener(self)
 
-        # Create a QueueSink that requests BGRA8 buffers (2 max)
-        self.queue_sink = ic4.QueueSink(listener, [ic4.PixelFormat.BGRA8], max_output_buffers=2)
+        # Create a QueueSink that requests BGRa8 buffers (2 max)
+        # Note: changed PixelFormat.BGRA8 → PixelFormat.BGRa8
+        self.queue_sink = ic4.QueueSink(listener, [ic4.PixelFormat.BGRa8], max_output_buffers=2)
 
         # Hook the sink into the grabber
         try:
