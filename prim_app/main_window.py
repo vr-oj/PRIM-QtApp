@@ -942,8 +942,8 @@ class MainWindow(QMainWindow):
 
         threads_to_clean = []
 
-        # CameraThread inside camera_widget
-        cam_thread = self.camera_widget._cam_thread
+        # CameraThread (we stored it in self.camera_thread)
+        cam_thread = self.camera_thread
         threads_to_clean.append(
             ("SDKCameraThread", cam_thread, getattr(cam_thread, "stop", None))
         )
