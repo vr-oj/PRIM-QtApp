@@ -11,11 +11,12 @@ class MinimalListener(ic4.QueueSinkListener):
         pass
 
     def sink_connected(self, sink, *args):
-        pass
+        # Must return True to allow the sink to attach and start streaming
+        return True
 
 
 def main():
-    # 1) Init library
+    # 1) Initialize the IC4 library
     try:
         ic4.Library.init()
     except ic4.IC4Exception as e:
@@ -36,7 +37,7 @@ def main():
     info = devices[0]
     print(f"Opening camera: {info.model_name}")
 
-    # 3) Open Grabber
+    # 3) Open the Grabber
     try:
         grabber = ic4.Grabber()
         grabber.device_open(info)
@@ -46,28 +47,36 @@ def main():
 
     pm = grabber.device_property_map
 
-    # 4) Query and set ExposureTime (now using find_float)
+    # 4) Query and set ExposureTime via find_float()
     try:
         prop_exp = pm.find_float(ic4.PropId.EXPOSURE_TIME)
         print("Current ExposureTime (µs):", prop_exp.value)
-        prop_exp.value = prop_exp.value  # leave unchanged or set a new float value
+        # Optionally set it to the same or a new value, e.g.:
+        # prop_exp.value = 10000.0
     except ic4.IC4Exception as exc:
         print("Could not find/set ExposureTime:", exc)
 
-    # 5) (Optional) set ExposureAuto off if you want manual control (for some cameras):
+    # 5) Turn off auto‐exposure (if present)
     try:
         prop_auto = pm.find_boolean(ic4.PropId.EXPOSURE_AUTO)
         prop_auto.value = False
     except ic4.IC4Exception:
         pass
 
-    # 6) Attach a QueueSink and start continuous acquisition:
+    # 6) Attach a QueueSink and start acquisition
     listener = MinimalListener()
     sink = ic4.QueueSink(listener)
-    grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
+    try:
+        grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
+    except ic4.IC4Exception as e:
+        print("stream_setup failed (sink_connected probably returned false):", e)
+        grabber.device_close()
+        return
+
+    # 7) Pre‐allocate a few buffers
     sink.alloc_and_queue_buffers(5)
 
-    # 7) Pop exactly one buffer (with timeout)
+    # 8) Pop exactly one buffer (with a timeout)
     buf = None
     start = time.time()
     while time.time() - start < 5.0:
@@ -83,33 +92,33 @@ def main():
     if buf is None:
         print("Timed out waiting for a frame.")
     else:
+        # 9) Convert the ImageBuffer to a NumPy array
         arr = buf.numpy_wrap()
         np_img = np.array(arr, copy=False)
 
-        # Convert to 8-bit for display if needed:
+        # 10) Down‐shift 16‐bit → 8‐bit if needed
         if np_img.dtype == np.uint16:
             img8 = (np_img >> 8).astype(np.uint8)
         else:
             img8 = np_img
 
-        # If multi‐channel, assume BGR8:
+        # 11) If multi‐channel, assume BGR8; otherwise grayscale
         if img8.ndim == 3 and img8.shape[2] == 3:
             display = img8
         else:
-            # Single channel
             display = img8 if img8.ndim == 2 else img8[:, :, 0]
 
         cv2.imshow("One Frame", display)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-        # Release buffer
+        # 12) Release the buffer so the sink can reuse it
         try:
             buf.release()
         except:
             pass
 
-    # 8) Clean up
+    # 13) Clean up
     try:
         grabber.acquisition_stop()
     except:
