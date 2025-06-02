@@ -649,9 +649,16 @@ class MainWindow(QMainWindow):
     # ─── Toggle Serial Connection / Simulated Data ────────────────────────────
     def _toggle_serial_connection(self):
         if self._serial_thread and self._serial_thread.isRunning():
+            # — User clicked “Disconnect PRIM Device”
             log.info("Stopping serial thread...")
-            self._serial_thread.stop()  # stop() will emit finished when done
+            self._serial_thread.stop()
+
+            # Immediately flip back to “Connect PRIM Device”
+            self.connect_serial_action.setIcon(self.icon_connect)
+            self.connect_serial_action.setText("Connect PRIM Device")
+
         else:
+            # — User clicked “Connect PRIM Device”
             data = self.serial_port_combobox.currentData()
             port = data.value() if isinstance(data, QVariant) else data
             if (
@@ -663,7 +670,7 @@ class MainWindow(QMainWindow):
 
             log.info(f"Starting serial thread on port: {port or 'Simulation'}")
             try:
-                # Clean up previous thread if it wasn’t fully deleted
+                # Clean up previous thread if still hanging
                 if self._serial_thread:
                     if self._serial_thread.isRunning():
                         log.warning(
@@ -686,6 +693,11 @@ class MainWindow(QMainWindow):
                     self._handle_serial_thread_finished
                 )
                 self._serial_thread.start()
+
+                # *** Immediately switch to “Disconnect PRIM Device” ***
+                self.connect_serial_action.setIcon(self.icon_disconnect)
+                self.connect_serial_action.setText("Disconnect PRIM Device")
+
             except Exception as e:
                 log.exception("Failed to start SerialThread.")
                 QMessageBox.critical(self, "Serial Error", str(e))
