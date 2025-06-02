@@ -356,9 +356,6 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(int)
     def _on_device_selected(self, index):
-        """
-        When the user selects a camera device, enumerate its supported resolutions.
-        """
         dev_info = self.device_combo.itemData(index)
         self.resolution_combo.clear()
         self.resolution_combo.addItem("Select Resolution...", None)
@@ -367,23 +364,19 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            # ─── Create a Grabber and open using dev_info ──────────────────────
             grab = ic4.Grabber()
             grab.device_open(dev_info)
 
-            # ─── Enumerate all supported video formats (pixel‐formats) ────────
-            pf_list = grab.format_video.enumerate()
-            for pv in pf_list:
-                w = grab.format_video.get_value(ic4.PropId.IMAGE_WIDTH, pv)
-                h = grab.format_video.get_value(ic4.PropId.IMAGE_HEIGHT, pv)
-                pixfmt = grab.format_video.get_value(ic4.PropId.PIXEL_FORMAT, pv)
-                display_str = f"{w}×{h} ({pv.name if hasattr(pv, 'name') else pixfmt})"
-                self.resolution_combo.addItem(display_str, (w, h, pixfmt))
+            # --- DEBUG: list all attributes of this Grabber instance ---
+            print(">>> Grabber members:", dir(grab))
+
+            # Then try to find a member that enumerates formats
+            # e.g. "format_video", "video_formats", "available_video_formats", etc.
 
             grab.device_close()
 
         except Exception as e:
-            log.error(f"Failed to get formats for {dev_info!r}: {e}")
+            log.error(f"Failed to inspect Grabber for {dev_info!r}: {e}")
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
