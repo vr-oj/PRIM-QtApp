@@ -381,67 +381,46 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
-        """
-        Toggle the SDKCameraThread: start grabbing or stop.
-        """
-        # CASE A: No thread running → user clicked “Start Camera”
         if self.camera_thread is None or not self.camera_thread.isRunning():
-            # Verify that the user has chosen a device and a resolution:
-            if (
-                self.device_combo.currentData() is None
-                or self.resolution_combo.currentData() is None
-            ):
-                dlg = QMessageBox(self)
-                dlg.setIcon(QMessageBox.Warning)
-                dlg.setWindowTitle("Camera Not Configured")
-                dlg.setText(
-                    "Please select a valid device and resolution before starting."
-                )
-                dlg.exec_()
-                return
+            # Check device/resolution selections …
+            dev_info = self.device_combo.currentData()
+            w,h,pf_name = self.resolution_combo.currentData()
 
-            # Extract the chosen DeviceInfo and resolution tuple:
-            dev_info = self.device_combo.currentData()      # e.g. ic4.DeviceInfo
-            res_data = self.resolution_combo.currentData()  # (width, height, pixelFormatName)
-
-            # Tell QtCameraWidget’s thread which device and resolution to use:
-            self.camera_thread = self.camera_widget._cam_thread
+            self.camera_thread = SDKCameraThread(parent=self)
             self.camera_thread.set_device_info(dev_info)
-            self.camera_thread.set_resolution(res_data)
+            self.camera_thread.set_resolution((w,h,pf_name))
 
-            # Connect signals:
+            # 1) When the grabber is open & streaming, enable sliders
             self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
+
+            # 2) Each time a new frame is ready, tell QtCameraWidget to update
+            self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
+
+            # 3) Any camera error → pop up a dialog
             self.camera_thread.error.connect(self._on_camera_error)
 
-            # Reset the Info tab labels:
+            # Show “Connecting…” in the Info tab
+            self.lbl_cam_connection.setText("Connecting…")
             self.lbl_cam_frame.setText("0")
             self.lbl_cam_resolution.setText("N/A")
-            self.lbl_cam_connection.setText("Connecting…")
 
-            # Actually start the thread (inside QtCameraWidget):
-            self.camera_widget.start_camera()
-
-            # Update button text and disable controls until grabber_ready():
+            # Actually start the thread
+            self.camera_thread.start()
             self.btn_start_camera.setText("Stop Camera")
             self.camera_control_panel.setEnabled(False)
 
-        # CASE B: thread is already running → user clicked “Stop Camera”
         else:
-            try:
-                self.camera_widget.stop_camera()
-            except Exception as e:
-                log.error(f"Error stopping camera thread: {e}")
+            # Stop camera
+            self.camera_thread.stop()
+            self.camera_thread = None
 
-            # Reset UI to “off” state:
+            # Reset UI
             self.btn_start_camera.setText("Start Camera")
             self.camera_control_panel.setEnabled(False)
             self.lbl_cam_connection.setText("Disconnected")
             self.lbl_cam_frame.setText("0")
             self.lbl_cam_resolution.setText("N/A")
-            self.camera_widget.stop_camera()
-
-            # Drop our thread reference so next click re-creates it:
-            self.camera_thread = None
+            self.camera_widget.clear_image()
 
     @pyqtSlot()
     def _on_grabber_ready(self):
