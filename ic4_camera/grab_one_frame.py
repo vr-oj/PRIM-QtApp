@@ -52,7 +52,7 @@ def main():
         print("  ✗ Could not set ACQUISITION_FRAME_RATE:", e)
 
     try:
-        exp_node = grabber.device_property_map.find_integer(ic4.PropId.EXPOSURE_TIME)
+        exp_node = grabber.device_property_map.find_float(ic4.PropId.EXPOSURE_TIME)
         if exp_node:
             exp_node.value = 30000  # 30 ms = 30,000 µs
             print("  → Set EXPOSURE_TIME to 30 ms")
