@@ -2218,3 +2218,18 @@ Camera reports 219 PropId constants. Checking each one:
   Not supported by this camera.
 
 (.primenv) C:\Users\Tykocki Lab - PRIM\Documents\GitHub\PRIM-QtApp\ic4_camera>
+
+
+
+
+
+(.primenv) C:\Users\Tykocki Lab - PRIM\Documents\GitHub\PRIM-QtApp\ic4_camera>python debug_camera_properties.py
+--- Debug: enum_pids contents and types ---
+   pid = 'ExposureAuto',   type(pid) = <class 'str'>
+   pid = 'GainAuto',   type(pid) = <class 'str'>
+   pid = 'PixelFormat',   type(pid) = <class 'str'>
+   pid = 'TriggerMode',   type(pid) = <class 'str'>
+   pid = 'TriggerSource',   type(pid) = <class 'str'>
+-----------------------------------------
+
+(.primenv) C:\Users\Tykocki Lab - PRIM\Documents\GitHub\PRIM-QtApp\ic4_camera>

@@ -7,10 +7,12 @@ def toggle_enumeration(pm, pid: ic4.PropId):
     pid must be an ic4.PropId member.
     Print its current enumeration entry, cycle to the next valid entry (if >1), and print again.
     """
+    # Debug print to confirm pid type
+    print(f"[toggle_enumeration] pid = {pid!r},   type(pid) = {type(pid)}")
     try:
         prop = pm.find_enumeration(pid)
     except ic4.IC4Exception:
-        print(f"  [SKIP] {pid.name}: not an enumeration on this camera.")
+        print(f"  [SKIP] {pid.name}: not an enumeration on this camera.\n")
         return
 
     entries = [entry.name for entry in prop.entries]
@@ -33,10 +35,12 @@ def toggle_boolean(pm, pid: ic4.PropId):
     pid must be an ic4.PropId member.
     Print its current boolean value, flip it, and print again.
     """
+    # Debug print to confirm pid type
+    print(f"[toggle_boolean] pid = {pid!r},   type(pid) = {type(pid)}")
     try:
         prop = pm.find_boolean(pid)
     except ic4.IC4Exception:
-        print(f"  [SKIP] {pid.name}: not a boolean on this camera.")
+        print(f"  [SKIP] {pid.name}: not a boolean on this camera.\n")
         return
 
     curr = prop.value
@@ -52,10 +56,12 @@ def adjust_float(pm, pid: ic4.PropId):
     Print its current float value, set it to mid-range (if auto-limits exist)
     or bump it by 10% otherwise, then print again.
     """
+    # Debug print to confirm pid type
+    print(f"[adjust_float] pid = {pid!r},   type(pid) = {type(pid)}")
     try:
         prop = pm.find_float(pid)
     except ic4.IC4Exception:
-        print(f"  [SKIP] {pid.name}: not a float on this camera.")
+        print(f"  [SKIP] {pid.name}: not a float on this camera.\n")
         return
 
     curr = prop.value
@@ -87,7 +93,6 @@ def adjust_float(pm, pid: ic4.PropId):
 
 def cycle_over_props(pm):
     print("\n=== Testing Enumeration Props ===")
-    # Here we list actual PropId members (not strings)
     enum_pids = [
         ic4.PropId.EXPOSURE_AUTO,
         ic4.PropId.GAIN_AUTO,
@@ -161,7 +166,7 @@ def main():
     except ic4.IC4Exception:
         pass
 
-    # 2) Toggle/cycle each property group
+    # 2) Toggle/cycle each property group (with debug prints)
     cycle_over_props(pm)
 
     # 3) Cleanup
