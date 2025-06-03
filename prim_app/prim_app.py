@@ -83,70 +83,6 @@ def load_processed_qss(path):
         return ""
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# BELOW: Copied from your standalone “device-enumeration.py”
-from collections import defaultdict
-
-
-def format_device_info(device_info: ic4.DeviceInfo) -> str:
-    return f"Model: {device_info.model_name}    Serial: {device_info.serial}"
-
-
-def print_device_list():
-    """
-    Print all attached IC4 cameras, grouped by interface.
-    Exactly as in your standalone script.
-    """
-    print("Enumerating all attached video capture devices…")
-
-    device_list = ic4.DeviceEnum.devices()
-    if len(device_list) == 0:
-        print("No devices found")
-        return
-
-    by_interface = defaultdict(list)
-    for dev in device_list:
-        iface = f"{dev.interface_id:#06x}"  # e.g. “0x0000”
-        by_interface[iface].append(dev)
-
-    for iface, devs in by_interface.items():
-        print(f"Interface: {iface}")
-        if not devs:
-            print("\t(no cameras on this interface)")
-        for device_info in devs:
-            print(f"\t{format_device_info(device_info)}")
-
-
-def detect_camera():
-    """
-    Initialize IC4, enumerate devices, then exit IC4.
-    Return the list of discovered DeviceInfo objects (possibly empty).
-    """
-    try:
-        ic4.Library.init(
-            api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
-        )
-    except Exception as e:
-        print(f"ERROR: Failed to initialize IC4 library: {e}")
-        return []
-
-    try:
-        device_list = ic4.DeviceEnum.devices()
-    except Exception as e:
-        print(f"ERROR: DeviceEnum.devices() raised an exception: {e}")
-        device_list = []
-    finally:
-        try:
-            ic4.Library.exit()
-        except:
-            pass
-
-    return device_list
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def main_app_entry():
     # ─── Set Default OpenGL 3.3 Core Profile ─────────────────────────────
     fmt = QSurfaceFormat()
@@ -240,50 +176,11 @@ def main_app_entry():
         log.info("No style.qss found. Using default 'Fusion' style.")
         app.setStyle(QStyleFactory.create("Fusion"))
 
-    # ─── Begin: Camera detection (using your standalone logic) ───────────
-    devices = detect_camera()
-
-    # Print exactly the same info (model & serial, grouped by interface)
-    # using the list that detect_camera() returned.
-    from collections import defaultdict
-
-    by_interface = defaultdict(list)
-    for dev in devices:
-        iface = f"{dev.interface:#06x}"  # e.g. “0x0000”
-        by_interface[iface].append(dev)
-
-    print("Enumerating all attached video capture devices…")
-    if not devices:
-        print("No devices found")
-    else:
-        for iface, devs in by_interface.items():
-            print(f"Interface: {iface}")
-            if not devs:
-                print("\t(no cameras on this interface)")
-            for device_info in devs:
-                print(
-                    f"\tModel: {device_info.model_name}    Serial: {device_info.serial}"
-                )
-
-    if not devices:
-        dlg = QMessageBox(
-            QMessageBox.Critical,
-            f"{APP_NAME} – Camera Not Found",
-            "No IC4 camera detected. Please connect a camera and restart.",
-            QMessageBox.Ok,
-        )
-        dlg.exec_()
-        sys.exit(1)
-
-    # At least one camera was found—print a confirmation and continue
-    print(f"Found {len(devices)} camera(s)—proceeding to launch the UI.")
-    # ─── End: Camera detection ────────────────────────────────────────────
-
-    # ─── Import & Launch MainWindow (unchanged) ──────────────────────────
+    # ─── Import & Launch MainWindow ───────────────────────────────────────
     from main_window import MainWindow
 
-    display_version = CONFIG_APP_VERSION or "Unknown"
     main_win = MainWindow()
+    display_version = CONFIG_APP_VERSION or "Unknown"
     main_win.setWindowTitle(f"{APP_NAME} v{display_version}")
     main_win.show()
 
