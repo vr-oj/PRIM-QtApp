@@ -47,31 +47,23 @@ class SDKCameraThread(QThread):
 
     def run(self):
         try:
-            # -----------------------------------------------------------------
-            # 1) Initialize IC4 in this thread (if not already done globally)
-            # -----------------------------------------------------------------
+            # ─── Initialize IC4 (with “already called” catch) ─────────────────
             try:
                 ic4.Library.init(
-                    api_log_level=ic4.LogLevel.INFO,
-                    log_targets=ic4.LogTarget.STDERR,
+                    api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
                 )
                 log.info("SDKCameraThread: Library.init() succeeded.")
             except RuntimeError as e:
-                # If “Library.init was already called,” ignore and continue
                 if "already called" in str(e):
                     log.info("SDKCameraThread: IC4 already initialized; continuing.")
                 else:
                     raise
 
-            # -----------------------------------------------------------------
-            # 2) Verify we have a DeviceInfo
-            # -----------------------------------------------------------------
+            # ─── Verify device_info was set ────────────────────────────────────
             if self._device_info is None:
                 raise RuntimeError("No DeviceInfo passed to SDKCameraThread.")
 
-            # -----------------------------------------------------------------
-            # 3) Open the grabber
-            # -----------------------------------------------------------------
+            # ─── Open the grabber ───────────────────────────────────────────────
             self.grabber = ic4.Grabber()
             self.grabber.device_open(self._device_info)
             log.info(
@@ -79,9 +71,7 @@ class SDKCameraThread(QThread):
                 f"'{self._device_info.model_name}' (S/N '{self._device_info.serial}')."
             )
 
-            # -----------------------------------------------------------------
-            # 4) Apply resolution + PixelFormat if provided
-            # -----------------------------------------------------------------
+            # ─── Apply PixelFormat & resolution ────────────────────────────────
             if self._resolution is not None:
                 w, h, pf_name = self._resolution
                 try:
@@ -99,29 +89,51 @@ class SDKCameraThread(QThread):
                             log.info(f"SDKCameraThread: Set resolution = {w}×{h}")
                     else:
                         log.warning(
-                            "SDKCameraThread: PixelFormat node not found; using camera default."
+                            "SDKCameraThread: PixelFormat node not found; using default."
                         )
                 except Exception as e:
                     log.warning(f"SDKCameraThread: Could not set resolution/PF: {e}")
 
-            # -----------------------------------------------------------------
-            # 5) Signal “grabber_ready” so MainWindow can build controls, etc.
-            # -----------------------------------------------------------------
+            # ─── Force Continuous acquisition mode ───────────────────────────────
+            try:
+                acq_node = self.grabber.device_property_map.find_enumeration(
+                    "AcquisitionMode"
+                )
+                if acq_node:
+                    entries = [e.name for e in acq_node.entries]
+                    if "Continuous" in entries:
+                        acq_node.value = "Continuous"
+                        log.info("SDKCameraThread: Set AcquisitionMode = Continuous")
+                    else:
+                        acq_node.value = entries[0]
+                        log.info(f"SDKCameraThread: Set AcquisitionMode = {entries[0]}")
+            except Exception as e:
+                log.warning(f"SDKCameraThread: Could not set AcquisitionMode: {e}")
+
+            # ─── Disable trigger so camera will free‐run ─────────────────────────
+            try:
+                trig_node = self.grabber.device_property_map.find_enumeration(
+                    "TriggerMode"
+                )
+                if trig_node:
+                    trig_node.value = "Off"
+                    log.info("SDKCameraThread: Set TriggerMode = Off")
+                else:
+                    log.warning(
+                        "SDKCameraThread: TriggerMode node not found; assuming free‐run."
+                    )
+            except Exception as e:
+                log.warning(f"SDKCameraThread: Could not disable TriggerMode: {e}")
+
+            # ─── Signal “grabber_ready” so UI can enable controls ────────────────
             self.grabber_ready.emit()
 
-            # -----------------------------------------------------------------
-            # 6) Build a QueueSink requesting Mono8 frames (max_output_buffers=1).
-            #    We assume resolution’s pf_name is “Mono8.” If it’s not, the fallback
-            #    below will request the camera’s native PF and we’ll downconvert in frames_queued().
-            # -----------------------------------------------------------------
+            # ─── Build QueueSink requesting Mono8 (fallback to native PF if needed)─
             try:
-                # Request exactly Mono8 from the camera
                 self._sink = ic4.QueueSink(
                     self, [ic4.PixelFormat.Mono8], max_output_buffers=1
                 )
-            except Exception:
-                # Fallback: if camera can only deliver its native pf_name,
-                # request that instead (pf_name might be "Mono8" anyway).
+            except:
                 native_pf = self._resolution[2] if self._resolution else None
                 if native_pf and hasattr(ic4.PixelFormat, native_pf):
                     self._sink = ic4.QueueSink(
@@ -131,12 +143,10 @@ class SDKCameraThread(QThread):
                     )
                 else:
                     raise RuntimeError(
-                        "SDKCameraThread: Unable to create a QueueSink for Mono8 or native PF."
+                        "SDKCameraThread: Unable to create QueueSink for Mono8 or native PF."
                     )
 
-            # -----------------------------------------------------------------
-            # 7) Hook up the sink AND immediately start acquisition
-            # -----------------------------------------------------------------
+            # ─── Start streaming immediately ───────────────────────────────────────
             from imagingcontrol4 import StreamSetupOption
 
             self.grabber.stream_setup(
@@ -144,24 +154,19 @@ class SDKCameraThread(QThread):
                 setup_option=StreamSetupOption.ACQUISITION_START,
             )
             log.info(
-                "SDKCameraThread: stream_setup(ACQUISITION_START) succeeded. Entering frame loop..."
+                "SDKCameraThread: stream_setup(ACQUISITION_START) succeeded. Entering frame loop…"
             )
 
-            # -----------------------------------------------------------------
-            # 8) Busy‐loop until stop() is called. frames_queued() will handle images.
-            # -----------------------------------------------------------------
+            # ─── Frame loop: IC4 calls frames_queued() whenever a new buffer is ready ─
             while not self._stop_requested:
-                self.msleep(10)  # ← corrected from ic4.sleep(10)
+                self.msleep(10)
 
-            # -----------------------------------------------------------------
-            # 9) On stop request: stop streaming, close device
-            # -----------------------------------------------------------------
+            # ─── Stop streaming & close device ───────────────────────────────────
             self.grabber.stream_stop()
             self.grabber.device_close()
-            log.info("SDKCameraThread: Streaming stopped,  device closed.")
+            log.info("SDKCameraThread: Streaming stopped, device closed.")
 
         except Exception as e:
-            # Emit any errors
             msg = str(e)
             code_enum = getattr(e, "code", None)
             code_str = str(code_enum) if code_enum else ""
@@ -169,9 +174,6 @@ class SDKCameraThread(QThread):
             self.error.emit(msg, code_str)
 
         finally:
-            # -----------------------------------------------------------------
-            # 10) Exit IC4 for this thread (decrements internal reference count)
-            # -----------------------------------------------------------------
             try:
                 ic4.Library.exit()
                 log.info("SDKCameraThread: Library.exit() called.")
