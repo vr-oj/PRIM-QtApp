@@ -727,28 +727,32 @@ class MainWindow(QMainWindow):
     @pyqtSlot(QImage, object)
     def _on_video_frame_and_record(self, qimg, buf):
         """
-        Called on each new camera frame (from SDKCameraThread.frame_ready).
-        1) Live‐preview the frame.
+        Called on each new camera frame.
+        1) Display it in the live preview (passing both QImage and raw buffer).
         2) Extract the NumPy array + timestamp, assign our own frame_index,
-        and enqueue into the RecordingWorker.
+        and enqueue for recording.
         """
-        # 1) Show in live preview
-        self.camera_widget._on_frame_ready(qimg)
+        # 1) Live preview – pass both qimg and buf to the widget
+        try:
+            self.camera_widget._on_frame_ready(qimg, buf)
+        except Exception as e:
+            log.error(f"Error updating live preview: {e}")
+            # even if preview fails, we still attempt to record the frame below
 
-        # 2) Try to extract a NumPy array from the IC4 buffer
+        # 2) Extract NumPy array from the IC4 buffer
         try:
             arr = buf.numpy_wrap().copy()
         except Exception as e:
             log.error(f"MainWindow: failed to convert buffer to NumPy: {e}")
             return
 
-        # 3) Pull camera timestamp from the buffer's metadata
+        # 3) Read camera timestamp from metadata (μs)
         try:
             cam_ts = int(buf.meta_data.get("Timestamp", 0))
         except Exception:
             cam_ts = 0
 
-        # 4) Use our own per-recording frame counter as frame index
+        # 4) Use our own per‐recording frame counter as frame index
         frame_idx = self._record_frame_count
         self._record_frame_count += 1
 
