@@ -229,6 +229,7 @@ class MainWindow(QMainWindow):
         controls_layout.setContentsMargins(6, 6, 6, 6)
         controls_layout.setSpacing(6)
 
+        # Instantiate CameraControlPanel here (disabled by default)
         self.camera_control_panel = CameraControlPanel(parent=self)
         self.camera_control_panel.setEnabled(False)
         controls_layout.addWidget(self.camera_control_panel)
@@ -444,6 +445,7 @@ class MainWindow(QMainWindow):
 
         self.camera_control_panel.grabber = grabber
         self.camera_control_panel._on_grabber_ready()
+        self.camera_control_panel.setEnabled(True)
 
         self.lbl_cam_connection.setText("Connected")
 
