@@ -5,7 +5,7 @@ import imagingcontrol4 as ic4
 def toggle_enumeration(pm, pid: ic4.PropId):
     """
     pid must be an ic4.PropId member.
-    Print its current entry, cycle to the next valid entry (if more than one), and print again.
+    Print its current enumeration entry, cycle to the next valid entry (if >1), and print again.
     """
     try:
         prop = pm.find_enumeration(pid)
@@ -13,8 +13,7 @@ def toggle_enumeration(pm, pid: ic4.PropId):
         print(f"  [SKIP] {pid.name}: not an enumeration on this camera.")
         return
 
-    # The PropEnumEntry objects each have a .name (the string) in prop.entries
-    entries = [e.name for e in prop.entries]
+    entries = [entry.name for entry in prop.entries]
     curr = prop.selected_entry.name
     print(f"  {pid.name}: current = '{curr}'   (options: {entries})")
 
@@ -50,8 +49,8 @@ def toggle_boolean(pm, pid: ic4.PropId):
 def adjust_float(pm, pid: ic4.PropId):
     """
     pid must be an ic4.PropId member.
-    Print its current float value, then set it to mid‐range (if auto‐limits exist)
-    or bump it by 10% otherwise, and print again.
+    Print its current float value, set it to mid-range (if auto-limits exist)
+    or bump it by 10% otherwise, then print again.
     """
     try:
         prop = pm.find_float(pid)
@@ -62,7 +61,7 @@ def adjust_float(pm, pid: ic4.PropId):
     curr = prop.value
     print(f"  {pid.name}: current = {curr}")
 
-    # Attempt to find “AUTO_LOWER_LIMIT” and “AUTO_UPPER_LIMIT” if they exist
+    # Attempt to find auto-limits if they exist
     lower = upper = None
     lower_name = pid.name + "_LOWER_LIMIT"
     upper_name = pid.name + "_UPPER_LIMIT"
@@ -75,11 +74,11 @@ def adjust_float(pm, pid: ic4.PropId):
 
     if lower is not None and upper is not None and upper > lower:
         mid = (lower + upper) / 2.0
-        print(f"    Using auto‐limits {lower} … {upper}, setting to mid = {mid}")
+        print(f"    Using auto-limits {lower} … {upper}, setting to mid = {mid}")
         prop.value = mid
     else:
         bump = curr * 1.1 if curr > 0 else 1.0
-        print(f"    No auto‐limits found. Setting to {bump}")
+        print(f"    No auto-limits found. Setting to {bump}")
         prop.value = bump
 
     time.sleep(0.1)
@@ -88,6 +87,7 @@ def adjust_float(pm, pid: ic4.PropId):
 
 def cycle_over_props(pm):
     print("\n=== Testing Enumeration Props ===")
+    # Here we list actual PropId members (not strings)
     enum_pids = [
         ic4.PropId.EXPOSURE_AUTO,
         ic4.PropId.GAIN_AUTO,
@@ -149,7 +149,7 @@ def main():
 
     pm = grabber.device_property_map
 
-    # 1) Basic camera info (model, serial, temperature)
+    # 1) Print basic camera info
     print("=== Basic Camera Info ===")
     try:
         model = pm.find_string(ic4.PropId.DEVICE_MODEL_NAME).value
@@ -161,7 +161,7 @@ def main():
     except ic4.IC4Exception:
         pass
 
-    # 2) Run through our toggles and adjustments
+    # 2) Toggle/cycle each property group
     cycle_over_props(pm)
 
     # 3) Cleanup
