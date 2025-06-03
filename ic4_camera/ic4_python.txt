@@ -1188,3 +1188,1033 @@ class StreamSetupOption(enum.IntEnum)
 >>>
 >>>
 >>>
+___________________________________________________________
+
+(.primenv) C:\Users\Tykocki Lab - PRIM\Documents\GitHub\PRIM-QtApp\ic4_camera>python dump_camera_capabilities.py
+--- ACQUISITION_BURST_FRAME_COUNT ---
+  Not supported by this camera.
+--- ACQUISITION_BURST_INTERVAL ---
+  Not supported by this camera.
+--- ACQUISITION_FRAME_RATE ---
+  Type: Float
+    Current value = 10.0
+--- ACQUISITION_MODE ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEE723C0>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEEAD6D0>]
+--- ACQUISITION_START ---
+  Not supported by this camera.
+--- ACQUISITION_STOP ---
+  Not supported by this camera.
+--- ACTION_DEVICE_KEY ---
+  Not supported by this camera.
+--- ACTION_GROUP_KEY ---
+  Not supported by this camera.
+--- ACTION_GROUP_MASK ---
+  Not supported by this camera.
+--- ACTION_QUEUE_SIZE ---
+  Not supported by this camera.
+--- ACTION_SCHEDULER_CANCEL ---
+  Not supported by this camera.
+--- ACTION_SCHEDULER_COMMIT ---
+  Not supported by this camera.
+--- ACTION_SCHEDULER_INTERVAL ---
+  Not supported by this camera.
+--- ACTION_SCHEDULER_STATUS ---
+  Not supported by this camera.
+--- ACTION_SCHEDULER_TIME ---
+  Not supported by this camera.
+--- ACTION_SELECTOR ---
+  Not supported by this camera.
+--- AUTO_FOCUS_ROI_ENABLE ---
+  Not supported by this camera.
+--- AUTO_FOCUS_ROI_HEIGHT ---
+  Not supported by this camera.
+--- AUTO_FOCUS_ROI_LEFT ---
+  Not supported by this camera.
+--- AUTO_FOCUS_ROI_TOP ---
+  Not supported by this camera.
+--- AUTO_FOCUS_ROI_WIDTH ---
+  Not supported by this camera.
+--- AUTO_FUNCTIONS_ROI_ENABLE ---
+  Type: Boolean
+    Current value = True
+--- AUTO_FUNCTIONS_ROI_HEIGHT ---
+  Not supported by this camera.
+--- AUTO_FUNCTIONS_ROI_LEFT ---
+  Not supported by this camera.
+--- AUTO_FUNCTIONS_ROI_PRESET ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEEAD950>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEE569E0>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEE56B10>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF4E210>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEEE08D0>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEEE09E0>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEEB5350>]
+--- AUTO_FUNCTIONS_ROI_TOP ---
+  Not supported by this camera.
+--- AUTO_FUNCTIONS_ROI_WIDTH ---
+  Not supported by this camera.
+--- BALANCE_RATIO ---
+  Not supported by this camera.
+--- BALANCE_RATIO_SELECTOR ---
+  Not supported by this camera.
+--- BALANCE_WHITE_AUTO ---
+  Not supported by this camera.
+--- BALANCE_WHITE_AUTO_PRESET ---
+  Not supported by this camera.
+--- BALANCE_WHITE_MODE ---
+  Not supported by this camera.
+--- BALANCE_WHITE_TEMPERATURE ---
+  Not supported by this camera.
+--- BALANCE_WHITE_TEMPERATURE_PRESET ---
+  Not supported by this camera.
+--- BINNING_HORIZONTAL ---
+  Not supported by this camera.
+--- BINNING_VERTICAL ---
+  Not supported by this camera.
+--- BLACK_LEVEL ---
+  Not supported by this camera.
+--- CHUNK_BLOCK_ID ---
+  Not supported by this camera.
+--- CHUNK_ENABLE ---
+  Type: Boolean
+    Current value = True
+--- CHUNK_EXPOSURE_TIME ---
+  Not supported by this camera.
+--- CHUNK_GAIN ---
+  Not supported by this camera.
+--- CHUNK_IMAGE ---
+  Not supported by this camera.
+--- CHUNK_IMX174_FRAME_ID ---
+  Not supported by this camera.
+--- CHUNK_IMX174_FRAME_SET ---
+  Not supported by this camera.
+--- CHUNK_MODE_ACTIVE ---
+  Type: Boolean
+    Current value = True
+--- CHUNK_MULTI_FRAME_SET_FRAME_ID ---
+  Not supported by this camera.
+--- CHUNK_MULTI_FRAME_SET_ID ---
+  Not supported by this camera.
+--- CHUNK_SELECTOR ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEEB5350>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEE47200>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEE46F30>]
+--- COLOR_TRANSFORMATION_ENABLE ---
+  Not supported by this camera.
+--- COLOR_TRANSFORMATION_SELECTOR ---
+  Not supported by this camera.
+--- COLOR_TRANSFORMATION_VALUE ---
+  Not supported by this camera.
+--- COLOR_TRANSFORMATION_VALUE_SELECTOR ---
+  Not supported by this camera.
+--- CONTRAST ---
+  Not supported by this camera.
+--- DECIMATION_HORIZONTAL ---
+  Not supported by this camera.
+--- DECIMATION_VERTICAL ---
+  Not supported by this camera.
+--- DENOISE ---
+  Not supported by this camera.
+--- DEVICE_EVENT_CHANNEL_COUNT ---
+  Not supported by this camera.
+--- DEVICE_FACTORY_RESET ---
+  Not supported by this camera.
+--- DEVICE_FIRMWARE_VERSION ---
+  Type: String
+    Current value = 'P1300_M/1745/781 USB3c2-PythonLS/30'
+--- DEVICE_LINK_HEARTBEAT_TIMEOUT ---
+  Not supported by this camera.
+--- DEVICE_LINK_SELECTOR ---
+  Not supported by this camera.
+--- DEVICE_MODEL_NAME ---
+  Type: String
+    Current value = 'DMK 33UP5000'
+--- DEVICE_RESET ---
+  Not supported by this camera.
+--- DEVICE_SCAN_TYPE ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170E0909A90>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170E0909A90>]
+--- DEVICE_SERIAL_NUMBER ---
+  Type: String
+    Current value = '51020069'
+--- DEVICE_SFNC_VERSION_MAJOR ---
+  Not supported by this camera.
+--- DEVICE_SFNC_VERSION_MINOR ---
+  Not supported by this camera.
+--- DEVICE_SFNC_VERSION_SUB_MINOR ---
+  Not supported by this camera.
+--- DEVICE_STREAM_CHANNEL_COUNT ---
+  Not supported by this camera.
+--- DEVICE_STREAM_CHANNEL_ENDIANNESS ---
+  Not supported by this camera.
+--- DEVICE_STREAM_CHANNEL_LINK ---
+  Not supported by this camera.
+--- DEVICE_STREAM_CHANNEL_PACKET_SIZE ---
+  Not supported by this camera.
+--- DEVICE_STREAM_CHANNEL_SELECTOR ---
+  Not supported by this camera.
+--- DEVICE_STREAM_CHANNEL_TYPE ---
+  Not supported by this camera.
+--- DEVICE_TEMPERATURE ---
+  Type: Float
+    Current value = 55.0
+--- DEVICE_TEMPERATURE_SELECTOR ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF5D710>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEDE7110>]
+--- DEVICE_TL_TYPE ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEDE7110>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEE1AA40>]
+--- DEVICE_TL_VERSION_MAJOR ---
+  Not supported by this camera.
+--- DEVICE_TL_VERSION_MINOR ---
+  Not supported by this camera.
+--- DEVICE_TL_VERSION_SUB_MINOR ---
+  Not supported by this camera.
+--- DEVICE_TYPE ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEE1AA40>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170E0913F70>]
+--- DEVICE_USER_ID ---
+  Type: String
+    Current value = ''
+--- DEVICE_VENDOR_NAME ---
+  Type: String
+    Current value = 'The Imaging Source Europe GmbH'
+--- DEVICE_VERSION ---
+  Not supported by this camera.
+--- DISABLE_INFO_OVERLAY ---
+  Not supported by this camera.
+--- EVENT_EXPOSURE_END ---
+  Not supported by this camera.
+--- EVENT_EXPOSURE_END_FRAME_ID ---
+  Not supported by this camera.
+--- EVENT_EXPOSURE_END_TIMESTAMP ---
+  Not supported by this camera.
+--- EVENT_FOCUS_MOVE_COMPLETED ---
+  Not supported by this camera.
+--- EVENT_FOCUS_MOVE_COMPLETED_FOCUS ---
+  Not supported by this camera.
+--- EVENT_FOCUS_MOVE_COMPLETED_TIMESTAMP ---
+  Not supported by this camera.
+--- EVENT_FRAME_TRIGGER_MISSED ---
+  Not supported by this camera.
+--- EVENT_FRAME_TRIGGER_MISSED_TIMESTAMP ---
+  Not supported by this camera.
+--- EVENT_LINE1_FALLING_EDGE ---
+  Not supported by this camera.
+--- EVENT_LINE1_FALLING_EDGE_TIMESTAMP ---
+  Not supported by this camera.
+--- EVENT_LINE1_RISING_EDGE ---
+  Not supported by this camera.
+--- EVENT_LINE1_RISING_EDGE_TIMESTAMP ---
+  Not supported by this camera.
+--- EVENT_NOTIFICATION ---
+  Not supported by this camera.
+--- EVENT_SELECTOR ---
+  Not supported by this camera.
+--- EVENT_TEST ---
+  Not supported by this camera.
+--- EVENT_TEST_TIMESTAMP ---
+  Not supported by this camera.
+--- EVENT_ZOOM_MOVE_COMPLETED ---
+  Not supported by this camera.
+--- EVENT_ZOOM_MOVE_COMPLETED_TIMESTAMP ---
+  Not supported by this camera.
+--- EVENT_ZOOM_MOVE_COMPLETED_ZOOM ---
+  Not supported by this camera.
+--- EXPAND_OUTPUT_RANGE ---
+  Not supported by this camera.
+--- EXPOSURE_AUTO ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170E0913F70>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEEA0C20>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF530D0>]
+--- EXPOSURE_AUTO_HIGHLIGHT_REDUCTION ---
+  Type: Boolean
+    Current value = False
+--- EXPOSURE_AUTO_HIGHLIGH_REDUCTION ---
+  Not supported by this camera.
+--- EXPOSURE_AUTO_LOWER_LIMIT ---
+  Type: Float
+    Current value = 50.0
+--- EXPOSURE_AUTO_REFERENCE ---
+  Not supported by this camera.
+--- EXPOSURE_AUTO_UPPER_LIMIT ---
+  Type: Float
+    Current value = 16666.0
+--- EXPOSURE_AUTO_UPPER_LIMIT_AUTO ---
+  Type: Boolean
+    Current value = False
+--- EXPOSURE_TIME ---
+  Type: Float
+    Current value = 1000.0
+--- FILE_ACCESS_BUFFER ---
+  Not supported by this camera.
+--- FILE_ACCESS_LENGTH ---
+  Not supported by this camera.
+--- FILE_ACCESS_OFFSET ---
+  Not supported by this camera.
+--- FILE_OPEN_MODE ---
+  Not supported by this camera.
+--- FILE_OPERATION_EXECUTE ---
+  Not supported by this camera.
+--- FILE_OPERATION_RESULT ---
+  Not supported by this camera.
+--- FILE_OPERATION_SELECTOR ---
+  Not supported by this camera.
+--- FILE_OPERATION_STATUS ---
+  Not supported by this camera.
+--- FILE_SELECTOR ---
+  Not supported by this camera.
+--- FILE_SIZE ---
+  Not supported by this camera.
+--- FOCUS ---
+  Not supported by this camera.
+--- FOCUS_AUTO ---
+  Not supported by this camera.
+--- GAIN ---
+  Type: Float
+    Current value = 0.0
+--- GAIN_AUTO ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF535D0>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF00830>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF008A0>]
+--- GAIN_AUTO_LOWER_LIMIT ---
+  Type: Float
+    Current value = 0.0
+--- GAIN_AUTO_UPPER_LIMIT ---
+  Type: Float
+    Current value = 3.202040034985937
+--- GAIN_MODE ---
+  Not supported by this camera.
+--- GAMMA ---
+  Type: Float
+    Current value = 1.0
+--- GEV_GVSP_EXTENDED_ID_MODE ---
+  Not supported by this camera.
+--- GEV_SCPS_DO_NOT_FRAGMENT ---
+  Not supported by this camera.
+--- GEV_SCPS_PACKET_SIZE ---
+  Not supported by this camera.
+--- GP_IN ---
+  Not supported by this camera.
+--- GP_OUT ---
+  Not supported by this camera.
+--- HEIGHT ---
+  Not supported by this camera.
+--- HEIGHT_MAX ---
+  Not supported by this camera.
+--- HUE ---
+  Not supported by this camera.
+--- IMX174_HARDWARE_WDR_ENABLE ---
+  Not supported by this camera.
+--- IMX174_HARDWARE_WDR_SHUTTER_MODE ---
+  Not supported by this camera.
+--- IMX174_WDR_SHUTTER2 ---
+  Not supported by this camera.
+--- IMX_LOW_LATENCY_TRIGGER_MODE ---
+  Not supported by this camera.
+--- INPUT_BITS ---
+  Not supported by this camera.
+--- INPUT_FP1KS ---
+  Not supported by this camera.
+--- INPUT_HEIGHT ---
+  Not supported by this camera.
+--- INPUT_WIDTH ---
+  Not supported by this camera.
+--- IRIS ---
+  Not supported by this camera.
+--- IRIS_AUTO ---
+  Not supported by this camera.
+--- IR_CUT_FILTER_ENABLE ---
+  Not supported by this camera.
+--- LUT_ENABLE ---
+  Type: Boolean
+    Current value = False
+--- LUT_INDEX ---
+  Not supported by this camera.
+--- LUT_SELECTOR ---
+  Not supported by this camera.
+--- LUT_VALUE ---
+  Not supported by this camera.
+--- LUT_VALUE_ALL ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_CUSTOM_GAIN ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_ENABLE ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_EXPOSURE_TIME0 ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_EXPOSURE_TIME1 ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_EXPOSURE_TIME2 ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_EXPOSURE_TIME3 ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_FRAME_COUNT ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_GAIN0 ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_GAIN1 ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_GAIN2 ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_GAIN3 ---
+  Not supported by this camera.
+--- OFFSET_AUTO_CENTER ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170E06B70B0>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170E06B70B0>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68A50>]
+--- OFFSET_X ---
+  Not supported by this camera.
+--- OFFSET_Y ---
+  Not supported by this camera.
+--- PAYLOAD_SIZE ---
+  Not supported by this camera.
+--- PIXEL_FORMAT ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68AF0>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68AA0>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68A50>]
+--- PTP_CLOCK_ACCURACY ---
+  Not supported by this camera.
+--- PTP_ENABLE ---
+  Not supported by this camera.
+--- PTP_STATUS ---
+  Not supported by this camera.
+--- REVERSE_X ---
+  Not supported by this camera.
+--- REVERSE_Y ---
+  Not supported by this camera.
+--- SATURATION ---
+  Not supported by this camera.
+--- SENSOR_HEIGHT ---
+  Not supported by this camera.
+--- SENSOR_PIXEL_HEIGHT ---
+  Not supported by this camera.
+--- SENSOR_PIXEL_WIDTH ---
+  Not supported by this camera.
+--- SENSOR_WIDTH ---
+  Not supported by this camera.
+--- SHARPNESS ---
+  Not supported by this camera.
+--- SIDEBAND_USE ---
+  Not supported by this camera.
+--- SIGNAL_DETECTED ---
+  Not supported by this camera.
+--- SOFTWARE_TRANSFORM_ENABLE ---
+  Type: Boolean
+    Current value = True
+--- SOURCE_CONNECTED ---
+  Not supported by this camera.
+--- STROBE_DELAY ---
+  Not supported by this camera.
+--- STROBE_DURATION ---
+  Not supported by this camera.
+--- STROBE_ENABLE ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEEBF4D0>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEEBF4D0>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68A50>]
+--- STROBE_OPERATION ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEEBF4D0>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEEBF4D0>]
+--- STROBE_POLARITY ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEEBF4D0>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEEBF4D0>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68AA0>]
+--- TEST_EVENT_GENERATE ---
+  Not supported by this camera.
+--- TEST_PENDING_ACK ---
+  Not supported by this camera.
+--- TIMESTAMP_LATCH ---
+  Not supported by this camera.
+--- TIMESTAMP_LATCH_STRING ---
+  Not supported by this camera.
+--- TIMESTAMP_LATCH_VALUE ---
+  Not supported by this camera.
+--- TIMESTAMP_RESET ---
+  Not supported by this camera.
+--- TL_PARAMS_LOCKED ---
+  Not supported by this camera.
+--- TONE_MAPPING_ENABLE ---
+  Type: Boolean
+    Current value = False
+--- TONE_MAPPING_GLOBAL_BRIGHTNESS ---
+  Type: Float
+    Current value = 0.0
+--- TONE_MAPPING_INTENSITY ---
+  Type: Float
+    Current value = 1.0
+--- TRIGGER_ACTIVATION ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68B40>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68A50>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68AA0>]
+--- TRIGGER_DEBOUNCER ---
+  Type: Float
+    Current value = 0.0
+--- TRIGGER_DELAY ---
+  Type: Float
+    Current value = 15.9
+--- TRIGGER_DENOISE ---
+  Type: Float
+    Current value = 0.0
+--- TRIGGER_MASK ---
+  Type: Float
+    Current value = 0.0
+--- TRIGGER_MODE ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68AA0>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68A50>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68AF0>]
+--- TRIGGER_OPERATION ---
+  Not supported by this camera.
+--- TRIGGER_OVERLAP ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68B40>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68AF0>]
+--- TRIGGER_SELECTOR ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68A50>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68AF0>]
+--- TRIGGER_SOFTWARE ---
+  Not supported by this camera.
+--- TRIGGER_SOURCE ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68A50>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68AF0>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68AA0>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68B90>]
+--- USER_SET_DEFAULT ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68AA0>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68AF0>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68B40>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68A50>]
+--- USER_SET_LOAD ---
+  Not supported by this camera.
+--- USER_SET_SAVE ---
+  Not supported by this camera.
+--- USER_SET_SELECTOR ---
+  Type: Enumeration
+    Current value = '<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68B40>'
+    Options = [<imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68AF0>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68B90>, <imagingcontrol4.properties.PropEnumEntry object at 0x00000170FEF68AA0>]
+--- WIDTH ---
+  Not supported by this camera.
+--- WIDTH_MAX ---
+  Not supported by this camera.
+--- ZOOM ---
+  Not supported by this camera.
+
+(.primenv) C:\Users\Tykocki Lab - PRIM\Documents\GitHub\PRIM-QtApp\ic4_camera>
+
+
+(.primenv) C:\Users\Tykocki Lab - PRIM\Documents\GitHub\PRIM-QtApp\ic4_camera>python dump_camera_capabilities.py
+Opening camera: DMK 33UP5000
+
+Camera reports 219 PropId constants. Checking each one:
+
+--- ACQUISITION_BURST_FRAME_COUNT ---
+  Not supported by this camera.
+--- ACQUISITION_BURST_INTERVAL ---
+  Not supported by this camera.
+--- ACQUISITION_FRAME_RATE ---
+  Type: Float
+    Current value = 10.0
+--- ACQUISITION_MODE ---
+  Type: Enumeration
+    Current value = 'Continuous'
+    Options = ['Continuous']
+--- ACQUISITION_START ---
+  Not supported by this camera.
+--- ACQUISITION_STOP ---
+  Not supported by this camera.
+--- ACTION_DEVICE_KEY ---
+  Not supported by this camera.
+--- ACTION_GROUP_KEY ---
+  Not supported by this camera.
+--- ACTION_GROUP_MASK ---
+  Not supported by this camera.
+--- ACTION_QUEUE_SIZE ---
+  Not supported by this camera.
+--- ACTION_SCHEDULER_CANCEL ---
+  Not supported by this camera.
+--- ACTION_SCHEDULER_COMMIT ---
+  Not supported by this camera.
+--- ACTION_SCHEDULER_INTERVAL ---
+  Not supported by this camera.
+--- ACTION_SCHEDULER_STATUS ---
+  Not supported by this camera.
+--- ACTION_SCHEDULER_TIME ---
+  Not supported by this camera.
+--- ACTION_SELECTOR ---
+  Not supported by this camera.
+--- AUTO_FOCUS_ROI_ENABLE ---
+  Not supported by this camera.
+--- AUTO_FOCUS_ROI_HEIGHT ---
+  Not supported by this camera.
+--- AUTO_FOCUS_ROI_LEFT ---
+  Not supported by this camera.
+--- AUTO_FOCUS_ROI_TOP ---
+  Not supported by this camera.
+--- AUTO_FOCUS_ROI_WIDTH ---
+  Not supported by this camera.
+--- AUTO_FUNCTIONS_ROI_ENABLE ---
+  Type: Boolean
+    Current value = True
+--- AUTO_FUNCTIONS_ROI_HEIGHT ---
+  Not supported by this camera.
+--- AUTO_FUNCTIONS_ROI_LEFT ---
+  Not supported by this camera.
+--- AUTO_FUNCTIONS_ROI_PRESET ---
+  Type: Enumeration
+    Current value = 'AutoFunctionsROIPreset_Full'
+    Options = ['AutoFunctionsROIPreset_Full', 'AutoFunctionsROIPreset_Custom', 'AutoFunctionsROIPreset_Center50Pct', 'AutoFunctionsROIPreset_Center25Pct', 'AutoFunctionsROIPreset_BottomHalf', 'AutoFunctionsROIPreset_TopHalf']
+--- AUTO_FUNCTIONS_ROI_TOP ---
+  Not supported by this camera.
+--- AUTO_FUNCTIONS_ROI_WIDTH ---
+  Not supported by this camera.
+--- BALANCE_RATIO ---
+  Not supported by this camera.
+--- BALANCE_RATIO_SELECTOR ---
+  Not supported by this camera.
+--- BALANCE_WHITE_AUTO ---
+  Not supported by this camera.
+--- BALANCE_WHITE_AUTO_PRESET ---
+  Not supported by this camera.
+--- BALANCE_WHITE_MODE ---
+  Not supported by this camera.
+--- BALANCE_WHITE_TEMPERATURE ---
+  Not supported by this camera.
+--- BALANCE_WHITE_TEMPERATURE_PRESET ---
+  Not supported by this camera.
+--- BINNING_HORIZONTAL ---
+  Not supported by this camera.
+--- BINNING_VERTICAL ---
+  Not supported by this camera.
+--- BLACK_LEVEL ---
+  Not supported by this camera.
+--- CHUNK_BLOCK_ID ---
+  Not supported by this camera.
+--- CHUNK_ENABLE ---
+  Type: Boolean
+    Current value = True
+--- CHUNK_EXPOSURE_TIME ---
+  Not supported by this camera.
+--- CHUNK_GAIN ---
+  Not supported by this camera.
+--- CHUNK_IMAGE ---
+  Not supported by this camera.
+--- CHUNK_IMX174_FRAME_ID ---
+  Not supported by this camera.
+--- CHUNK_IMX174_FRAME_SET ---
+  Not supported by this camera.
+--- CHUNK_MODE_ACTIVE ---
+  Type: Boolean
+    Current value = True
+--- CHUNK_MULTI_FRAME_SET_FRAME_ID ---
+  Not supported by this camera.
+--- CHUNK_MULTI_FRAME_SET_ID ---
+  Not supported by this camera.
+--- CHUNK_SELECTOR ---
+  Type: Enumeration
+    Current value = 'ChunkSelector_Image'
+    Options = ['ChunkSelector_Image', 'ChunkSelector_BlockId']
+--- COLOR_TRANSFORMATION_ENABLE ---
+  Not supported by this camera.
+--- COLOR_TRANSFORMATION_SELECTOR ---
+  Not supported by this camera.
+--- COLOR_TRANSFORMATION_VALUE ---
+  Not supported by this camera.
+--- COLOR_TRANSFORMATION_VALUE_SELECTOR ---
+  Not supported by this camera.
+--- CONTRAST ---
+  Not supported by this camera.
+--- DECIMATION_HORIZONTAL ---
+  Not supported by this camera.
+--- DECIMATION_VERTICAL ---
+  Not supported by this camera.
+--- DENOISE ---
+  Not supported by this camera.
+--- DEVICE_EVENT_CHANNEL_COUNT ---
+  Not supported by this camera.
+--- DEVICE_FACTORY_RESET ---
+  Not supported by this camera.
+--- DEVICE_FIRMWARE_VERSION ---
+  Type: String
+    Current value = 'P1300_M/1745/781 USB3c2-PythonLS/30'
+--- DEVICE_LINK_HEARTBEAT_TIMEOUT ---
+  Not supported by this camera.
+--- DEVICE_LINK_SELECTOR ---
+  Not supported by this camera.
+--- DEVICE_MODEL_NAME ---
+  Type: String
+    Current value = 'DMK 33UP5000'
+--- DEVICE_RESET ---
+  Not supported by this camera.
+--- DEVICE_SCAN_TYPE ---
+  Type: Enumeration
+    Current value = 'Areascan'
+    Options = ['Areascan']
+--- DEVICE_SERIAL_NUMBER ---
+  Type: String
+    Current value = '51020069'
+--- DEVICE_SFNC_VERSION_MAJOR ---
+  Not supported by this camera.
+--- DEVICE_SFNC_VERSION_MINOR ---
+  Not supported by this camera.
+--- DEVICE_SFNC_VERSION_SUB_MINOR ---
+  Not supported by this camera.
+--- DEVICE_STREAM_CHANNEL_COUNT ---
+  Not supported by this camera.
+--- DEVICE_STREAM_CHANNEL_ENDIANNESS ---
+  Not supported by this camera.
+--- DEVICE_STREAM_CHANNEL_LINK ---
+  Not supported by this camera.
+--- DEVICE_STREAM_CHANNEL_PACKET_SIZE ---
+  Not supported by this camera.
+--- DEVICE_STREAM_CHANNEL_SELECTOR ---
+  Not supported by this camera.
+--- DEVICE_STREAM_CHANNEL_TYPE ---
+  Not supported by this camera.
+--- DEVICE_TEMPERATURE ---
+  Type: Float
+    Current value = 55.0
+--- DEVICE_TEMPERATURE_SELECTOR ---
+  Type: Enumeration
+    Current value = 'Mainboard'
+    Options = ['Mainboard']
+--- DEVICE_TL_TYPE ---
+  Type: Enumeration
+    Current value = 'USB3Vision'
+    Options = ['USB3Vision']
+--- DEVICE_TL_VERSION_MAJOR ---
+  Not supported by this camera.
+--- DEVICE_TL_VERSION_MINOR ---
+  Not supported by this camera.
+--- DEVICE_TL_VERSION_SUB_MINOR ---
+  Not supported by this camera.
+--- DEVICE_TYPE ---
+  Type: Enumeration
+    Current value = 'Transmitter'
+    Options = ['Transmitter']
+--- DEVICE_USER_ID ---
+  Type: String
+    Current value = ''
+--- DEVICE_VENDOR_NAME ---
+  Type: String
+    Current value = 'The Imaging Source Europe GmbH'
+--- DEVICE_VERSION ---
+  Not supported by this camera.
+--- DISABLE_INFO_OVERLAY ---
+  Not supported by this camera.
+--- EVENT_EXPOSURE_END ---
+  Not supported by this camera.
+--- EVENT_EXPOSURE_END_FRAME_ID ---
+  Not supported by this camera.
+--- EVENT_EXPOSURE_END_TIMESTAMP ---
+  Not supported by this camera.
+--- EVENT_FOCUS_MOVE_COMPLETED ---
+  Not supported by this camera.
+--- EVENT_FOCUS_MOVE_COMPLETED_FOCUS ---
+  Not supported by this camera.
+--- EVENT_FOCUS_MOVE_COMPLETED_TIMESTAMP ---
+  Not supported by this camera.
+--- EVENT_FRAME_TRIGGER_MISSED ---
+  Not supported by this camera.
+--- EVENT_FRAME_TRIGGER_MISSED_TIMESTAMP ---
+  Not supported by this camera.
+--- EVENT_LINE1_FALLING_EDGE ---
+  Not supported by this camera.
+--- EVENT_LINE1_FALLING_EDGE_TIMESTAMP ---
+  Not supported by this camera.
+--- EVENT_LINE1_RISING_EDGE ---
+  Not supported by this camera.
+--- EVENT_LINE1_RISING_EDGE_TIMESTAMP ---
+  Not supported by this camera.
+--- EVENT_NOTIFICATION ---
+  Not supported by this camera.
+--- EVENT_SELECTOR ---
+  Not supported by this camera.
+--- EVENT_TEST ---
+  Not supported by this camera.
+--- EVENT_TEST_TIMESTAMP ---
+  Not supported by this camera.
+--- EVENT_ZOOM_MOVE_COMPLETED ---
+  Not supported by this camera.
+--- EVENT_ZOOM_MOVE_COMPLETED_TIMESTAMP ---
+  Not supported by this camera.
+--- EVENT_ZOOM_MOVE_COMPLETED_ZOOM ---
+  Not supported by this camera.
+--- EXPAND_OUTPUT_RANGE ---
+  Not supported by this camera.
+--- EXPOSURE_AUTO ---
+  Type: Enumeration
+    Current value = 'Off'
+    Options = ['Off', 'Continuous']
+--- EXPOSURE_AUTO_HIGHLIGHT_REDUCTION ---
+  Type: Boolean
+    Current value = False
+--- EXPOSURE_AUTO_HIGHLIGH_REDUCTION ---
+  Not supported by this camera.
+--- EXPOSURE_AUTO_LOWER_LIMIT ---
+  Type: Float
+    Current value = 50.0
+--- EXPOSURE_AUTO_REFERENCE ---
+  Not supported by this camera.
+--- EXPOSURE_AUTO_UPPER_LIMIT ---
+  Type: Float
+    Current value = 16666.0
+--- EXPOSURE_AUTO_UPPER_LIMIT_AUTO ---
+  Type: Boolean
+    Current value = False
+--- EXPOSURE_TIME ---
+  Type: Float
+    Current value = 1000.0
+--- FILE_ACCESS_BUFFER ---
+  Not supported by this camera.
+--- FILE_ACCESS_LENGTH ---
+  Not supported by this camera.
+--- FILE_ACCESS_OFFSET ---
+  Not supported by this camera.
+--- FILE_OPEN_MODE ---
+  Not supported by this camera.
+--- FILE_OPERATION_EXECUTE ---
+  Not supported by this camera.
+--- FILE_OPERATION_RESULT ---
+  Not supported by this camera.
+--- FILE_OPERATION_SELECTOR ---
+  Not supported by this camera.
+--- FILE_OPERATION_STATUS ---
+  Not supported by this camera.
+--- FILE_SELECTOR ---
+  Not supported by this camera.
+--- FILE_SIZE ---
+  Not supported by this camera.
+--- FOCUS ---
+  Not supported by this camera.
+--- FOCUS_AUTO ---
+  Not supported by this camera.
+--- GAIN ---
+  Type: Float
+    Current value = 0.0
+--- GAIN_AUTO ---
+  Type: Enumeration
+    Current value = 'Off'
+    Options = ['Off', 'Continuous']
+--- GAIN_AUTO_LOWER_LIMIT ---
+  Type: Float
+    Current value = 0.0
+--- GAIN_AUTO_UPPER_LIMIT ---
+  Type: Float
+    Current value = 3.202040034985937
+--- GAIN_MODE ---
+  Not supported by this camera.
+--- GAMMA ---
+  Type: Float
+    Current value = 1.0
+--- GEV_GVSP_EXTENDED_ID_MODE ---
+  Not supported by this camera.
+--- GEV_SCPS_DO_NOT_FRAGMENT ---
+  Not supported by this camera.
+--- GEV_SCPS_PACKET_SIZE ---
+  Not supported by this camera.
+--- GP_IN ---
+  Not supported by this camera.
+--- GP_OUT ---
+  Not supported by this camera.
+--- HEIGHT ---
+  Not supported by this camera.
+--- HEIGHT_MAX ---
+  Not supported by this camera.
+--- HUE ---
+  Not supported by this camera.
+--- IMX174_HARDWARE_WDR_ENABLE ---
+  Not supported by this camera.
+--- IMX174_HARDWARE_WDR_SHUTTER_MODE ---
+  Not supported by this camera.
+--- IMX174_WDR_SHUTTER2 ---
+  Not supported by this camera.
+--- IMX_LOW_LATENCY_TRIGGER_MODE ---
+  Not supported by this camera.
+--- INPUT_BITS ---
+  Not supported by this camera.
+--- INPUT_FP1KS ---
+  Not supported by this camera.
+--- INPUT_HEIGHT ---
+  Not supported by this camera.
+--- INPUT_WIDTH ---
+  Not supported by this camera.
+--- IRIS ---
+  Not supported by this camera.
+--- IRIS_AUTO ---
+  Not supported by this camera.
+--- IR_CUT_FILTER_ENABLE ---
+  Not supported by this camera.
+--- LUT_ENABLE ---
+  Type: Boolean
+    Current value = False
+--- LUT_INDEX ---
+  Not supported by this camera.
+--- LUT_SELECTOR ---
+  Not supported by this camera.
+--- LUT_VALUE ---
+  Not supported by this camera.
+--- LUT_VALUE_ALL ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_CUSTOM_GAIN ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_ENABLE ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_EXPOSURE_TIME0 ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_EXPOSURE_TIME1 ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_EXPOSURE_TIME2 ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_EXPOSURE_TIME3 ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_FRAME_COUNT ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_GAIN0 ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_GAIN1 ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_GAIN2 ---
+  Not supported by this camera.
+--- MULTI_FRAME_SET_OUTPUT_MODE_GAIN3 ---
+  Not supported by this camera.
+--- OFFSET_AUTO_CENTER ---
+  Type: Enumeration
+    Current value = 'Off'
+    Options = ['Off', 'On']
+--- OFFSET_X ---
+  Not supported by this camera.
+--- OFFSET_Y ---
+  Not supported by this camera.
+--- PAYLOAD_SIZE ---
+  Not supported by this camera.
+--- PIXEL_FORMAT ---
+  Type: Enumeration
+    Current value = 'Mono8'
+    Options = ['Mono8', 'Mono10p']
+--- PTP_CLOCK_ACCURACY ---
+  Not supported by this camera.
+--- PTP_ENABLE ---
+  Not supported by this camera.
+--- PTP_STATUS ---
+  Not supported by this camera.
+--- REVERSE_X ---
+  Not supported by this camera.
+--- REVERSE_Y ---
+  Not supported by this camera.
+--- SATURATION ---
+  Not supported by this camera.
+--- SENSOR_HEIGHT ---
+  Not supported by this camera.
+--- SENSOR_PIXEL_HEIGHT ---
+  Not supported by this camera.
+--- SENSOR_PIXEL_WIDTH ---
+  Not supported by this camera.
+--- SENSOR_WIDTH ---
+  Not supported by this camera.
+--- SHARPNESS ---
+  Not supported by this camera.
+--- SIDEBAND_USE ---
+  Not supported by this camera.
+--- SIGNAL_DETECTED ---
+  Not supported by this camera.
+--- SOFTWARE_TRANSFORM_ENABLE ---
+  Type: Boolean
+    Current value = True
+--- SOURCE_CONNECTED ---
+  Not supported by this camera.
+--- STROBE_DELAY ---
+  Not supported by this camera.
+--- STROBE_DURATION ---
+  Not supported by this camera.
+--- STROBE_ENABLE ---
+  Type: Enumeration
+    Current value = 'Off'
+    Options = ['On', 'Off']
+--- STROBE_OPERATION ---
+  Type: Enumeration
+    Current value = 'Exposure'
+    Options = ['Exposure']
+--- STROBE_POLARITY ---
+  Type: Enumeration
+    Current value = 'ActiveLow'
+    Options = ['ActiveHigh', 'ActiveLow']
+--- TEST_EVENT_GENERATE ---
+  Not supported by this camera.
+--- TEST_PENDING_ACK ---
+  Not supported by this camera.
+--- TIMESTAMP_LATCH ---
+  Not supported by this camera.
+--- TIMESTAMP_LATCH_STRING ---
+  Not supported by this camera.
+--- TIMESTAMP_LATCH_VALUE ---
+  Not supported by this camera.
+--- TIMESTAMP_RESET ---
+  Not supported by this camera.
+--- TL_PARAMS_LOCKED ---
+  Not supported by this camera.
+--- TONE_MAPPING_ENABLE ---
+  Type: Boolean
+    Current value = False
+--- TONE_MAPPING_GLOBAL_BRIGHTNESS ---
+  Type: Float
+    Current value = 0.0
+--- TONE_MAPPING_INTENSITY ---
+  Type: Float
+    Current value = 1.0
+--- TRIGGER_ACTIVATION ---
+  Type: Enumeration
+    Current value = 'FallingEdge'
+    Options = ['RisingEdge', 'FallingEdge']
+--- TRIGGER_DEBOUNCER ---
+  Type: Float
+    Current value = 0.0
+--- TRIGGER_DELAY ---
+  Type: Float
+    Current value = 15.9
+--- TRIGGER_DENOISE ---
+  Type: Float
+    Current value = 0.0
+--- TRIGGER_MASK ---
+  Type: Float
+    Current value = 0.0
+--- TRIGGER_MODE ---
+  Type: Enumeration
+    Current value = 'On'
+    Options = ['Off', 'On']
+--- TRIGGER_OPERATION ---
+  Not supported by this camera.
+--- TRIGGER_OVERLAP ---
+  Type: Enumeration
+    Current value = 'ReadOut'
+    Options = ['ReadOut']
+--- TRIGGER_SELECTOR ---
+  Type: Enumeration
+    Current value = 'FrameStart'
+    Options = ['FrameStart']
+--- TRIGGER_SOFTWARE ---
+  Not supported by this camera.
+--- TRIGGER_SOURCE ---
+  Type: Enumeration
+    Current value = 'Any'
+    Options = ['Line1', 'Software', 'Any']
+--- USER_SET_DEFAULT ---
+  Type: Enumeration
+    Current value = 'UserSet1'
+    Options = ['Default', 'UserSet1', 'UserSet2']
+--- USER_SET_LOAD ---
+  Not supported by this camera.
+--- USER_SET_SAVE ---
+  Not supported by this camera.
+--- USER_SET_SELECTOR ---
+  Type: Enumeration
+    Current value = 'UserSet1'
+    Options = ['Default', 'UserSet1', 'UserSet2']
+--- WIDTH ---
+  Not supported by this camera.
+--- WIDTH_MAX ---
+  Not supported by this camera.
+--- ZOOM ---
+  Not supported by this camera.
+
+(.primenv) C:\Users\Tykocki Lab - PRIM\Documents\GitHub\PRIM-QtApp\ic4_camera>
