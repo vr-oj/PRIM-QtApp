@@ -731,44 +731,15 @@ class MainWindow(QMainWindow):
             self.plot_control_panel.setEnabled(True)
 
     # ─── Camera/Recording Dialogs & Methods ──────────────────────────────────
-    @pyqtSlot(int, float, float)
-    def _on_first_serial_data(self, frame_idx_device, t_device, p):
-        """
-        Called exactly once—when the Arduino’s first data line arrives
-        after we “armed” the RecordingWorker. Now switch the worker to live,
-        hook camera → worker and serial → worker, and enqueue that first line.
-        """
-        # a) Disconnect this one‐time watcher so it doesn’t fire again:
-        try:
-            self._serial_thread.data_ready.disconnect(self._on_first_serial_data)
-        except Exception:
-            pass
-
-        # b) Tell the worker to begin live recording (assumes your worker has this method):
-        try:
-            self._recording_worker.begin_live_recording()
-        except Exception:
-            pass  # If your worker is already configured to accept frames right away, skip this.
-
-        # c) Hook camera frames into the worker:
-        try:
-            self.camera_thread.frame_ready.connect(self._on_video_frame_and_record)
-        except Exception:
-            pass
-
-        # d) Hook serial lines into the worker:
-        try:
-            self._serial_thread.data_ready.connect(self._on_serial_data_and_record)
-        except Exception:
-            pass
-
-        # e) Immediately enqueue this very first Arduino packet:
-        if self._is_recording and self._recording_worker:
-            self._recording_worker.add_csv_data(t_device, p)
-
     @pyqtSlot()
     def _trigger_start_recording_dialog(self):
-        # 1) Create the next FillN folder, basepath, etc.
+        """
+        Simplest possible “Start Recording”:
+         - Create YYYY-MM-DD/FillN folder
+         - Start RecordingWorker immediately
+         - Hook camera frames + serial lines directly into the worker
+        """
+        # 1) Create next FillN folder (e.g. …/PRIMAcquisition/YYYY-MM-DD/FillN)
         fill_folder = get_next_fill_folder()
         if not fill_folder or not os.path.isdir(fill_folder):
             QMessageBox.critical(
@@ -776,10 +747,10 @@ class MainWindow(QMainWindow):
             )
             return
 
-        fill_name = os.path.basename(fill_folder)
+        fill_name = os.path.basename(fill_folder)  # “Fill1”, “Fill2”, etc.
         basepath = os.path.join(fill_folder, fill_name)
 
-        # 2) Check resolution
+        # 2) Check that a camera resolution is selected
         resdata = self.resolution_combo.currentData()
         if not resdata:
             QMessageBox.warning(
@@ -789,124 +760,86 @@ class MainWindow(QMainWindow):
         w, h, pf_name = resdata
         fps = DEFAULT_FPS
 
-        # 3) Instantiate & start the worker (it stays “standby”):
+        # 3) Instantiate & start the RecordingWorker (it goes live immediately)
         self._recording_worker = RecordingWorker(
             basepath=basepath,
             fps=fps,
             frame_size=(w, h),
-            video_ext="tif",
-            video_codec=None,
+            video_ext="tif",     # we want a TIFF stack
+            video_codec=None,    # not used for “.tif”
             parent=self,
         )
         self._recording_worker.start()
 
-        # 4) Wait until the worker thread is initialized
+        # 4) Wait until the RecordingWorker is fully initialized
         while not self._recording_worker.is_ready_to_record:
             QCoreApplication.processEvents()
 
-        # 5) Reset per‐recording frame counter
+        # 5) Reset our per-recording counter
         self._record_frame_count = 0
 
-        # 6) Disconnect preview‐only camera slot so it doesn’t consume frames in “armed” state:
+        # 6) **Disconnect** the preview-only camera slot so frames don’t bypass the worker
         try:
-            self.camera_thread.frame_ready.disconnect(
-                self.camera_widget._on_frame_ready
-            )
+            self.camera_thread.frame_ready.disconnect(self.camera_widget._on_frame_ready)
         except Exception:
             pass
 
-        # 7) Watch ONLY for the FIRST Arduino line (knob press). Once that arrives,
-        #    _on_first_serial_data() will hook camera + serial into the worker.
-        try:
-            self._serial_thread.data_ready.connect(self._on_first_serial_data)
-        except Exception:
-            pass
-
-        # 8) Do NOT attach camera_thread.frame_ready → _on_video_frame_and_record
-        #    or serial_thread.data_ready → _on_serial_data_and_record just yet.
-
-        # 9) Mark “armed but not yet live”
-        self._is_recording = True
-        self.statusBar().showMessage(
-            "Recording armed → waiting for Arduino trigger…", 2000
-        )
-        self.start_recording_action.setEnabled(False)
-        self.stop_recording_action.setEnabled(True)
-
-    @pyqtSlot(int, float, float)
-    def _on_first_serial_data(self, frame_idx, arduino_ts_s, pressure):
-        """
-        This is our “one‐shot” slot: it fires exactly when the very first line
-        arrives from SerialThread once we've “armed” recording.  At that moment:
-          • Disconnect itself so it won’t fire again.
-          • Connect camera→_on_video_frame_and_record and serial→_on_serial_data_and_record.
-          • Also enqueue that first serial line into RecordingWorker immediately,
-            so we don’t lose the very first pressure/time sample.
-        """
-        # (A) Un‐hook this one‐shot so it only runs once:
-        try:
-            self._serial_thread.data_ready.disconnect(self._on_first_serial_data)
-        except Exception:
-            pass
-
-        # (B) Now that Arduino has “triggered,” start the live hooks:
-        # Connect camera frames → our recording slot:
+        # 7) **Immediately** hook camera → worker AND serial → worker
         self.camera_thread.frame_ready.connect(self._on_video_frame_and_record)
-        # Connect further serial samples → our recording slot:
         self._serial_thread.data_ready.connect(self._on_serial_data_and_record)
 
-        # (C) Immediately enqueue this first packet into the CSV queue:
-        if self._recording_worker:
-            # Note: our signature is add_csv_data(arduino_ts, pressure)
-            self._recording_worker.add_csv_data(arduino_ts_s, pressure)
+        # 8) Update UI state
+        self._is_recording = True
+        self.start_recording_action.setEnabled(False)
+        self.stop_recording_action.setEnabled(True)
+        self.statusBar().showMessage(f"Recording to '{fill_folder}' …", 2000)
 
-        # (D) Update status bar to indicate “live recording” has begun
-        self.statusBar().showMessage("Recording live…", 2000)
-
-    @pyqtSlot(QImage, object)
+        @pyqtSlot(QImage, object)
     def _on_video_frame_and_record(self, qimg, buf):
         """
         Called on each new camera frame.
         1) Display it in the live preview (passing both QImage and raw buffer).
         2) Extract the NumPy array + timestamp, assign our own frame_index,
-        and enqueue for recording.
+           and enqueue for recording.
         """
-        # 1) Live preview – pass both qimg and buf to the widget
+        # 1) Live preview (we still show it, but preview is rerouted once we stop)
         try:
             self.camera_widget._on_frame_ready(qimg, buf)
         except Exception as e:
             log.error(f"Error updating live preview: {e}")
-            # even if preview fails, we still attempt to record the frame below
 
         # 2) Extract NumPy array from the IC4 buffer
         try:
             arr = buf.numpy_wrap().copy()
         except Exception as e:
-            log.error(f"MainWindow: failed to convert buffer to NumPy: {e}")
+            log.error(f"Failed to convert buffer to NumPy: {e}")
             return
 
-        # 3) Read camera timestamp from metadata (μs)
+        # 3) Read camera timestamp from metadata (µs)
         try:
-            cam_ts = int(buf.meta_data.get("Timestamp", 0))
+            cam_ts_us = int(buf.meta_data.get("Timestamp", 0))
         except Exception:
-            cam_ts = 0
+            cam_ts_us = 0
 
-        # 4) Use our own per‐recording frame counter as frame index
+        # 4) Use our own per-recording frame counter as frame index
         frame_idx = self._record_frame_count
         self._record_frame_count += 1
 
-        # 5) Enqueue into RecordingWorker (a_ts & pressure placeholders)
+        # 5) Enqueue into RecordingWorker; we leave Arduino fields as None for now,
+        #    and the worker can match CSV lines later based on timestamp or index.
         if self._is_recording and self._recording_worker:
-            self._recording_worker.add_video_frame((arr, frame_idx, cam_ts, None, None))
+            self._recording_worker.add_video_frame((arr, frame_idx, cam_ts_us, None, None))
 
-    @pyqtSlot(int, float)
-    def _on_serial_data_and_record(self, arduino_ts_us, pressure):
+
+    @pyqtSlot(int, float, float)
+    def _on_serial_data_and_record(self, frame_idx_from_arduino, t_device_s, p):
         """
-        Called on each new Arduino line (arduino_ts_us, pressure).
-        Enqueue it so it can be paired with the next video frame.
+        Called on each new Arduino line (frame_idx, timestamp_s, pressure).
+        Enqueue it so it can be paired (post‐hoc) with the next video frame.
         """
         if self._is_recording and self._recording_worker:
-            self._recording_worker.add_csv_data(arduino_ts_us, pressure)
+            self._recording_worker.add_csv_data(t_device_s, frame_idx_from_arduino, p)
+
 
     @pyqtSlot()
     def _trigger_stop_recording(self):
@@ -914,27 +847,23 @@ class MainWindow(QMainWindow):
         Stop the active RecordingWorker, wait for it to finish, and restore live preview.
         """
         if self._is_recording and self._recording_worker:
-            # 1) Signal the worker to finish
+            # 1) Signal the worker to finish writing TIFF + CSV
             self._recording_worker.stop_worker()
             if not self._recording_worker.wait(5000):
                 self._recording_worker.terminate()
                 self._recording_worker.wait(1000)
 
-            # 2) Disconnect recording‐specific slots
+            # 2) Disconnect our recording-specific slots
             try:
-                self.camera_thread.frame_ready.disconnect(
-                    self._on_video_frame_and_record
-                )
+                self.camera_thread.frame_ready.disconnect(self._on_video_frame_and_record)
             except Exception:
                 pass
             try:
-                self._serial_thread.data_ready.disconnect(
-                    self._on_serial_data_and_record
-                )
+                self._serial_thread.data_ready.disconnect(self._on_serial_data_and_record)
             except Exception:
                 pass
 
-            # 3) Restore the preview‐only connection
+            # 3) Re-attach the preview-only slot so you see live feed again
             self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
 
             # 4) Reset flags and UI
@@ -945,6 +874,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Recording stopped and saved.", 3000)
         else:
             log.warning("Stop recording requested but no recording is active.")
+
 
     # ─── Menu Actions & Dialog Slots ──────────────────────────────────────────
     def _export_plot_data_as_csv(self):
@@ -1009,10 +939,6 @@ class MainWindow(QMainWindow):
                 # Create and start the new thread
                 self._serial_thread = SerialThread(port=port, parent=self)
                 self._serial_thread.data_ready.connect(self._handle_new_serial_data)
-                self._serial_thread.data_ready.connect(self._on_first_serial_data)
-                self._serial_thread.finished.connect(
-                    self._stop_recording_due_to_hardware
-                )
                 self._serial_thread.error_occurred.connect(self._handle_serial_error)
                 self._serial_thread.status_changed.connect(
                     self._handle_serial_status_change
@@ -1167,74 +1093,7 @@ class MainWindow(QMainWindow):
         self.start_recording_action.setEnabled(bool(can_start))
         self.stop_recording_action.setEnabled(bool(self._is_recording))
 
-    @pyqtSlot(int, float, float)
-    def _on_first_serial_data(self, frame_idx: int, t: float, p: float):
-        """
-        This slot is called on _every_ data_ready from SerialThread,
-        but we only want to act on the _very first_ packet after "Start Recording" was clicked.
-        On the first packet, we actually begin sending camera frames & serial data into the RecordingWorker.
-        """
-        # If we're not in “armed” but not‐yet‐capturing state, ignore:
-        if not self._is_recording or self._recording_worker is None:
-            return
-
-        # If RecordingWorker is already actively writing (is_live_recording), do nothing:
-        if getattr(self._recording_worker, "is_live_recording", False):
-            return
-
-        # At this point: first valid line has arrived → switch into “live capture”:
-        self.statusBar().showMessage(
-            "Arduino trigger arrived → recording started.", 2000
-        )
-
-        # Tell the RecordingWorker: from now on, you should accept camera frames.
-        # We mark a flag inside RecordingWorker (is_live_recording), so that
-        # subsequent calls to add_video_frame/add_csv_data actually write to disk.
-        self._recording_worker.begin_live_recording()
-
-        # After this point, further camera & serial signals will flow into add_video_frame/add_csv_data.
-        # We do _not_ disconnect _on_first_serial_data, because we might still need to pair every CSV line.
-        # But we do set a flag inside the worker, so it knows to write.
-        log.info("MainWindow: Received first serial packet, worker is now live.")
-
-    @pyqtSlot()
-    def _stop_recording_due_to_hardware(self):
-        """
-        Called when SerialThread.f​inished() emits (i.e. Arduino knob released → no data for IDLE_TIMEOUT).
-        If we are currently recording, we force‐stop/finalize the RecordingWorker and restore the preview.
-        """
-        if not self._is_recording or self._recording_worker is None:
-            return
-
-        log.info(
-            "MainWindow: _stop_recording_due_to_hardware() called → finalizing recording."
-        )
-
-        # 1) Instruct worker to stop writing
-        self._recording_worker.stop_worker()
-        if not self._recording_worker.wait(5000):
-            self._recording_worker.terminate()
-            self._recording_worker.wait(1000)
-
-        # 2) Disconnect the “live capture” slots
-        try:
-            self.camera_thread.frame_ready.disconnect(self._on_video_frame_and_record)
-        except Exception:
-            pass
-        try:
-            self._serial_thread.data_ready.disconnect(self._on_serial_data_and_record)
-        except Exception:
-            pass
-
-        # 3) Re‐attach preview‐only connection
-        self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
-
-        # 4) Reset flags & UI
-        self._recording_worker = None
-        self._is_recording = False
-        self.start_recording_action.setEnabled(True)
-        self.stop_recording_action.setEnabled(False)
-        self.statusBar().showMessage("Recording stopped (Arduino knob released).", 3000)
+    
 
     # ─── Window Close Cleanup ──────────────────────────────────────────────────
     def closeEvent(self, event):
