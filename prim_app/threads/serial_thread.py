@@ -18,7 +18,7 @@ IDLE_TIMEOUT_S = 2.0
 
 class SerialThread(QThread):
     data_ready = pyqtSignal(int, float, float)  # (frameIndex, timestamp_s, pressure)
-    error_occurred = pyqtSignal(str)  # For reporting errors to the GUI
+    error_occurred = pyqtSignal(str)  # For reporting errors back to the GUI
     status_changed = pyqtSignal(str)  # For general status updates
 
     def __init__(self, port=None, baud=115200, test_csv=None, parent=None):
@@ -29,34 +29,34 @@ class SerialThread(QThread):
 
         # Control flags
         self.running = False
-        self._got_first_packet = False  # Have we seen at least one line?
-        self._last_data_time = None  # Timestamp of last valid data
+        self._got_first_packet = False  # Have we seen at least one valid line?
+        self._last_data_time = None  # Timestamp (time.time()) of last valid packet
         self._stop_requested = False
 
         # Simulation helpers (if port is None)
         self.fake_t_idx = 0
         self.start_time = 0.0
 
-        # For sending commands (unused here, but retained)
+        # For sending commands (not used here, but kept for future)
         self.command_queue = queue.Queue()
         self.mutex = QMutex()
         self.wait_condition = QWaitCondition()
 
     def run(self):
         """
-        Open serial port (if provided). Then loop:
+        Open the serial port (if provided). Then loop:
           - If port is open, read lines, parse them, emit data_ready(...)
-          - Track last_data_time; once we’ve seen the first packet, if
-            no new data arrives for IDLE_TIMEOUT_S seconds, break → thread finishes.
-          - In simulation mode (port is None), emit a fake sine‐wave at ~10 Hz.
-        When loop exits, close port if needed, and exit → QThread.finished() fires.
+          - Track last_data_time; once we've seen the first packet, if
+            no new data arrives for IDLE_TIMEOUT_S seconds → break → thread finishes.
+          - If port is None (simulation mode), emit a fake sine-wave at ~10 Hz.
+        On exit: close port if needed, emit “Disconnected,” and finish.
         """
         self.running = True
         self.start_time = time.time()
         self._got_first_packet = False
         self._last_data_time = None
 
-        # 1) Try opening the real serial port if one was given
+        # 1) Attempt to open the real serial port if one was given
         if self.port:
             try:
                 self.ser = serial.Serial(self.port, self.baud, timeout=1)
@@ -68,12 +68,12 @@ class SerialThread(QThread):
                 self.ser = None
         else:
             # Simulation mode: no real port; we’ll generate fake data
-            log.info("No serial port specified → running simulation mode")
+            log.info("No serial port specified → running in simulation mode")
             self.status_changed.emit("Running in simulation mode")
 
         # 2) Main loop
         while self.running and not self._stop_requested:
-            # 2a) Process outgoing commands (if any)
+            # 2a) Process any outgoing commands
             try:
                 cmd = self.command_queue.get_nowait()
                 if self.ser and cmd:
@@ -85,23 +85,34 @@ class SerialThread(QThread):
                 log.error(f"Error sending serial command: {e}")
                 self.error_occurred.emit(f"Serial send error: {e}")
 
-            # 2b) If real port is open, read lines
-            if self.ser:
+            # 2b) If we have a real port configured, handle live reading+reconnect
+            if self.port:
+                # 2b-i) If `ser` is None, attempt to reopen once per loop iteration
+                if self.ser is None:
+                    try:
+                        self.ser = serial.Serial(self.port, self.baud, timeout=1)
+                        log.info(f"[SerialThread] Reconnected to {self.port}")
+                        self.status_changed.emit(f"Reconnected to {self.port}")
+                    except Exception as e_op:
+                        # Still cannot open; sleep a bit before retrying
+                        log.debug(
+                            f"[SerialThread] Reopen failed: {e_op} → retrying in 0.1 s"
+                        )
+                        self.msleep(100)
+                    continue
+
+                # 2b-ii) Now `self.ser` is not None → attempt to read lines
                 try:
                     if self.ser.in_waiting > 0:
                         raw = self.ser.readline()
-                        if not raw:
-                            # readline timed out with no data;
-                            # we’ll loop back and check for IDLE_TIMEOUT below
-                            pass
-                        else:
+                        if raw:
                             line = raw.decode("utf-8", errors="replace").strip()
                             log.debug(f"Raw serial data: {line}")
 
                             parts = [fld.strip() for fld in line.split(",")]
                             if len(parts) < 3:
                                 log.warning(
-                                    f"Malformed data line (expected 3 parts): {line}"
+                                    f"Malformed data line (expected 3 fields): {line}"
                                 )
                             else:
                                 try:
@@ -109,41 +120,60 @@ class SerialThread(QThread):
                                     frame_idx_device = int(parts[1])
                                     p = float(parts[2])
                                 except ValueError as ve:
-                                    log.error(f"Parse error for data '{line}': {ve}")
-                                    # Skip this line entirely
+                                    log.error(f"Parse error for line '{line}': {ve}")
                                 else:
-                                    # We have a valid packet → emit data_ready
+                                    # Valid packet → emit signal
                                     self.data_ready.emit(frame_idx_device, t_device, p)
 
-                                    # Mark that we’ve seen our first packet
+                                    # Mark that we've seen at least one packet
                                     if not self._got_first_packet:
                                         self._got_first_packet = True
-                                    # Record last‐data timestamp
+                                    # Update last-data timestamp
                                     self._last_data_time = time.time()
+                        else:
+                            # readline timed out without data; will check idle below
+                            pass
                     else:
-                        # No bytes waiting. Sleep briefly to avoid a tight loop
+                        # No bytes waiting; sleep briefly
                         self.msleep(10)
 
-                    # 2c) Check idle timeout (only after we’ve seen at least one packet)
+                    # 2b-iii) Check idle timeout (only after first packet)
                     if self._got_first_packet and self._last_data_time is not None:
                         if (time.time() - self._last_data_time) > IDLE_TIMEOUT_S:
-                            # It’s been IDLE_TIMEOUT_S seconds since the last packet.
-                            # We interpret this as “Arduino stopped streaming.”
+                            # No packet in IDLE_TIMEOUT_S secs → assume Arduino stopped streaming
                             log.info(
                                 "No serial data for idle timeout → finishing SerialThread."
                             )
                             break
 
                 except serial.SerialException as se:
-                    log.error(f"Serial communication error: {se}")
-                    self.error_occurred.emit(f"Serial error: {se}. Disconnecting.")
-                    break
+                    # Port dropped unexpectedly → attempt to reconnect
+                    log.error(
+                        f"[SerialThread] SerialException: {se} → will attempt reconnect"
+                    )
+                    self.status_changed.emit("Serial disconnected, retrying…")
+                    try:
+                        self.ser.close()
+                    except Exception:
+                        pass
+                    self.ser = None
+                    # Wait a short moment before retrying
+                    t0 = time.time()
+                    while (
+                        self.running
+                        and not self._stop_requested
+                        and (time.time() - t0) < 1.0
+                    ):
+                        # Sleep in small increments so we remain responsive
+                        self.msleep(50)
+                    continue
+
                 except Exception as e:
-                    log.exception(f"Unexpected error in serial read loop: {e}")
+                    log.exception(f"[SerialThread] Unexpected error in read loop: {e}")
                     self.msleep(100)
 
             else:
-                # 2d) Simulation mode: emit fake sine‐wave ~10 Hz
+                # 2c) Simulation mode: emit a fake sine-wave at ~10 Hz
                 t_elapsed = time.time() - self.start_time
                 p_sim = (
                     50
@@ -168,7 +198,7 @@ class SerialThread(QThread):
 
     def send_command(self, command_str):
         """
-        External callers can queue ASCII commands (terminated with newline) to the Arduino.
+        Queue a command (ASCII + newline) for the Arduino. GUI can call this safely.
         """
         if self.running:
             final_command = command_str.encode("utf-8") + b"\n"
@@ -180,7 +210,7 @@ class SerialThread(QThread):
 
     def stop(self):
         """
-        Ask the thread to exit cleanly (politely).  If it does not within 2 seconds, force terminate.
+        Ask the thread to exit cleanly. If it doesn't within 2 seconds, force‐terminate.
         """
         log.info("Stopping SerialThread…")
         self._stop_requested = True
@@ -194,9 +224,10 @@ class SerialThread(QThread):
             self.wait(1000)
 
 
-# For standalone testing if you run this module directly:
+# For standalone testing (if you run this module directly):
 if __name__ == "__main__":
     from PyQt5.QtWidgets import QApplication
+    from PyQt5.QtCore import QTimer
     import sys
 
     logging.basicConfig(
@@ -206,7 +237,7 @@ if __name__ == "__main__":
 
     class DummyApp:
         def __init__(self):
-            self.thread = SerialThread(port=None)
+            self.thread = SerialThread(port=None)  # Simulation mode
             self.thread.data_ready.connect(self.on_data)
             self.thread.status_changed.connect(lambda s: log.info(f"Status: {s}"))
             self.thread.error_occurred.connect(lambda e: log.error(f"Error: {e}"))
@@ -220,7 +251,6 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     da = DummyApp()
-    # Let it run for a few seconds in simulation
-    QTimer = QTimer()
+    # Run simulation for 5 seconds, then exit
     QTimer.singleShot(5000, da.stop_thread)
     sys.exit(app.exec_())

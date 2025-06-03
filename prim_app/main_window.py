@@ -91,6 +91,11 @@ class MainWindow(QMainWindow):
         self._serial_active = False
         self._recording_worker = None
         self._is_recording = False
+        self._record_armed = False     # ← has user clicked “Start Recording” (armed) but not yet started actual saving?
+        self._serial_timeout_timer = QTimer(self)
+        self._serial_timeout_timer.setSingleShot(True)
+        self._serial_timeout_timer.setInterval(500)  # 0.5 s of no serial → stop recording
+
 
         # Camera‐related
         self.device_combo = None
@@ -593,7 +598,7 @@ class MainWindow(QMainWindow):
         am = mb.addMenu("&Acquisition")
         self.start_recording_action = QAction(
             self.icon_record_start,
-            "Start &Recording",
+            "Arm &Recording",
             self,
             shortcut=Qt.CTRL | Qt.Key_R,
             triggered=self._trigger_start_recording_dialog,
@@ -725,7 +730,7 @@ class MainWindow(QMainWindow):
             self.plot_control_panel.setEnabled(True)
 
     # ─── Camera/Recording Dialogs & Methods ──────────────────────────────────
-    @pyqtSlot()
+        @pyqtSlot()
     def _trigger_start_recording_dialog(self):
         """
         Called when “Start Recording” is clicked. We create the new folder
@@ -783,16 +788,52 @@ class MainWindow(QMainWindow):
         # 7) Do NOT yet connect camera_thread.frame_ready → _on_video_frame_and_record
         #    We only do that in _on_first_serial_data, once knob is pressed.
 
-        # 8) Do NOT connect serial.data_ready → _on_serial_data_and_record yet.
-        #    We only do that in _on_first_serial_data as well.
+        # 8) Instead of connecting serial.data_ready→_on_serial_data_and_record now,
+        #    we connect __one‐shot__ serial.data_ready → _on_first_serial_data
+        try:
+            self._serial_thread.data_ready.disconnect(self._on_first_serial_data)
+        except Exception:
+            pass
+        self._serial_thread.data_ready.connect(self._on_first_serial_data)
 
         # 9) Mark “armed but not yet live”
         self._is_recording = True
         self.statusBar().showMessage(
-            f"Recording armed → waiting for Arduino trigger...", 2000
+            "Recording armed → waiting for Arduino trigger…", 2000
         )
         self.start_recording_action.setEnabled(False)
         self.stop_recording_action.setEnabled(True)
+
+
+    @pyqtSlot(int, float, float)
+    def _on_first_serial_data(self, frame_idx, arduino_ts_s, pressure):
+        """
+        This is our “one‐shot” slot: it fires exactly when the very first line
+        arrives from SerialThread once we've “armed” recording.  At that moment:
+          • Disconnect itself so it won’t fire again.
+          • Connect camera→_on_video_frame_and_record and serial→_on_serial_data_and_record.
+          • Also enqueue that first serial line into RecordingWorker immediately,
+            so we don’t lose the very first pressure/time sample.
+        """
+        # (A) Un‐hook this one‐shot so it only runs once:
+        try:
+            self._serial_thread.data_ready.disconnect(self._on_first_serial_data)
+        except Exception:
+            pass
+
+        # (B) Now that Arduino has “triggered,” start the live hooks:
+        # Connect camera frames → our recording slot:
+        self.camera_thread.frame_ready.connect(self._on_video_frame_and_record)
+        # Connect further serial samples → our recording slot:
+        self._serial_thread.data_ready.connect(self._on_serial_data_and_record)
+
+        # (C) Immediately enqueue this first packet into the CSV queue:
+        if self._recording_worker:
+            # Note: our signature is add_csv_data(arduino_ts, pressure)
+            self._recording_worker.add_csv_data(arduino_ts_s, pressure)
+
+        # (D) Update status bar to indicate “live recording” has begun
+        self.statusBar().showMessage("Recording live…", 2000)
 
     @pyqtSlot(QImage, object)
     def _on_video_frame_and_record(self, qimg, buf):
