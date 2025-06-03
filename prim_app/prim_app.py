@@ -5,7 +5,7 @@ import os
 import re
 import traceback
 import logging
-import imagingcontrol4 as ic4  # ← We keep this import, but we no longer call init()/exit() here.
+import imagingcontrol4 as ic4
 
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication
@@ -101,6 +101,17 @@ def main_app_entry():
     if hasattr(Qt, "AA_UseHighDpiPixmaps"):
         QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
+    # ─── Initialize IC4 globally so MainWindow can enumerate devices ─────────
+    try:
+        ic4.Library.init(
+            api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
+        )
+        log.info("Global IC4 Library.init() succeeded.")
+    except Exception as e:
+        log.error(f"Could not initialize IC4 in main thread: {e}")
+        # You might still allow the UI to start (with an empty device list),
+        # or choose to exit right here with sys.exit(1).
+
     # Create the QApplication
     app = QApplication(sys.argv)
 
@@ -186,6 +197,13 @@ def main_app_entry():
 
     exit_code = app.exec_()
     log.info(f"Application event loop ended with exit code {exit_code}.")
+
+    # ─── Clean up IC4 when the app is closing ─────────────────────────────
+    try:
+        ic4.Library.exit()
+        log.info("Global IC4 Library.exit() called.")
+    except Exception:
+        pass
 
     sys.exit(exit_code)
 
