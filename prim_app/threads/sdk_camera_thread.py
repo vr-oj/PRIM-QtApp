@@ -2,192 +2,148 @@
 
 import logging
 import imagingcontrol4 as ic4
-import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal
-from PyQt5.QtGui import QImage
 
 log = logging.getLogger(__name__)
 
 
 class SDKCameraThread(QThread):
-    # emitted when grabber is open & ready (so UI can build controls, if needed)
+    # Emitted once the camera is opened and basic nodes are set.
     grabber_ready = pyqtSignal()
 
-    # emitted for each new frame: (QImage, raw_buffer_object)
-    frame_ready = pyqtSignal(QImage, object)
-
-    # emitted on error: (message, code_as_string)
+    # Emitted on any error. The second argument here is a string, not an ErrorCode.
     error = pyqtSignal(str, str)
 
-    def __init__(self, parent=None, desired_fps=10):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.grabber = None
         self._stop_requested = False
-        self._desired_fps = desired_fps
 
     def run(self):
         try:
-            # ─── 1) Initialize the IC4 library (each thread must do this exactly once) ──
+            # ─── 1) Initialize IC4 exactly once ────────────────────────────────────
             ic4.Library.init(
-                api_log_level=ic4.LogLevel.INFO,
-                log_targets=ic4.LogTarget.STDERR,
+                api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
             )
             log.info("SDKCameraThread: Library.init() succeeded.")
 
-            # ─── 2) Enumerate all connected cameras, pick the first one ─────────────────
-            device_list = ic4.DeviceEnum.devices()
-            if not device_list:
-                raise RuntimeError("No IC4 camera devices found on this machine.")
-            dev_info = device_list[0]
+            # ─── 2) Enumerate & Open the first camera ─────────────────────────────
+            devices = ic4.DeviceEnum.devices()
+            if not devices:
+                raise RuntimeError("No IC4 camera devices found.")
+            dev_info = devices[0]
             log.info(
-                f"SDKCameraThread: selected device = {dev_info.model_name!r}, "
-                f"S/N={dev_info.serial!r}"
+                f"SDKCameraThread: Opening camera {dev_info.model_name!r} (S/N {dev_info.serial!r})"
             )
 
-            # ─── 3) Open that device on a new Grabber ───────────────────────────────────
             self.grabber = ic4.Grabber()
             self.grabber.device_open(dev_info)
+            log.info("SDKCameraThread: device_open() succeeded.")
 
-            # ─── 4) Force “Continuous” mode if possible ─────────────────────────────────
-            acq_mode_node = self.grabber.device_property_map.find_enumeration(
-                "AcquisitionMode"
-            )
-            if acq_mode_node:
-                all_modes = [entry.name for entry in acq_mode_node.entries]
-                if "Continuous" in all_modes:
-                    acq_mode_node.value = "Continuous"
+            # ─── 3) Apply the same acquisition settings as grab_one_frame.py ────────
+            # 3a) Try Mono8 if available
+            try:
+                pf_node = self.grabber.device_property_map.find_enumeration(
+                    ic4.PropId.PIXEL_FORMAT
+                )
+                if pf_node:
+                    mono8_options = [
+                        e.name
+                        for e in pf_node.entries
+                        if e.is_available and "Mono8" in e.name
+                    ]
+                    if mono8_options:
+                        pf_node.value = "Mono8"
+                        log.info("  → PIXEL_FORMAT set to Mono8")
+                    else:
+                        log.warning(
+                            "  → No Mono8 entry available; leaving default PF unchanged."
+                        )
                 else:
-                    acq_mode_node.value = all_modes[0]
-
-            # ─── 5) AUTOMATICALLY FIND THE “BEST” MONOCHROME FORMAT ─────────────────────
-            best_pf = None
-            best_width = 0
-            best_height = 0
-            pf_node = self.grabber.device_property_map.find_enumeration("PixelFormat")
-            if pf_node:
-                # 5a) Prefer Mono8 entries first
-                mono8_entries = [e for e in pf_node.entries if "Mono8" in e.name]
-                if mono8_entries:
-                    for entry in mono8_entries:
-                        try:
-                            pf_node.value = entry.name
-                            w_node = self.grabber.device_property_map.find_integer(
-                                "Width"
-                            )
-                            h_node = self.grabber.device_property_map.find_integer(
-                                "Height"
-                            )
-                            if w_node and h_node:
-                                w = int(w_node.value)
-                                h = int(h_node.value)
-                                if (w * h) > (best_width * best_height):
-                                    best_width = w
-                                    best_height = h
-                                    best_pf = entry.name
-                        except Exception as e:
-                            log.warning(f"Skipping PF={entry.name} due to error: {e}")
-                            continue
-
-                # 5b) If no Mono8, look for Mono10 or Mono16
-                if best_pf is None:
-                    for entry in pf_node.entries:
-                        name = entry.name
-                        if "Mono10" in name or "Mono16" in name:
-                            try:
-                                pf_node.value = name
-                                w_node = self.grabber.device_property_map.find_integer(
-                                    "Width"
-                                )
-                                h_node = self.grabber.device_property_map.find_integer(
-                                    "Height"
-                                )
-                                if w_node and h_node:
-                                    w = int(w_node.value)
-                                    h = int(h_node.value)
-                                    if (w * h) > (best_width * best_height):
-                                        best_width = w
-                                        best_height = h
-                                        best_pf = name
-                            except Exception as e:
-                                log.warning(f"Skipping PF={name} due to error: {e}")
-                                continue
-
-            if best_pf is None:
-                raise RuntimeError(
-                    "Could not find any usable Mono8, Mono10, or Mono16 format."
-                )
-
-            # ─── 6) Now set the device to that “best” pixel format and resolution:
-            log.info(
-                f"SDKCameraThread: picked PF={best_pf!r} at W×H={best_width}×{best_height}"
-            )
-            try:
-                pf_node.value = best_pf
+                    log.warning("  → PIXEL_FORMAT node not found.")
             except Exception as e:
-                raise RuntimeError(f"Failed to set PixelFormat={best_pf}: {e}")
+                log.warning(f"  ✗ Cannot set PIXEL_FORMAT: {e}")
 
-            # Re‐read actual W×H in case the camera clamps dimensions
-            w_node = self.grabber.device_property_map.find_integer("Width")
-            h_node = self.grabber.device_property_map.find_integer("Height")
-            actual_w, actual_h = int(w_node.value), int(h_node.value)
-            log.info(f"Camera reports W×H after setting PF: {actual_w}×{actual_h}")
-
-            # ─── 7) TRY TO SET AcquisitionFrameRate = desired FPS (if that node exists) ──
-            fr_node = self.grabber.device_property_map.find_float(
-                "AcquisitionFrameRate"
-            )
-            if fr_node:
-                try:
-                    fr_node.value = float(self._desired_fps)
-                    log.info(
-                        f"SDKCameraThread: forced AcquisitionFrameRate = {self._desired_fps}"
-                    )
-                except Exception as e:
-                    log.warning(
-                        f"SDKCameraThread: could not set AcquisitionFrameRate "
-                        f"to {self._desired_fps}: {e}"
-                    )
-
-            # ─── 8) BUILD a QueueSink that requests Mono8 if possible ───────────────────
-            # First try requesting Mono8 directly
+            # 3b) AcquisitionMode → Continuous
             try:
-                sink = ic4.QueueSink(
-                    self, [ic4.PixelFormat.Mono8], max_output_buffers=1
+                acq_node = self.grabber.device_property_map.find_enumeration(
+                    ic4.PropId.ACQUISITION_MODE
                 )
-            except Exception:
-                # Fallback: use the camera’s native best_pf (Mono10p or Mono16)
-                sink = ic4.QueueSink(
-                    self, [ic4.PixelFormat[best_pf]], max_output_buffers=1
-                )
+                if acq_node:
+                    modes = [e.name for e in acq_node.entries if e.is_available]
+                    if "Continuous" in modes:
+                        acq_node.value = "Continuous"
+                        log.info("  → ACQUISITION_MODE set to Continuous")
+                    else:
+                        log.warning(
+                            f"  → 'Continuous' not available (options: {modes}); leaving default."
+                        )
+                else:
+                    log.warning("  → ACQUISITION_MODE node not found.")
+            except Exception as e:
+                log.warning(f"  ✗ Cannot set ACQUISITION_MODE: {e}")
 
-            self.grabber.stream_setup(sink)
+            # 3c) AcquisitionFrameRate → 10.0
+            try:
+                fr_node = self.grabber.device_property_map.find_float(
+                    ic4.PropId.ACQUISITION_FRAME_RATE
+                )
+                if fr_node:
+                    fr_node.value = 10.0
+                    log.info("  → ACQUISITION_FRAME_RATE set to 10.0 FPS")
+                else:
+                    log.warning("  → ACQUISITION_FRAME_RATE node not found.")
+            except Exception as e:
+                log.warning(f"  ✗ Cannot set ACQUISITION_FRAME_RATE: {e}")
+
+            # 3d) ExposureTime → 30000 µs (30 ms)
+            try:
+                exp_node = self.grabber.device_property_map.find_float(
+                    ic4.PropId.EXPOSURE_TIME
+                )
+                if exp_node:
+                    exp_node.value = 30000.0
+                    log.info("  → EXPOSURE_TIME set to 30 ms")
+                else:
+                    log.warning("  → EXPOSURE_TIME node not found.")
+            except Exception as e:
+                log.warning(f"  ✗ Cannot set EXPOSURE_TIME: {e}")
+
+            # 3e) Gain → 10.0
+            try:
+                gain_node = self.grabber.device_property_map.find_float(ic4.PropId.GAIN)
+                if gain_node:
+                    gain_node.value = 10.0
+                    log.info("  → GAIN set to 10.0")
+                else:
+                    log.warning("  → GAIN node not found.")
+            except Exception as e:
+                log.warning(f"  ✗ Cannot set GAIN: {e}")
+
+            # ─── 4) Emit grabber_ready so the UI knows it can query self.grabber now ───
             self.grabber_ready.emit()
 
-            # ─── 9) START STREAMING ─────────────────────────────────────────────────────
-            self.grabber.stream_start()
-            log.info(
-                "SDKCameraThread: stream_start() succeeded. Entering frame loop..."
-            )
-
-            # ─── 10) BUSY-LOOP, POPPING FRAMES until stop() is called ───────────────────
+            # ─── 5) Wait here until someone calls stop() ─────────────────────────────
             while not self._stop_requested:
-                ic4.sleep(10)  # around 10 ms sleep (≈100 FPS spin-loop)
+                self.msleep(100)  # sleep 100 ms at a time, low CPU usage
 
-            # ─── 11) STOP STREAMING & CLOSE DEVICE ─────────────────────────────────────
-            self.grabber.stream_stop()
-            self.grabber.device_close()
-            log.info("SDKCameraThread: streaming stopped, device closed.")
+            # ─── 6) Clean up & close device ────────────────────────────────────────
+            try:
+                self.grabber.device_close()
+                log.info("SDKCameraThread: device_close() succeeded.")
+            except Exception:
+                pass
 
         except Exception as e:
-            # Convert e.code (an ErrorCode enum) to string
+            # If anything fails, convert e.code (if present) to a string
             msg = str(e)
-            code_enum = getattr(e, "code", "")
+            code_enum = getattr(e, "code", None)
             code_str = str(code_enum) if code_enum else ""
-            log.exception("SDKCameraThread: encountered an error in run().")
+            log.exception("SDKCameraThread: encountered an error.")
             self.error.emit(msg, code_str)
 
         finally:
-            # ─── 12) CLEAN UP: call Library.exit() exactly once per thread ──────────────
+            # Always call Library.exit() exactly once per thread
             try:
                 ic4.Library.exit()
                 log.info("SDKCameraThread: Library.exit() called.")
@@ -196,49 +152,3 @@ class SDKCameraThread(QThread):
 
     def stop(self):
         self._stop_requested = True
-
-    # ← This is the callback from QueueSink when a new frame arrives
-    def frames_queued(self, sink):
-        try:
-            buf = sink.pop_output_buffer()
-            arr = (
-                buf.numpy_wrap()
-            )  # shape might be (H, W, 1) with dtype=uint8 or uint16
-
-            # Remove the singleton channel dimension if present: shape → (H, W)
-            if arr.ndim == 3 and arr.shape[2] == 1:
-                gray = arr[:, :, 0]
-            else:
-                gray = arr  # In case it already is (H, W)
-
-            # If dtype is >8 bits, downscale to 8-bit
-            if gray.dtype != np.uint8:
-                max_val = float(gray.max()) if gray.max() > 0 else 1.0
-                scale = 255.0 / max_val
-                gray8 = (gray.astype(np.float32) * scale).astype(np.uint8)
-            else:
-                gray8 = gray
-
-            h, w = gray8.shape[:2]
-
-            # Build a QImage from single-channel grayscale
-            qimg = QImage(
-                gray8.data,
-                w,
-                h,
-                gray8.strides[0],
-                QImage.Format_Grayscale8,
-            )
-
-            self.frame_ready.emit(qimg, buf)
-
-        except Exception as e:
-            log.error(
-                f"SDKCameraThread.frames_queued: Error popping/converting buffer: {e}"
-            )
-            code_enum = getattr(e, "code", "")
-            code_str = str(code_enum) if code_enum else ""
-            self.error.emit(str(e), code_str)
-        finally:
-            # With max_output_buffers=1, IC4 automatically recycles the buffer.
-            pass
