@@ -129,6 +129,13 @@ class MainWindow(QMainWindow):
         self._populate_device_list()
         self._set_initial_control_states()
 
+        # Recording state
+        self._recording_worker = None
+        self._is_recording = False
+
+        # Per‐recording frame counter (reset each time we start a recording)
+        self._record_frame_count = 0
+
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
         QTimer.singleShot(50, self._set_initial_splitter_sizes)
         log.info("MainWindow initialized.")
@@ -693,11 +700,14 @@ class MainWindow(QMainWindow):
         )
         self._recording_worker.start()
 
-        # 5) Wait until the TIFF+CSV writers are ready
+        # 5) Wait until the TrialRecorder inside is fully active
         while not self._recording_worker.is_ready_to_record:
             QCoreApplication.processEvents()
 
-        # 6) Re‐route camera & serial signals into the worker
+        # 6) Reset per-recording frame counter
+        self._record_frame_count = 0
+
+        # 7) Re‐route camera & serial signals into the worker
         try:
             self.camera_thread.frame_ready.disconnect(
                 self.camera_widget._on_frame_ready
@@ -708,30 +718,41 @@ class MainWindow(QMainWindow):
         self.camera_thread.frame_ready.connect(self._on_video_frame_and_record)
         self._serial_thread.data_ready.connect(self._on_serial_data_and_record)
 
-        # 7) Update UI state
+        # 8) Update UI state
         self._is_recording = True
         self.start_recording_action.setEnabled(False)
         self.stop_recording_action.setEnabled(True)
         self.statusBar().showMessage(f"Recording to '{fill_folder}' …", 2000)
 
-    @pyqtSlot(QImage, object, int, int)
-    def _on_video_frame_and_record(self, qimg, buf, frame_idx, cam_ts):
+    @pyqtSlot(QImage, object)
+    def _on_video_frame_and_record(self, qimg, buf):
         """
-        Called on each new camera frame.
-        1) Display it in the live preview.
-        2) Extract the NumPy array and enqueue it for recording (paired later).
+        Called on each new camera frame (from SDKCameraThread.frame_ready).
+        1) Live‐preview the frame.
+        2) Extract the NumPy array + timestamp, assign our own frame_index,
+        and enqueue into the RecordingWorker.
         """
-        # 1) Live preview
+        # 1) Show in live preview
         self.camera_widget._on_frame_ready(qimg)
 
-        # 2) Extract NumPy array from buffer
+        # 2) Try to extract a NumPy array from the IC4 buffer
         try:
             arr = buf.numpy_wrap().copy()
         except Exception as e:
             log.error(f"MainWindow: failed to convert buffer to NumPy: {e}")
             return
 
-        # 3) Enqueue into RecordingWorker; the worker will pair it with the next CSV entry
+        # 3) Pull camera timestamp from the buffer's metadata
+        try:
+            cam_ts = int(buf.meta_data.get("Timestamp", 0))
+        except Exception:
+            cam_ts = 0
+
+        # 4) Use our own per-recording frame counter as frame index
+        frame_idx = self._record_frame_count
+        self._record_frame_count += 1
+
+        # 5) Enqueue into RecordingWorker (a_ts & pressure placeholders)
         if self._is_recording and self._recording_worker:
             self._recording_worker.add_video_frame((arr, frame_idx, cam_ts, None, None))
 
