@@ -1,111 +1,275 @@
-# ─── ui/control_panels/camera_control_panel.py ─────────────────────────────
+# File: prim_app/ui/control_panels/camera_control_panel.py
 
 import logging
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QSlider, QComboBox
-from PyQt5.QtCore import Qt
+
+from PyQt5.QtCore import Qt, pyqtSlot
+from PyQt5.QtWidgets import (
+    QWidget,
+    QFormLayout,
+    QLabel,
+    QDoubleSpinBox,
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+)
 
 log = logging.getLogger(__name__)
 
 
 class CameraControlPanel(QWidget):
+    """
+    A panel of camera controls (Exposure, Gain, Auto-settings, etc.).
+    MainWindow will assign `self.grabber = <ic4.Grabber>` when the camera is open.
+    Once `grabber_ready` fires, MainWindow calls `_on_grabber_ready()`, which should
+    enumerate and enable any controls that actually exist on the device.
+    """
+
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        # This will be set by MainWindow once the grabber is open:
         self.grabber = None
-        self.layout = QVBoxLayout(self)
-        self.layout.addWidget(QLabel("Camera Controls"))
-        # We will fill this in once grabber_ready arrives
-        self.setLayout(self.layout)
+
+        # ───– Build the Qt widgets (all disabled by default) –────────────────
+        self.layout = QFormLayout(self)
+        self.layout.setContentsMargins(4, 4, 4, 4)
+        self.layout.setSpacing(6)
+
+        # 1) Exposure Time (float)
+        self.exposure_label = QLabel("Exposure (µs):")
+        self.exposure_spin = QDoubleSpinBox()
+        self.exposure_spin.setDecimals(1)
+        self.exposure_spin.setSuffix(" µs")
+        self.exposure_spin.setRange(0.0, 1e6)  # placeholder; will adjust later
+        self.exposure_spin.setSingleStep(1000.0)
+        self.exposure_spin.setEnabled(False)
+        self.exposure_spin.valueChanged.connect(self._on_exposure_changed)
+        self.layout.addRow(self.exposure_label, self.exposure_spin)
+
+        # 2) Gain (float)
+        self.gain_label = QLabel("Gain:")
+        self.gain_spin = QDoubleSpinBox()
+        self.gain_spin.setDecimals(2)
+        self.gain_spin.setRange(0.0, 20.0)  # placeholder; will adjust later
+        self.gain_spin.setSingleStep(0.1)
+        self.gain_spin.setEnabled(False)
+        self.gain_spin.valueChanged.connect(self._on_gain_changed)
+        self.layout.addRow(self.gain_label, self.gain_spin)
+
+        # 3) Auto-Exposure checkbox (if available)
+        self.ae_checkbox = QCheckBox("Auto Exposure")
+        self.ae_checkbox.setEnabled(False)
+        self.ae_checkbox.stateChanged.connect(self._on_auto_exposure_toggled)
+        self.layout.addRow(self.ae_checkbox)
+
+        # 4) Auto-Gain checkbox (if available)
+        self.ag_checkbox = QCheckBox("Auto Gain")
+        self.ag_checkbox.setEnabled(False)
+        self.ag_checkbox.stateChanged.connect(self._on_auto_gain_toggled)
+        self.layout.addRow(self.ag_checkbox)
+
+        # 5) Frame Rate (float) – optional
+        self.framerate_label = QLabel("Frame Rate (fps):")
+        self.framerate_spin = QDoubleSpinBox()
+        self.framerate_spin.setDecimals(1)
+        self.framerate_spin.setRange(0.1, 120.0)  # placeholder
+        self.framerate_spin.setSingleStep(0.5)
+        self.framerate_spin.setEnabled(False)
+        self.framerate_spin.valueChanged.connect(self._on_framerate_changed)
+        self.layout.addRow(self.framerate_label, self.framerate_spin)
+
+        # 6) Pixel Format dropdown (enum) – optional
+        self.pf_label = QLabel("Pixel Format:")
+        self.pf_combo = QComboBox()
+        self.pf_combo.setEnabled(False)
+        self.pf_combo.currentIndexChanged.connect(self._on_pf_changed)
+        self.layout.addRow(self.pf_label, self.pf_combo)
+
+        # (You can add more controls here—e.g. Gamma, White Balance, etc.—using the same pattern.)
 
     def _on_grabber_ready(self):
         """
-        Called by MainWindow once the grabber is open & streaming.
-        We can now read self.grabber.device_property_map and build controls.
+        Called by MainWindow right after `grabber` is set. At this point:
+          - self.grabber.device_property_map is valid.
+          - We can safely query which nodes exist and populate our controls.
         """
+        if self.grabber is None:
+            return
 
-        # Clear any old controls
-        for i in reversed(range(self.layout.count())):
-            widget = self.layout.itemAt(i).widget()
-            if widget:
-                widget.setParent(None)
+        dm = self.grabber.device_property_map
 
-        self.layout.addWidget(QLabel("Camera Controls"))
-
-        prop_map = self.grabber.device_property_map
-
-        # ─── Example: build a dropdown for PixelFormat ──────────────────────
+        # ─── ExposureTime ─────────────────────────────────────────────────────
         try:
-            pf_node = prop_map.find_enumeration("PixelFormat")
-            if pf_node:
-                pf_combo = QComboBox(self)
-                pf_combo.addItem(f"Current: {pf_node.value}", pf_node.value)
-                for entry in pf_node.entries:
-                    pf_combo.addItem(entry.name, entry.name)
-                pf_combo.currentTextChanged.connect(
-                    lambda txt: self._set_enumeration(pf_node, txt)
-                )
-                self.layout.addWidget(QLabel("Pixel Format:"))
-                self.layout.addWidget(pf_combo)
-        except Exception as ex:
-            log.error(f"Could not add PixelFormat control: {ex}")
-
-        # ─── Example: build a slider for “ExposureTime” if available ───────
-        try:
-            exp_node = prop_map.find_float("ExposureTime")
+            exp_node = dm.find_float("ExposureTime")
             if exp_node:
-                slider = QSlider(Qt.Horizontal, self)
-                slider.setMinimum(exp_node.min)
-                slider.setMaximum(exp_node.max)
-                slider.setValue(exp_node.value)
-                slider.setTickInterval(exp_node.increment or 1)
-                slider.setSingleStep(exp_node.increment or 1)
-                slider.valueChanged.connect(lambda v: setattr(exp_node, "value", v))
-                self.layout.addWidget(QLabel("Exposure Time:"))
-                self.layout.addWidget(slider)
-        except Exception as ex:
-            log.error(f"Could not add ExposureTime control: {ex}")
+                # If the PropFloat has .min and .max, use them to set ranges
+                try:
+                    amin = float(exp_node.min)
+                    amax = float(exp_node.max)
+                    self.exposure_spin.setRange(amin, amax)
+                    self.exposure_spin.setSingleStep((amax - amin) / 100.0)
+                except AttributeError:
+                    # Some cameras don’t expose min/max – leave defaults
+                    pass
 
-        # ─── Example: build a slider for “Gain” (float) if available ───────
+                # Set current value
+                self.exposure_spin.setValue(float(exp_node.value))
+                self.exposure_spin.setEnabled(True)
+            else:
+                self.exposure_label.setText("Exposure (N/A)")
+        except Exception as e:
+            self.exposure_label.setText("Exposure (Error)")
+            log.error(f"CameraControlPanel: could not query ExposureTime: {e}")
+
+        # ─── Gain ──────────────────────────────────────────────────────────────
         try:
-            gain_node = prop_map.find_float("Gain")
+            gain_node = dm.find_float("Gain")
             if gain_node:
-                slider = QSlider(Qt.Horizontal, self)
-                # Map float → slider range by multiplying by 100 (for example)
-                slider.setMinimum(int(gain_node.min * 100))
-                slider.setMaximum(int(gain_node.max * 100))
-                slider.setValue(int(gain_node.value * 100))
-                slider.setTickInterval(int(gain_node.increment * 100) or 1)
-                slider.setSingleStep(int(gain_node.increment * 100) or 1)
+                try:
+                    gmin = float(gain_node.min)
+                    gmax = float(gain_node.max)
+                    self.gain_spin.setRange(gmin, gmax)
+                    self.gain_spin.setSingleStep((gmax - gmin) / 100.0)
+                except AttributeError:
+                    pass
 
-                def on_gain_changed(val):
-                    gain_node.value = float(val / 100.0)
+                self.gain_spin.setValue(float(gain_node.value))
+                self.gain_spin.setEnabled(True)
+            else:
+                self.gain_label.setText("Gain (N/A)")
+        except Exception as e:
+            self.gain_label.setText("Gain (Error)")
+            log.error(f"CameraControlPanel: could not query Gain: {e}")
 
-                slider.valueChanged.connect(on_gain_changed)
-                self.layout.addWidget(QLabel("Gain:"))
-                self.layout.addWidget(slider)
-        except Exception as ex:
-            log.error(f"Could not add Gain control: {ex}")
-
-        # ─── Example: build a checkbox for “AutoExposure” (boolean) if available ─
+        # ─── Auto-Exposure ─────────────────────────────────────────────────────
         try:
-            ae_node = prop_map.find_boolean("AutoExposure")
+            ae_node = dm.find_enumeration("ExposureAuto")
             if ae_node:
-                from PyQt5.QtWidgets import QCheckBox
+                # If enum value is "Continuous", check the box
+                self.ae_checkbox.setChecked(ae_node.value == "Continuous")
+                self.ae_checkbox.setEnabled(True)
+            else:
+                self.ae_checkbox.setText("Auto Exposure (N/A)")
+        except Exception as e:
+            self.ae_checkbox.setText("Auto Exposure (Error)")
+            log.error(f"CameraControlPanel: could not query ExposureAuto: {e}")
 
-                cb = QCheckBox("Auto‐Exposure", self)
-                cb.setChecked(ae_node.value)
-                cb.stateChanged.connect(lambda st: setattr(ae_node, "value", bool(st)))
-                self.layout.addWidget(cb)
-        except Exception as ex:
-            log.error(f"Could not add AutoExposure control: {ex}")
-
-        # … repeat for any other nodes you care about (e.g. WhiteBalance, Gamma, etc.) …
-
-        self.layout.addStretch(1)
-
-    def _set_enumeration(self, node, selected_name):
+        # ─── Auto-Gain ─────────────────────────────────────────────────────────
         try:
-            node.value = selected_name
-        except Exception as ex:
+            ag_node = dm.find_enumeration("GainAuto")
+            if ag_node:
+                self.ag_checkbox.setChecked(ag_node.value == "Continuous")
+                self.ag_checkbox.setEnabled(True)
+            else:
+                self.ag_checkbox.setText("Auto Gain (N/A)")
+        except Exception as e:
+            self.ag_checkbox.setText("Auto Gain (Error)")
+            log.error(f"CameraControlPanel: could not query GainAuto: {e}")
+
+        # ─── Frame Rate ────────────────────────────────────────────────────────
+        try:
+            fr_node = dm.find_float("AcquisitionFrameRate")
+            if fr_node:
+                try:
+                    fmin = float(fr_node.min)
+                    fmax = float(fr_node.max)
+                    self.framerate_spin.setRange(fmin, fmax)
+                    self.framerate_spin.setSingleStep((fmax - fmin) / 100.0)
+                except AttributeError:
+                    pass
+
+                self.framerate_spin.setValue(float(fr_node.value))
+                self.framerate_spin.setEnabled(True)
+            else:
+                self.framerate_label.setText("Frame Rate (N/A)")
+        except Exception as e:
+            self.framerate_label.setText("Frame Rate (Error)")
+            log.error(f"CameraControlPanel: could not query AcquisitionFrameRate: {e}")
+
+        # ─── Pixel Format ──────────────────────────────────────────────────────
+        try:
+            pf_node = dm.find_enumeration("PixelFormat")
+            if pf_node:
+                self.pf_combo.clear()
+                # Build a list of all available PFs
+                for entry in pf_node.entries:
+                    if entry.is_available:
+                        self.pf_combo.addItem(entry.name)
+                # Select the current format
+                current_pf = pf_node.value
+                idx = self.pf_combo.findText(current_pf)
+                if idx >= 0:
+                    self.pf_combo.setCurrentIndex(idx)
+                self.pf_combo.setEnabled(True)
+            else:
+                self.pf_label.setText("Pixel Format (N/A)")
+        except Exception as e:
+            self.pf_label.setText("Pixel Format (Error)")
+            log.error(f"CameraControlPanel: could not query PixelFormat: {e}")
+
+        # ─── (Add any additional nodes you want to expose here) ──────────────
+
+    # ─── User‐driven slots: write back to the camera nodes ────────────────────
+
+    @pyqtSlot(float)
+    def _on_exposure_changed(self, new_val):
+        try:
+            exp_node = self.grabber.device_property_map.find_float("ExposureTime")
+            if exp_node:
+                exp_node.value = float(new_val)
+        except Exception as e:
             log.error(
-                f"Failed to set enumeration {node.name!r} = {selected_name}: {ex}"
+                f"CameraControlPanel: failed to set ExposureTime = {new_val}: {e}"
+            )
+
+    @pyqtSlot(float)
+    def _on_gain_changed(self, new_val):
+        try:
+            gain_node = self.grabber.device_property_map.find_float("Gain")
+            if gain_node:
+                gain_node.value = float(new_val)
+        except Exception as e:
+            log.error(f"CameraControlPanel: failed to set Gain = {new_val}: {e}")
+
+    @pyqtSlot(int)
+    def _on_auto_exposure_toggled(self, state):
+        try:
+            ae_node = self.grabber.device_property_map.find_enumeration("ExposureAuto")
+            if ae_node:
+                ae_node.value = "Continuous" if state == Qt.Checked else "Off"
+        except Exception as e:
+            log.error(f"CameraControlPanel: failed to set ExposureAuto: {e}")
+
+    @pyqtSlot(int)
+    def _on_auto_gain_toggled(self, state):
+        try:
+            ag_node = self.grabber.device_property_map.find_enumeration("GainAuto")
+            if ag_node:
+                ag_node.value = "Continuous" if state == Qt.Checked else "Off"
+        except Exception as e:
+            log.error(f"CameraControlPanel: failed to set GainAuto: {e}")
+
+    @pyqtSlot(float)
+    def _on_framerate_changed(self, new_val):
+        try:
+            fr_node = self.grabber.device_property_map.find_float(
+                "AcquisitionFrameRate"
+            )
+            if fr_node:
+                fr_node.value = float(new_val)
+        except Exception as e:
+            log.error(
+                f"CameraControlPanel: failed to set AcquisitionFrameRate = {new_val}: {e}"
+            )
+
+    @pyqtSlot(int)
+    def _on_pf_changed(self, index):
+        try:
+            pf_node = self.grabber.device_property_map.find_enumeration("PixelFormat")
+            if pf_node:
+                new_pf = self.pf_combo.currentText()
+                pf_node.value = new_pf
+        except Exception as e:
+            log.error(
+                f"CameraControlPanel: failed to set PixelFormat = {self.pf_combo.currentText()}: {e}"
             )
