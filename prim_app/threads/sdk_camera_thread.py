@@ -37,11 +37,6 @@ class SDKCameraThread(QThread):
 
     def run(self):
         try:
-            # 1) Initialize IC4
-            ic4.Library.init(
-                api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
-            )
-            log.info("SDKCameraThread: Library.init() succeeded.")
 
             # 2) Verify we have device_info
             if self._device_info is None:
