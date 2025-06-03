@@ -36,7 +36,15 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize
+from PyQt5.QtCore import (
+    Qt,
+    pyqtSlot,
+    QTimer,
+    QVariant,
+    QDateTime,
+    QSize,
+    QCoreApplication,
+)
 from PyQt5.QtGui import QIcon, QKeySequence, QImage
 
 import prim_app
@@ -66,6 +74,8 @@ from ui.canvas.pressure_plot_widget import PressurePlotWidget
 
 from threads.serial_thread import SerialThread
 from threads.sdk_camera_thread import SDKCameraThread
+from utils.config import DEFAULT_FPS
+from utils.path_helpers import get_next_fill_folder
 from recording import RecordingWorker
 from utils.utils import list_serial_ports
 
@@ -643,20 +653,134 @@ class MainWindow(QMainWindow):
             self.plot_control_panel.setEnabled(True)
 
     # ─── Camera/Recording Dialogs & Methods ──────────────────────────────────
-    # ─── Placeholder Stubs for Recording Actions ───────────────────────────────
+    @pyqtSlot()
     def _trigger_start_recording_dialog(self):
         """
-        Stub for “Start Recording” action.
-        Eventually this should pop up your record‐settings dialog; for now, do nothing.
+        Start a new recording by automatically creating:
+        ~/Documents/PRIMAcquisition/YYYY-MM-DD/FillN/
+        and using 'FillN' as the base filename (TIFF + CSV).
         """
-        log.info("Start Recording requested (stub).")
+        # 1) Find (and create) the next FillN folder for today
+        fill_folder = get_next_fill_folder()
+        if not fill_folder or not os.path.isdir(fill_folder):
+            QMessageBox.critical(
+                self, "Recording Error", "Could not create Fill folder."
+            )
+            return
 
+        # 2) Use "FillN" as the base filename in that folder
+        fill_name = os.path.basename(fill_folder)  # e.g. "Fill1"
+        basepath = os.path.join(fill_folder, fill_name)
+
+        # 3) Get current camera resolution & desired FPS
+        resdata = self.resolution_combo.currentData()
+        if not resdata:
+            QMessageBox.warning(
+                self, "Recording Error", "Please select a camera resolution first."
+            )
+            return
+        w, h, pf_name = resdata
+        fps = DEFAULT_FPS
+
+        # 4) Instantiate and start the RecordingWorker
+        self._recording_worker = RecordingWorker(
+            basepath=basepath,
+            fps=fps,
+            frame_size=(w, h),
+            video_ext="tif",
+            video_codec=None,
+            parent=self,
+        )
+        self._recording_worker.start()
+
+        # 5) Wait until the TIFF+CSV writers are ready
+        while not self._recording_worker.is_ready_to_record:
+            QCoreApplication.processEvents()
+
+        # 6) Re‐route camera & serial signals into the worker
+        try:
+            self.camera_thread.frame_ready.disconnect(
+                self.camera_widget._on_frame_ready
+            )
+        except Exception:
+            pass
+
+        self.camera_thread.frame_ready.connect(self._on_video_frame_and_record)
+        self._serial_thread.data_ready.connect(self._on_serial_data_and_record)
+
+        # 7) Update UI state
+        self._is_recording = True
+        self.start_recording_action.setEnabled(False)
+        self.stop_recording_action.setEnabled(True)
+        self.statusBar().showMessage(f"Recording to '{fill_folder}' …", 2000)
+
+    @pyqtSlot(QImage, object, int, int)
+    def _on_video_frame_and_record(self, qimg, buf, frame_idx, cam_ts):
+        """
+        Called on each new camera frame.
+        1) Display it in the live preview.
+        2) Extract the NumPy array and enqueue it for recording (paired later).
+        """
+        # 1) Live preview
+        self.camera_widget._on_frame_ready(qimg)
+
+        # 2) Extract NumPy array from buffer
+        try:
+            arr = buf.numpy_wrap().copy()
+        except Exception as e:
+            log.error(f"MainWindow: failed to convert buffer to NumPy: {e}")
+            return
+
+        # 3) Enqueue into RecordingWorker; the worker will pair it with the next CSV entry
+        if self._is_recording and self._recording_worker:
+            self._recording_worker.add_video_frame((arr, frame_idx, cam_ts, None, None))
+
+    @pyqtSlot(int, float)
+    def _on_serial_data_and_record(self, arduino_ts_us, pressure):
+        """
+        Called on each new Arduino line (arduino_ts_us, pressure).
+        Enqueue it so it can be paired with the next video frame.
+        """
+        if self._is_recording and self._recording_worker:
+            self._recording_worker.add_csv_data(arduino_ts_us, pressure)
+
+    @pyqtSlot()
     def _trigger_stop_recording(self):
         """
-        Stub for “Stop Recording” action.
-        Eventually this should stop your RecordingWorker; for now, do nothing.
+        Stop the active RecordingWorker, wait for it to finish, and restore live preview.
         """
-        log.info("Stop Recording requested (stub).")
+        if self._is_recording and self._recording_worker:
+            # 1) Signal the worker to finish
+            self._recording_worker.stop_worker()
+            if not self._recording_worker.wait(5000):
+                self._recording_worker.terminate()
+                self._recording_worker.wait(1000)
+
+            # 2) Disconnect recording‐specific slots
+            try:
+                self.camera_thread.frame_ready.disconnect(
+                    self._on_video_frame_and_record
+                )
+            except Exception:
+                pass
+            try:
+                self._serial_thread.data_ready.disconnect(
+                    self._on_serial_data_and_record
+                )
+            except Exception:
+                pass
+
+            # 3) Restore the preview‐only connection
+            self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
+
+            # 4) Reset flags and UI
+            self._recording_worker = None
+            self._is_recording = False
+            self.start_recording_action.setEnabled(True)
+            self.stop_recording_action.setEnabled(False)
+            self.statusBar().showMessage("Recording stopped and saved.", 3000)
+        else:
+            log.warning("Stop recording requested but no recording is active.")
 
     # ─── Menu Actions & Dialog Slots ──────────────────────────────────────────
     def _export_plot_data_as_csv(self):
