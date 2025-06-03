@@ -50,7 +50,7 @@ class CameraControlPanel(QWidget):
 
         # ─── Example: build a slider for “ExposureTime” if available ───────
         try:
-            exp_node = prop_map.find_integer("ExposureTime")
+            exp_node = prop_map.find_float("ExposureTime")
             if exp_node:
                 slider = QSlider(Qt.Horizontal, self)
                 slider.setMinimum(exp_node.min)
