@@ -242,7 +242,28 @@ def main_app_entry():
 
     # ─── Begin: Camera detection (using your standalone logic) ───────────
     devices = detect_camera()
-    print_device_list()
+
+    # Print exactly the same info (model & serial, grouped by interface)
+    # using the list that detect_camera() returned.
+    from collections import defaultdict
+
+    by_interface = defaultdict(list)
+    for dev in devices:
+        iface = f"{dev.interface_id:#06x}"  # e.g. “0x0000”
+        by_interface[iface].append(dev)
+
+    print("Enumerating all attached video capture devices…")
+    if not devices:
+        print("No devices found")
+    else:
+        for iface, devs in by_interface.items():
+            print(f"Interface: {iface}")
+            if not devs:
+                print("\t(no cameras on this interface)")
+            for device_info in devs:
+                print(
+                    f"\tModel: {device_info.model_name}    Serial: {device_info.serial}"
+                )
 
     if not devices:
         dlg = QMessageBox(
