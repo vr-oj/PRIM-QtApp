@@ -3,13 +3,15 @@
 import logging
 import imagingcontrol4 as ic4
 from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtGui import QImage
+
 
 log = logging.getLogger(__name__)
 
 
 class SDKCameraThread(QThread):
     grabber_ready = pyqtSignal()
-    frame_ready = pyqtSignal(object, object)  # we’ll wire this up later
+    frame_ready = pyqtSignal(QImage, object)  # we’ll wire this up later
     error = pyqtSignal(str, str)
 
     def __init__(self, parent=None):
