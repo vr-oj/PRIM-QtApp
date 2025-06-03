@@ -91,11 +91,12 @@ class MainWindow(QMainWindow):
         self._serial_active = False
         self._recording_worker = None
         self._is_recording = False
-        self._record_armed = False     # ← has user clicked “Start Recording” (armed) but not yet started actual saving?
+        self._record_armed = False  # ← has user clicked “Start Recording” (armed) but not yet started actual saving?
         self._serial_timeout_timer = QTimer(self)
         self._serial_timeout_timer.setSingleShot(True)
-        self._serial_timeout_timer.setInterval(500)  # 0.5 s of no serial → stop recording
-
+        self._serial_timeout_timer.setInterval(
+            500
+        )  # 0.5 s of no serial → stop recording
 
         # Camera‐related
         self.device_combo = None
@@ -730,7 +731,7 @@ class MainWindow(QMainWindow):
             self.plot_control_panel.setEnabled(True)
 
     # ─── Camera/Recording Dialogs & Methods ──────────────────────────────────
-        @pyqtSlot()
+    @pyqtSlot()
     def _trigger_start_recording_dialog(self):
         """
         Called when “Start Recording” is clicked. We create the new folder
@@ -803,7 +804,6 @@ class MainWindow(QMainWindow):
         )
         self.start_recording_action.setEnabled(False)
         self.stop_recording_action.setEnabled(True)
-
 
     @pyqtSlot(int, float, float)
     def _on_first_serial_data(self, frame_idx, arduino_ts_s, pressure):
