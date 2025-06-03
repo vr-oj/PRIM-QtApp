@@ -7,11 +7,9 @@ import time
 
 class DummySinkListener:
     def sink_connected(self, sink, pixel_format, min_buffers_required):
-        # Always allow the sink to connect
         return True
 
     def sink_disconnected(self, sink):
-        # Simply ignore
         pass
 
 
@@ -46,7 +44,7 @@ def main():
     except Exception as e:
         print("Warning: could not set AcquisitionMode →", e)
 
-    # 5) Pick Mono8 (if available) or fallback
+    # 5) Pick a pixel format: try Mono8, else BGR8, else camera default
     try:
         pf_node = grabber.device_property_map.find_enumeration(ic4.PropId.PIXEL_FORMAT)
         if pf_node:
@@ -54,13 +52,16 @@ def main():
             if "Mono8" in available:
                 pf_node.value = "Mono8"
                 print("PixelFormat set to Mono8")
+            elif "BGR8" in available:
+                pf_node.value = "BGR8"
+                print("Mono8 not available; using BGR8")
             else:
                 pf_node.value = available[0]
-                print(f"Mono8 not available; using {available[0]}")
+                print(f"Using fallback pixel format {available[0]}")
     except Exception as e:
         print("Warning: could not set PixelFormat →", e)
 
-    # 6) Clamp width/height to 640×480
+    # 6) Clamp width/height to 640×480 (if supported)
     try:
         w_node = grabber.device_property_map.find_integer(ic4.PropId.WIDTH)
         h_node = grabber.device_property_map.find_integer(ic4.PropId.HEIGHT)
@@ -71,38 +72,52 @@ def main():
     except Exception as e:
         print("Warning: could not set resolution →", e)
 
-    # 7) Create and attach a minimal listener to the QueueSink
+    # 7) Attach the dummy listener + create QueueSink
     listener = DummySinkListener()
+    # Use Mono8 frame format; if you set BGR8 above, this still tries Mono8.
+    # If Mono8 isn’t available, the sink will negotiate a compatible format.
     sink = ic4.QueueSink(listener, [ic4.PixelFormat.Mono8], max_output_buffers=1)
 
     # 8) Start streaming
     try:
         grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
-        print("Streaming started. Grabbing 5 frames...")
+        print("StreamSetup complete.")
+        # IMPORTANT: explicitly start acquisition
+        grabber.acquisition_start()
+        print("grabber.acquisition_start() called.")
     except Exception as e:
         print("❌ Failed to start stream:", e)
         grabber.device_close()
         ic4.Library.exit()
         return
 
-    # 9) Grab 5 frames (blocking pop) and display via OpenCV
+    # 9) Give camera a moment to warm up
+    time.sleep(1.0)
+
+    # 10) Grab 5 frames
+    print("Grabbing 5 frames...")
+    cv2.namedWindow("Frame", cv2.WINDOW_NORMAL)
     for i in range(5):
-        time.sleep(0.1)
         try:
-            buf = sink.pop_output_buffer()  # <-- no timeout parameter here
-            arr = buf.numpy_wrap()  # Mono8 → 2D numpy array
-            cv2.imshow("Frame (Mono8)", arr)
-            cv2.waitKey(100)
-            sink.queue_buffer(buf)  # Requeue the buffer
+            buf = sink.pop_output_buffer()  # blocking call
+            arr = buf.numpy_wrap()  # Mono8 or BGR8 → NumPy array
+            # If BGR8, arr.shape will be (H,W,3). If Mono8, arr.shape is (H,W).
+            cv2.imshow("Frame", arr)
+            cv2.waitKey(200)  # show each frame for 200 ms
+            sink.queue_buffer(buf)
         except ic4.IC4Exception as e:
             print("No frame yet or error:", e)
+            # Optionally sleep a bit more if needed:
+            time.sleep(0.1)
 
-    # 10) Stop and clean up
+    # 11) Stop acquisition, stop stream, close device
+    grabber.acquisition_stop()
     grabber.stream_stop()
     grabber.device_close()
     cv2.destroyAllWindows()
     print("Streaming stopped, camera closed.")
 
+    # 12) Shutdown library
     ic4.Library.exit()
     print("Library.exit() complete.")
 
