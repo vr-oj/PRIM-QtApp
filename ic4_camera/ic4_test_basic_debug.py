@@ -1,4 +1,4 @@
-# ic4_test_basic_debug.py
+# ic4_test_basic_debug2.py
 import imagingcontrol4 as ic4
 import cv2
 import time
@@ -17,6 +17,7 @@ class DummySinkListener:
 
 def main():
     print("1) Entered main()")
+
     # 1) Init the IC4 library
     try:
         print("2) Calling Library.init()")
@@ -124,11 +125,11 @@ def main():
         ic4.Library.exit()
         return
 
-    # 8) Start streaming (stream_setup + no extra acquisition_start!)
+    # 8) Start streaming (stream_setup only; no ACQUISITION_START here)
     try:
-        print("9) Calling grabber.stream_setup(..., ACQUISITION_START)")
-        grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
-        print("   → stream_setup() succeeded; acquisition is already active.")
+        print("9) Calling grabber.stream_setup(sink, default)")
+        grabber.stream_setup(sink)  # no ACQUISITION_START
+        print("   → stream_setup() succeeded (acquisition not started yet).")
     except Exception as e:
         print("   ✗ stream_setup() raised exception:", e)
         try:
@@ -138,12 +139,31 @@ def main():
         ic4.Library.exit()
         return
 
-    # 9) Give camera a moment to warm up
-    print("10) Sleeping for 1 second so camera can warm up buffers…")
-    time.sleep(1.0)
+    # 9) Now explicitly start acquisition
+    try:
+        print("10) Calling grabber.acquisition_start()")
+        grabber.acquisition_start()
+        print("   → grabber.acquisition_start() succeeded.")
+    except Exception as e:
+        print("   ✗ grabber.acquisition_start() raised exception:", e)
+        # If acquisition is already active, you can ignore it,
+        # but if it’s any other error, bail out:
+        if isinstance(e, ic4.IC4Exception):
+            print("   → Acquisition may already be active, continuing.")
+        else:
+            try:
+                grabber.device_close()
+            except:
+                pass
+            ic4.Library.exit()
+            return
 
-    # 10) Grab 5 frames (blocking pop) and display via OpenCV
-    print("11) Attempting to pop 5 frames now…")
+    # 10) Give camera extra warm-up time
+    print("11) Sleeping for 2 seconds so camera can warm up buffers…")
+    time.sleep(2.0)
+
+    # 11) Grab 5 frames (blocking pop) and display via OpenCV
+    print("12) Attempting to pop 5 frames now…")
     cv2.namedWindow("Frame", cv2.WINDOW_NORMAL)
     for idx in range(5):
         try:
@@ -161,8 +181,8 @@ def main():
             print(f"    ✗ Unexpected exception while popping frame {idx+1}:", e)
             time.sleep(0.1)
 
-    # 11) Stop acquisition, stop stream, close device
-    print("12) Stopping acquisition/stream, closing device…")
+    # 12) Stop acquisition, stop stream, close device
+    print("13) Stopping acquisition/stream, closing device…")
     try:
         grabber.acquisition_stop()
         print("    → grabber.acquisition_stop() succeeded.")
@@ -181,8 +201,8 @@ def main():
     cv2.destroyAllWindows()
     print("    → cv2 windows destroyed.")
 
-    # 12) Clean up objects before exit
-    print("13) Deleting sink and grabber…")
+    # 13) Clean up objects before exit
+    print("14) Deleting sink and grabber…")
     try:
         del sink
         del grabber
@@ -190,8 +210,8 @@ def main():
     except Exception as e:
         print("    ✗ Deleting sink/grabber raised exception:", e)
 
-    # 13) Shutdown library
-    print("14) Calling Library.exit()")
+    # 14) Shutdown library
+    print("15) Calling Library.exit()")
     try:
         ic4.Library.exit()
         print("    → Library.exit() succeeded.")
@@ -202,7 +222,7 @@ def main():
 
 
 if __name__ == "__main__":
-    print("=== Starting ic4_test_basic_debug.py ===")
+    print("=== Starting ic4_test_basic_debug2.py ===")
     main()
-    print("=== Exiting ic4_test_basic_debug.py ===")
+    print("=== Exiting ic4_test_basic_debug2.py ===")
     sys.exit(0)
