@@ -7,7 +7,7 @@ def toggle_enumeration(pm, pid: ic4.PropId):
     pid must be an ic4.PropId member.
     Print its current enumeration entry, cycle to the next valid entry (if >1), and print again.
     """
-    # Debug print to confirm pid type
+    # Debug-print to confirm pid type
     print(f"[toggle_enumeration] pid = {pid!r},   type(pid) = {type(pid)}")
     try:
         prop = pm.find_enumeration(pid)
@@ -35,7 +35,7 @@ def toggle_boolean(pm, pid: ic4.PropId):
     pid must be an ic4.PropId member.
     Print its current boolean value, flip it, and print again.
     """
-    # Debug print to confirm pid type
+    # Debug-print to confirm pid type
     print(f"[toggle_boolean] pid = {pid!r},   type(pid) = {type(pid)}")
     try:
         prop = pm.find_boolean(pid)
@@ -56,7 +56,7 @@ def adjust_float(pm, pid: ic4.PropId):
     Print its current float value, set it to mid-range (if auto-limits exist)
     or bump it by 10% otherwise, then print again.
     """
-    # Debug print to confirm pid type
+    # Debug-print to confirm pid type
     print(f"[adjust_float] pid = {pid!r},   type(pid) = {type(pid)}")
     try:
         prop = pm.find_float(pid)
