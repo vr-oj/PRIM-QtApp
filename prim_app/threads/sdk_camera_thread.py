@@ -189,7 +189,7 @@ class SDKCameraThread(QThread):
             buf = sink.pop_output_buffer()
             arr = buf.numpy_wrap()  # arr: shape=(H, W) dtype=uint8 or uint16
 
-            # Downconvert 16‐bit to 8‐bit if necessary
+            # Downconvert 16-bit to 8-bit if necessary
             if arr.dtype == np.uint8:
                 gray8 = arr
             else:
@@ -199,11 +199,22 @@ class SDKCameraThread(QThread):
 
             h, w = gray8.shape[:2]
 
-            # Build a QImage from single‐channel grayscale
+            # Build a QImage from single-channel grayscale
             qimg = QImage(gray8.data, w, h, gray8.strides[0], QImage.Format_Grayscale8)
 
-            # Emit to the UI
-            self.frame_ready.emit(qimg, buf)
+            # ❗️ Important: copy the QImage now, before re-queueing the buffer.
+            qimg_copy = qimg.copy()
+
+            # Emit the copy to the UI
+            self.frame_ready.emit(qimg_copy, buf)
+
+            # Re-enqueue the buffer so IC4 can reuse it for the next frame
+            try:
+                sink.queue_buffer(buf)
+            except Exception as e2:
+                log.error(
+                    f"SDKCameraThread.frames_queued: could not re-queue buffer: {e2}"
+                )
 
         except Exception as e:
             log.error(
