@@ -1,4 +1,5 @@
-# grab_and_save.py
+# grab_one_frame.py  (fixed)
+
 import imagingcontrol4 as ic4
 import cv2
 import time
@@ -6,11 +7,11 @@ import os
 
 
 def main():
-    # 1) Init IC4
+    # 1) Initialize IC4
     ic4.Library.init(api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR)
     print("Library.init() succeeded.")
 
-    # 2) Open camera (using your default IC Capture profile)
+    # 2) Open the first camera
     devices = ic4.DeviceEnum.devices()
     if not devices:
         print("No IC4 devices found.")
@@ -22,14 +23,14 @@ def main():
     grabber.device_open(dev)
     print(f"Opened camera: {dev.model_name} (S/N {dev.serial})")
 
-    # 3) Apply the same settings you used before—Mono8, Continuous, 10 FPS, etc.
+    # 3) Apply settings (Mono8, Continuous, 10 FPS, 30 ms, gain=10)
     try:
         pf_node = grabber.device_property_map.find_enumeration(ic4.PropId.PIXEL_FORMAT)
         if pf_node and "Mono8" in [e.name for e in pf_node.entries if e.is_available]:
             pf_node.value = "Mono8"
-            print("  → Set PIXEL_FORMAT to Mono8")
+            print("  → Set PIXEL_FORMAT = Mono8")
     except Exception as e:
-        print("  ✗ Could not set PIXEL_FORMAT:", e)
+        print("  ✗ Cannot set PIXEL_FORMAT:", e)
 
     try:
         acq_node = grabber.device_property_map.find_enumeration(
@@ -37,9 +38,9 @@ def main():
         )
         if acq_node and "Continuous" in [e.name for e in acq_node.entries]:
             acq_node.value = "Continuous"
-            print("  → Set ACQUISITION_MODE to Continuous")
+            print("  → Set ACQUISITION_MODE = Continuous")
     except Exception as e:
-        print("  ✗ Could not set ACQUISITION_MODE:", e)
+        print("  ✗ Cannot set ACQUISITION_MODE:", e)
 
     try:
         fr_node = grabber.device_property_map.find_float(
@@ -47,27 +48,27 @@ def main():
         )
         if fr_node:
             fr_node.value = 10.0
-            print("  → Set ACQUISITION_FRAME_RATE to 10.0")
+            print("  → Set ACQUISITION_FRAME_RATE = 10.0 FPS")
     except Exception as e:
-        print("  ✗ Could not set ACQUISITION_FRAME_RATE:", e)
+        print("  ✗ Cannot set ACQUISITION_FRAME_RATE:", e)
 
     try:
         exp_node = grabber.device_property_map.find_float(ic4.PropId.EXPOSURE_TIME)
         if exp_node:
-            exp_node.value = 30000  # 30 ms = 30,000 µs
-            print("  → Set EXPOSURE_TIME to 30 ms")
+            exp_node.value = 30000  # 30 ms in μs
+            print("  → Set EXPOSURE_TIME = 30 ms")
     except Exception as e:
-        print("  ✗ Could not set EXPOSURE_TIME:", e)
+        print("  ✗ Cannot set EXPOSURE_TIME:", e)
 
     try:
         gain_node = grabber.device_property_map.find_float(ic4.PropId.GAIN)
         if gain_node:
-            gain_node.value = 10
-            print("  → Set GAIN to 10")
+            gain_node.value = 10.0
+            print("  → Set GAIN = 10.0")
     except Exception as e:
-        print("  ✗ Could not set GAIN:", e)
+        print("  ✗ Cannot set GAIN:", e)
 
-    # 4) Create QueueSink and attach a simple listener, queue a few buffers
+    # 4) Create QueueSink and queue N buffers before starting acquisition
     class DummyListener:
         def sink_connected(self, sink, pf, min_bufs_required):
             return True
@@ -77,40 +78,49 @@ def main():
 
     listener = DummyListener()
     sink = ic4.QueueSink(listener, [ic4.PixelFormat.Mono8], max_output_buffers=5)
-    print("  → Created QueueSink")
+    print("  → Created QueueSink (max 5 buffers).")
 
-    # 5) Defer acquisition start, then start it
+    # 5) Attach the sink but do NOT start acquisition yet
     grabber.stream_setup(
         sink, setup_option=ic4.StreamSetupOption.DEFER_ACQUISITION_START
     )
-    print("  → Called stream_setup(DEFER_ACQUISITION_START)")
+    print("  → Called stream_setup(DEFER_ACQUISITION_START).")
 
+    # 6) Now queue 5 empty buffers into that QueueSink
+    for _ in range(5):
+        sink.queue_buffer(None)
+    print("  → Queued 5 buffers into the sink.")
+
+    # 7) Start acquisition—camera will write into those queued buffers
     grabber.acquisition_start()
-    print("  → Called acquisition_start() → camera streaming begins")
+    print("  → Called acquisition_start() → camera should now be streaming.")
 
-    # 6) Pop exactly one frame, save it to a TIFF, then exit
+    # 8) Give it a brief moment so at least one buffer can fill
+    time.sleep(0.5)
+
+    # 9) Pop exactly one frame, save it to disk as a TIFF, then exit
     try:
-        buf = sink.pop_output_buffer()  # blocking until one frame arrives
-        arr = buf.numpy_wrap()  # Mono8 array (HxW)
+        buf = sink.pop_output_buffer(timeout=2000)  # wait up to 2 seconds
+        arr = buf.numpy_wrap()  # Mono8 numpy array (H×W)
         h, w = arr.shape
 
-        # Save to a timestamped TIFF in the current folder
-        fname = "frame_{}.tif".format(int(time.time()))
+        # Save to a timestamped TIFF
+        fname = f"frame_{int(time.time())}.tif"
         cv2.imwrite(fname, arr)
         print(f"  → Saved frame to {fname}")
 
-        # Optionally, show it in a window for 1 second before closing
+        # Optional: show it in a window for 1 second
         cv2.namedWindow("Captured Frame", cv2.WINDOW_NORMAL)
         cv2.imshow("Captured Frame", arr)
         cv2.waitKey(1000)
         cv2.destroyAllWindows()
 
-        # Requeue buffer (good practice)
+        # Requeue the buffer (good practice)
         sink.queue_buffer(buf)
     except ic4.IC4Exception as e:
         print("  ✗ pop_output_buffer() error:", e)
 
-    # 7) Clean up
+    # 10) Clean up
     grabber.acquisition_stop()
     grabber.stream_stop()
     grabber.device_close()
