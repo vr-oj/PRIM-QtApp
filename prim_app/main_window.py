@@ -836,16 +836,16 @@ class MainWindow(QMainWindow):
                 (arr, frame_idx, cam_ts_us, None, None)
             )
 
-    @pyqtSlot(float, float)
-    def _on_serial_data_and_record(self, t_device_s, pressure):
+    @pyqtSlot(int, float, float)
+    def _on_serial_data_and_record(self, _frame_idx, t_device_s, pressure):
         """
-        Called on each new Arduino line (timestamp_s, pressure_mmHg).
-        Convert timestamp→µs, then enqueue into RecordingWorker.
+        Called on each new Arduino line (frame_idx, timestamp_s, pressure).
+        We ignore frame_idx, convert timestamp→µs, then enqueue into RecordingWorker.
         """
         if not self._is_recording or not self._recording_worker:
             return
 
-        # RecordingWorker expects (arduino_time_us, pressure)
+        # Convert seconds→µs for the CSV writer
         arduino_ts_us = int(t_device_s * 1e6)
         self._recording_worker.add_csv_data(arduino_ts_us, pressure)
 
