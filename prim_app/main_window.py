@@ -345,62 +345,115 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int)
     def _on_device_selected(self, index):
         """
-        Called whenever the user picks a different camera in “Device” combo.
-        Open it briefly, enumerate PixelFormat × (W,H), then close.
+        Diagnostic: print/log every step to see why no resolutions appear.
         """
         dev_info = self.device_combo.itemData(index)
+
+        # 1) Clear the combo and add placeholder
         self.resolution_combo.clear()
         self.resolution_combo.addItem("Select Resolution…", None)
 
+        # 2) If no device was chosen, bail out
         if not dev_info:
+            log.info("[_on_device_selected] No device selected (index=0).")
             return
+
+        log.info(
+            f"[_on_device_selected] Called with device: {dev_info.model_name!r}, S/N={dev_info.serial!r}"
+        )
 
         try:
             grab = ic4.Grabber()
-            grab.device_open(dev_info)
+            log.info("  → Created Grabber()")
 
-            # Force Continuous acquisition if possible
+            grab.device_open(dev_info)
+            log.info("  → grab.device_open() succeeded")
+
+            # 3) Read back the camera’s default Width/Height before touching PixelFormat
+            try:
+                w0 = grab.device_property_map.find_integer("Width")
+                h0 = grab.device_property_map.find_integer("Height")
+                if w0 and h0:
+                    w_val = w0.value
+                    h_val = h0.value
+                    default_pf_node = grab.device_property_map.find_enumeration(
+                        "PixelFormat"
+                    )
+                    default_pf = (
+                        default_pf_node.value if default_pf_node else "UnknownPF"
+                    )
+                    log.info(
+                        f"  → Default PF = {default_pf}, Width = {w_val}, Height = {h_val}"
+                    )
+                    # Also add the default out‐of‐the‐box resolution
+                    self.resolution_combo.addItem(
+                        f"{w_val}×{h_val} ({default_pf})", (w_val, h_val, default_pf)
+                    )
+                else:
+                    log.warning("  → Could not read default Width/Height.")
+                # (Note: do NOT return here; keep trying PixelFormat loop below.)
+            except Exception as e:
+                log.warning(f"  → Error reading default Width/Height: {e}")
+
+            # 4) Force Continuous acquisition mode if possible (just so PF switching is allowed)
             acq_node = grab.device_property_map.find_enumeration("AcquisitionMode")
             if acq_node:
                 names = [e.name for e in acq_node.entries]
+                log.info(f"  → AcquisitionMode options: {names}")
                 if "Continuous" in names:
                     acq_node.value = "Continuous"
+                    log.info("    • Set AcquisitionMode = Continuous")
                 else:
                     acq_node.value = names[0]
+                    log.info(f"    • Set AcquisitionMode = {names[0]}")
 
-                pf_node = grab.device_property_map.find_enumeration("PixelFormat")
-                if pf_node:
-                    for entry in pf_node.entries:
-                        #  skip any PixelFormat that isn’t currently available
-                        if not getattr(entry, "is_available", False):
-                            continue
+            # 5) Enumerate all PixelFormat entries (and availability flags)
+            pf_node = grab.device_property_map.find_enumeration("PixelFormat")
+            if pf_node is None:
+                log.error(
+                    "  → pf_node is None (could not find PixelFormat enumeration)."
+                )
+            else:
+                all_pf_entries = [entry.name for entry in pf_node.entries]
+                avail_flags = [
+                    getattr(entry, "is_available", False) for entry in pf_node.entries
+                ]
+                log.info(f"  → PixelFormat entries: {all_pf_entries}")
+                log.info(f"  → PixelFormat availability: {avail_flags}")
 
-                        pf_name = entry.name
-                        try:
-                            #  set the camera to that format
-                            pf_node.value = pf_name
+                # 6) Try each available PixelFormat, then read back Width/Height
+                for entry in pf_node.entries:
+                    pf_name = entry.name
+                    if not getattr(entry, "is_available", False):
+                        log.debug(f"    • Skipping PF={pf_name} (is_available=False)")
+                        continue
 
-                            #  once it succeeds, read back Width/Height
-                            w_prop = grab.device_property_map.find_integer("Width")
-                            h_prop = grab.device_property_map.find_integer("Height")
-                            if w_prop and h_prop:
-                                w = w_prop.value
-                                h = h_prop.value
-                                display_str = f"{w}×{h} ({pf_name})"
-                                self.resolution_combo.addItem(
-                                    display_str, (w, h, pf_name)
-                                )
-                        except Exception as e:
-                            #  if setting this format failed (e.g. Timeout), skip it
+                    try:
+                        pf_node.value = pf_name
+                        w_prop = grab.device_property_map.find_integer("Width")
+                        h_prop = grab.device_property_map.find_integer("Height")
+                        if w_prop and h_prop:
+                            w = w_prop.value
+                            h = h_prop.value
+                            display_str = f"{w}×{h} ({pf_name})"
+                            log.info(f"    • Added resolution: {display_str}")
+                            self.resolution_combo.addItem(display_str, (w, h, pf_name))
+                        else:
                             log.warning(
-                                f"Skipping PF={pf_name} (unavailable or timeout): {e}"
+                                f"    • PF={pf_name} succeeded, but could not read Width/Height."
                             )
-                            continue
+                    except Exception as e:
+                        log.warning(f"    • Could not set PF={pf_name}: {e}")
+                        continue
 
+            # 7) Close the camera
             grab.device_close()
+            log.info("  → grab.device_close() succeeded")
 
         except Exception as e:
-            log.error(f"Failed to get formats for {dev_info}: {e}")
+            log.error(f"[ _on_device_selected ] Top‐level exception: {e}")
+            # If you like, show a message box for visibility:
+            # QMessageBox.critical(self, "Error", f"Error enumerating formats: {e}")
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
