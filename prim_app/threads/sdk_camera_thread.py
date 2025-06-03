@@ -135,13 +135,16 @@ class SDKCameraThread(QThread):
                     )
 
             # -----------------------------------------------------------------
-            # 7) Hook up the sink and start streaming
+            # 7) Hook up the sink AND immediately start acquisition
             # -----------------------------------------------------------------
-            self.grabber.stream_setup(self._sink)
-            log.info("SDKCameraThread: stream_setup() succeeded.")
-            self.grabber.stream_start()
+            from imagingcontrol4 import StreamSetupOption
+
+            self.grabber.stream_setup(
+                self._sink,
+                setup_option=StreamSetupOption.ACQUISITION_START,
+            )
             log.info(
-                "SDKCameraThread: stream_start() succeeded. Entering frame loop..."
+                "SDKCameraThread: stream_setup(ACQUISITION_START) succeeded. Entering frame loop..."
             )
 
             # -----------------------------------------------------------------
