@@ -731,15 +731,44 @@ class MainWindow(QMainWindow):
             self.plot_control_panel.setEnabled(True)
 
     # ─── Camera/Recording Dialogs & Methods ──────────────────────────────────
+    @pyqtSlot(int, float, float)
+    def _on_first_serial_data(self, frame_idx_device, t_device, p):
+        """
+        Called exactly once—when the Arduino’s first data line arrives
+        after we “armed” the RecordingWorker. Now switch the worker to live,
+        hook camera → worker and serial → worker, and enqueue that first line.
+        """
+        # a) Disconnect this one‐time watcher so it doesn’t fire again:
+        try:
+            self._serial_thread.data_ready.disconnect(self._on_first_serial_data)
+        except Exception:
+            pass
+
+        # b) Tell the worker to begin live recording (assumes your worker has this method):
+        try:
+            self._recording_worker.begin_live_recording()
+        except Exception:
+            pass  # If your worker is already configured to accept frames right away, skip this.
+
+        # c) Hook camera frames into the worker:
+        try:
+            self.camera_thread.frame_ready.connect(self._on_video_frame_and_record)
+        except Exception:
+            pass
+
+        # d) Hook serial lines into the worker:
+        try:
+            self._serial_thread.data_ready.connect(self._on_serial_data_and_record)
+        except Exception:
+            pass
+
+        # e) Immediately enqueue this very first Arduino packet:
+        if self._is_recording and self._recording_worker:
+            self._recording_worker.add_csv_data(t_device, p)
+
     @pyqtSlot()
     def _trigger_start_recording_dialog(self):
-        """
-        Called when “Start Recording” is clicked. We create the new folder
-        and RecordingWorker, but the worker stays “standby” until the Arduino
-        knob actually emits its first line.  That first line is caught in
-        _on_first_serial_data(...), which then flips worker→live.
-        """
-        # 1) Create next FillN folder
+        # 1) Create the next FillN folder, basepath, etc.
         fill_folder = get_next_fill_folder()
         if not fill_folder or not os.path.isdir(fill_folder):
             QMessageBox.critical(
@@ -747,10 +776,10 @@ class MainWindow(QMainWindow):
             )
             return
 
-        fill_name = os.path.basename(fill_folder)  # “Fill1”, “Fill2”, etc.
+        fill_name = os.path.basename(fill_folder)
         basepath = os.path.join(fill_folder, fill_name)
 
-        # 2) Check resolution is selected
+        # 2) Check resolution
         resdata = self.resolution_combo.currentData()
         if not resdata:
             QMessageBox.warning(
@@ -760,7 +789,7 @@ class MainWindow(QMainWindow):
         w, h, pf_name = resdata
         fps = DEFAULT_FPS
 
-        # 3) Instantiate and start the RecordingWorker (it stays “standby” until begin_live_recording())
+        # 3) Instantiate & start the worker (it stays “standby”):
         self._recording_worker = RecordingWorker(
             basepath=basepath,
             fps=fps,
@@ -771,14 +800,14 @@ class MainWindow(QMainWindow):
         )
         self._recording_worker.start()
 
-        # 4) Wait until the worker thread is fully initialized (is_ready_to_record)
+        # 4) Wait until the worker thread is initialized
         while not self._recording_worker.is_ready_to_record:
             QCoreApplication.processEvents()
 
-        # 5) Reset frame counter
+        # 5) Reset per‐recording frame counter
         self._record_frame_count = 0
 
-        # 6) Disconnect preview‐only camera slot (so preview doesn’t double‐consume frames)
+        # 6) Disconnect preview‐only camera slot so it doesn’t consume frames in “armed” state:
         try:
             self.camera_thread.frame_ready.disconnect(
                 self.camera_widget._on_frame_ready
@@ -786,16 +815,15 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # 7) Do NOT yet connect camera_thread.frame_ready → _on_video_frame_and_record
-        #    We only do that in _on_first_serial_data, once knob is pressed.
-
-        # 8) Instead of connecting serial.data_ready→_on_serial_data_and_record now,
-        #    we connect __one‐shot__ serial.data_ready → _on_first_serial_data
+        # 7) Watch ONLY for the FIRST Arduino line (knob press). Once that arrives,
+        #    _on_first_serial_data() will hook camera + serial into the worker.
         try:
-            self._serial_thread.data_ready.disconnect(self._on_first_serial_data)
+            self._serial_thread.data_ready.connect(self._on_first_serial_data)
         except Exception:
             pass
-        self._serial_thread.data_ready.connect(self._on_first_serial_data)
+
+        # 8) Do NOT attach camera_thread.frame_ready → _on_video_frame_and_record
+        #    or serial_thread.data_ready → _on_serial_data_and_record just yet.
 
         # 9) Mark “armed but not yet live”
         self._is_recording = True

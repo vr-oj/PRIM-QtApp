@@ -137,15 +137,6 @@ class SerialThread(QThread):
                         # No bytes waiting; sleep briefly
                         self.msleep(10)
 
-                    # 2b-iii) Check idle timeout (only after first packet)
-                    if self._got_first_packet and self._last_data_time is not None:
-                        if (time.time() - self._last_data_time) > IDLE_TIMEOUT_S:
-                            # No packet in IDLE_TIMEOUT_S secs → assume Arduino stopped streaming
-                            log.info(
-                                "No serial data for idle timeout → finishing SerialThread."
-                            )
-                            break
-
                 except serial.SerialException as se:
                     # Port dropped unexpectedly → attempt to reconnect
                     log.error(
