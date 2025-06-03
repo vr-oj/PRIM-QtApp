@@ -249,7 +249,7 @@ def main_app_entry():
 
     by_interface = defaultdict(list)
     for dev in devices:
-        iface = f"{dev.interface_id:#06x}"  # e.g. “0x0000”
+        iface = f"{dev.interface:#06x}"  # e.g. “0x0000”
         by_interface[iface].append(dev)
 
     print("Enumerating all attached video capture devices…")
