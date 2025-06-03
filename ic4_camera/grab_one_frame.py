@@ -1,4 +1,4 @@
-# grab_one_frame.py  (fixed)
+# grab_one_frame.py  (version that uses ACQUISITION_START directly)
 
 import imagingcontrol4 as ic4
 import cv2
@@ -55,7 +55,7 @@ def main():
     try:
         exp_node = grabber.device_property_map.find_float(ic4.PropId.EXPOSURE_TIME)
         if exp_node:
-            exp_node.value = 30000  # 30 ms in μs
+            exp_node.value = 30000.0  # 30 ms = 30,000 µs
             print("  → Set EXPOSURE_TIME = 30 ms")
     except Exception as e:
         print("  ✗ Cannot set EXPOSURE_TIME:", e)
@@ -68,7 +68,7 @@ def main():
     except Exception as e:
         print("  ✗ Cannot set GAIN:", e)
 
-    # 4) Create QueueSink and queue N buffers before starting acquisition
+    # 4) Create QueueSink and start streaming immediately
     class DummyListener:
         def sink_connected(self, sink, pf, min_bufs_required):
             return True
@@ -80,28 +80,17 @@ def main():
     sink = ic4.QueueSink(listener, [ic4.PixelFormat.Mono8], max_output_buffers=5)
     print("  → Created QueueSink (max 5 buffers).")
 
-    # 5) Attach the sink but do NOT start acquisition yet
-    grabber.stream_setup(
-        sink, setup_option=ic4.StreamSetupOption.DEFER_ACQUISITION_START
-    )
-    print("  → Called stream_setup(DEFER_ACQUISITION_START).")
+    # 5) stream_setup with ACQUISITION_START (camera start queueing internally)
+    grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
+    print("  → Called stream_setup(ACQUISITION_START) → camera is now streaming.")
 
-    # 6) Now queue 5 empty buffers into that QueueSink
-    for _ in range(5):
-        sink.queue_buffer(None)
-    print("  → Queued 5 buffers into the sink.")
-
-    # 7) Start acquisition—camera will write into those queued buffers
-    grabber.acquisition_start()
-    print("  → Called acquisition_start() → camera should now be streaming.")
-
-    # 8) Give it a brief moment so at least one buffer can fill
+    # 6) Give the camera a short moment to fill buffers
     time.sleep(0.5)
 
-    # 9) Pop exactly one frame, save it to disk as a TIFF, then exit
+    # 7) Pop one frame and save to disk as a TIFF
     try:
-        buf = sink.pop_output_buffer(timeout=2000)  # wait up to 2 seconds
-        arr = buf.numpy_wrap()  # Mono8 numpy array (H×W)
+        buf = sink.pop_output_buffer(timeout=2000)  # wait up to 2 s
+        arr = buf.numpy_wrap()  # Mono8 numpy array
         h, w = arr.shape
 
         # Save to a timestamped TIFF
@@ -109,18 +98,18 @@ def main():
         cv2.imwrite(fname, arr)
         print(f"  → Saved frame to {fname}")
 
-        # Optional: show it in a window for 1 second
+        # Optional: show the captured frame for 1 second
         cv2.namedWindow("Captured Frame", cv2.WINDOW_NORMAL)
         cv2.imshow("Captured Frame", arr)
         cv2.waitKey(1000)
         cv2.destroyAllWindows()
 
-        # Requeue the buffer (good practice)
+        # Re‐queue the buffer (good practice)
         sink.queue_buffer(buf)
     except ic4.IC4Exception as e:
         print("  ✗ pop_output_buffer() error:", e)
 
-    # 10) Clean up
+    # 8) Clean up
     grabber.acquisition_stop()
     grabber.stream_stop()
     grabber.device_close()
