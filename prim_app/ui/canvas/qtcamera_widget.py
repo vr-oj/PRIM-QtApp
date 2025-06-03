@@ -1,77 +1,54 @@
-# prim_app/ui/widgets/qt_camera_widget.py
+# File: prim_app/ui/canvas/qtcamera_widget.py
 
-from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy
-from PyQt5.QtCore import Qt, QSize, pyqtSlot
-from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtWidgets import QWidget
+from PyQt5.QtGui import QPainter, QImage
+from PyQt5.QtCore import Qt, pyqtSlot
 
 
 class QtCameraWidget(QWidget):
     """
-    A simple “viewfinder” widget that displays each incoming QImage
-    onto a QLabel. Before frames arrive, it shows “No Camera Selected” text.
+    A simple widget that displays incoming QImage frames from the camera thread.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._current_qimage = None
 
-        # Keep the last QImage around so that we can re‐paint on resize.
-        self._last_qimg = None
-
-        # ─── Viewfinder Label ──────────────────────────────────────────────────
-        # This QLabel will show “No Camera Selected” initially, then
-        # be replaced by each incoming frame (converted to QPixmap).
-        self.viewfinder = QLabel("No Camera Selected", self)
-        self.viewfinder.setAlignment(Qt.AlignCenter)
-        self.viewfinder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        # Make the background black to mimic a camera viewfinder:
-        self.viewfinder.setStyleSheet("background-color: black; color: white;")
-
-        # ─── Layout ─────────────────────────────────────────────────────────────
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self.viewfinder)
-
-    @pyqtSlot(QImage)
-    def update_image(self, qimg: QImage):
+    @pyqtSlot(QImage, object)
+    def _on_frame_ready(self, qimg: QImage, raw_buffer):
         """
-        Slot for incoming frames (as QImage). Convert to QPixmap,
-        scale to fit the label’s current size, and display.
+        Slot to receive each new frame from SDKCameraThread.frame_ready.
+        Simply store the QImage and trigger a repaint.
         """
-        self._last_qimg = qimg
-
-        if qimg is None or qimg.isNull():
-            # If invalid, revert to text placeholder
-            self.viewfinder.setText("No Camera Selected")
-            self.viewfinder.setPixmap(QPixmap())
-            return
-
-        # Scale the QImage to the QLabel’s size, preserving aspect ratio
-        target_size = self.viewfinder.size()
-        scaled = qimg.scaled(target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        pix = QPixmap.fromImage(scaled)
-        self.viewfinder.setPixmap(pix)
+        # Make a deep copy to ensure the data stays valid even if the thread recycles buffers
+        self._current_qimage = qimg.copy()
+        # Ask Qt to repaint this widget
+        self.update()
 
     def clear_image(self):
         """
-        Clear the viewfinder (e.g. when camera stops or on error).
+        Clear the displayed image (e.g. when stopping the camera).
         """
-        self._last_qimg = None
-        self.viewfinder.clear()
-        self.viewfinder.setText("No Camera Selected")
+        self._current_qimage = None
+        self.update()
 
-    def resizeEvent(self, event):
+    def paintEvent(self, event):
         """
-        Whenever the widget is resized, repaint the last QImage (if any).
+        Called whenever the widget needs to be repainted. If we have a QImage,
+        draw it scaled to fit while preserving aspect ratio. Otherwise, fill
+        background with black.
         """
-        super().resizeEvent(event)
-        if self._last_qimg is not None and not self._last_qimg.isNull():
-            target_size = self.viewfinder.size()
-            scaled = self._last_qimg.scaled(
-                target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), Qt.black)
+
+        if self._current_qimage:
+            # Scale the image to fit this widget, preserving aspect ratio
+            scaled = self._current_qimage.scaled(
+                self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
-            pix = QPixmap.fromImage(scaled)
-            self.viewfinder.setPixmap(pix)
-        else:
-            # If there’s no frame yet, just keep the placeholder text
-            self.viewfinder.setText("No Camera Selected")
+            # Center the image
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            painter.drawImage(x, y, scaled)
+
+        painter.end()
