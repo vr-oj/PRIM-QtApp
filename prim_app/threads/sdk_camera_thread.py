@@ -13,9 +13,8 @@ log = logging.getLogger(__name__)
 class SDKCameraThread(QThread):
     """
     Opens the camera (using the DeviceInfo + resolution passed in via set_* methods),
-    then immediately starts a QueueSink-based stream. Each new frame is emitted as a
-    QImage via frame_ready(QImage, buffer). When stop() is called, it stops the stream
-    and closes the camera.
+    then starts a QueueSink-based stream. Each new frame is emitted as a QImage via
+    frame_ready(QImage, buffer). When stop() is called, stops streaming and closes the device.
     """
 
     # Emitted once the grabber is open (but before streaming starts).
@@ -36,7 +35,7 @@ class SDKCameraThread(QThread):
         self._device_info = None  # an ic4.DeviceInfo instance
         self._resolution = None  # tuple (width, height, pixel_format_name)
 
-        # We’ll keep a reference to the sink so we can cleanly stop it
+        # Keep a reference to the sink so we can stop it later
         self._sink = None
 
     def set_device_info(self, dev_info):
@@ -112,9 +111,8 @@ class SDKCameraThread(QThread):
 
             # -----------------------------------------------------------------
             # 6) Build a QueueSink requesting Mono8 frames (max_output_buffers=1).
-            #    We assume resolution’s pf_name is “Mono8.” If it were Mono10 or Mono16,
-            #    IC4 might automatically downconvert, else we’d receive 16-bit buffers
-            #    which we then scale below.
+            #    We assume resolution’s pf_name is “Mono8.” If it’s not, the fallback
+            #    below will request the camera’s native PF and we’ll downconvert in frames_queued().
             # -----------------------------------------------------------------
             try:
                 # Request exactly Mono8 from the camera
@@ -127,26 +125,27 @@ class SDKCameraThread(QThread):
                 native_pf = self._resolution[2] if self._resolution else None
                 if native_pf and hasattr(ic4.PixelFormat, native_pf):
                     self._sink = ic4.QueueSink(
-                        self, [ic4.PixelFormat[native_pf]], max_output_buffers=1
+                        self,
+                        [getattr(ic4.PixelFormat, native_pf)],
+                        max_output_buffers=1,
                     )
                 else:
                     raise RuntimeError(
                         "SDKCameraThread: Unable to create a QueueSink for Mono8 or native PF."
                     )
 
+            # -----------------------------------------------------------------
+            # 7) Hook up the sink and start streaming
+            # -----------------------------------------------------------------
             self.grabber.stream_setup(self._sink)
             log.info("SDKCameraThread: stream_setup() succeeded.")
-
-            # -----------------------------------------------------------------
-            # 7) Start streaming. After this, frames_queued() will be called for each frame.
-            # -----------------------------------------------------------------
             self.grabber.stream_start()
             log.info(
                 "SDKCameraThread: stream_start() succeeded. Entering frame loop..."
             )
 
             # -----------------------------------------------------------------
-            # 8) Busy‐loop until stop() is called. frames_queued() will handle incoming images.
+            # 8) Busy‐loop until stop() is called. frames_queued() will handle images.
             # -----------------------------------------------------------------
             while not self._stop_requested:
                 ic4.sleep(10)  # ~10 ms sleep
@@ -179,30 +178,26 @@ class SDKCameraThread(QThread):
     def frames_queued(self, sink):
         """
         This callback is invoked by IC4 each time a new buffer is available.
-        We pop the buffer, convert its data (Mono8 or Mono16) to a QImage, emit it,
-        then let IC4 recycle the buffer automatically.
+        Pop the buffer, convert to QImage, emit it, and allow IC4 to recycle it.
         """
         try:
             buf = sink.pop_output_buffer()
-            arr = (
-                buf.numpy_wrap()
-            )  # arr: shape=(H, W) with dtype=uint8 (Mono8) or uint16
+            arr = buf.numpy_wrap()  # arr: shape=(H, W) dtype=uint8 or uint16
 
-            # If dtype is 8-bit, we can use it directly. If 16-bit, scale to 8-bit.
+            # Downconvert 16‐bit to 8‐bit if necessary
             if arr.dtype == np.uint8:
                 gray8 = arr
             else:
-                # Convert 10/16‐bit → 8‐bit by linear scaling
                 max_val = float(arr.max()) if arr.max() > 0 else 1.0
                 scale = 255.0 / max_val
                 gray8 = (arr.astype(np.float32) * scale).astype(np.uint8)
 
             h, w = gray8.shape[:2]
 
-            # Create a QImage from single‐channel grayscale
+            # Build a QImage from single‐channel grayscale
             qimg = QImage(gray8.data, w, h, gray8.strides[0], QImage.Format_Grayscale8)
 
-            # Emit the frame
+            # Emit to the UI
             self.frame_ready.emit(qimg, buf)
 
         except Exception as e:
@@ -213,8 +208,17 @@ class SDKCameraThread(QThread):
             code_str = str(code_enum) if code_enum else ""
             self.error.emit(str(e), code_str)
 
+    # ─── Required listener methods for QueueSink ─────────────────────────────
+    def sink_connected(self, sink, pixel_format, min_buffers_required) -> bool:
+        # Return True so the sink actually attaches
+        return True
+
+    def sink_disconnected(self, sink) -> None:
+        # Called when the sink is torn down—no action needed
+        pass
+
     def stop(self):
         """
-        Request the streaming loop to end. After this returns, run() will clean up.
+        Request the streaming loop to end. After this, run() will clean up.
         """
         self._stop_requested = True
