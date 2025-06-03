@@ -735,9 +735,10 @@ class MainWindow(QMainWindow):
     def _trigger_start_recording_dialog(self):
         """
         Simplest possible “Start Recording”:
-         - Create YYYY-MM-DD/FillN folder
-         - Start RecordingWorker immediately
-         - Hook camera frames + serial lines directly into the worker
+         1) Create YYYY-MM-DD/FillN folder
+         2) Start RecordingWorker immediately
+         3) Hook camera frames → _on_video_frame_and_record
+         4) Hook serial lines → _on_serial_data_and_record
         """
         # 1) Create next FillN folder (e.g. …/PRIMAcquisition/YYYY-MM-DD/FillN)
         fill_folder = get_next_fill_folder()
@@ -786,11 +787,12 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # 7) **Immediately** hook camera → worker AND serial → worker
+        # 7) **Immediately** hook camera → worker
         self.camera_thread.frame_ready.connect(self._on_video_frame_and_record)
+        # 8) **Immediately** hook Arduino → worker
         self._serial_thread.data_ready.connect(self._on_serial_data_and_record)
 
-        # 8) Update UI state
+        # 9) Update UI state
         self._is_recording = True
         self.start_recording_action.setEnabled(False)
         self.stop_recording_action.setEnabled(True)
@@ -834,14 +836,18 @@ class MainWindow(QMainWindow):
                 (arr, frame_idx, cam_ts_us, None, None)
             )
 
-    @pyqtSlot(int, float, float)
-    def _on_serial_data_and_record(self, frame_idx_from_arduino, t_device_s, p):
+    @pyqtSlot(float, float)
+    def _on_serial_data_and_record(self, t_device_s, pressure):
         """
-        Called on each new Arduino line (frame_idx, timestamp_s, pressure).
-        Enqueue it so it can be paired (post‐hoc) with the next video frame.
+        Called on each new Arduino line (timestamp_s, pressure_mmHg).
+        Convert timestamp→µs, then enqueue into RecordingWorker.
         """
-        if self._is_recording and self._recording_worker:
-            self._recording_worker.add_csv_data(t_device_s, frame_idx_from_arduino, p)
+        if not self._is_recording or not self._recording_worker:
+            return
+
+        # RecordingWorker expects (arduino_time_us, pressure)
+        arduino_ts_us = int(t_device_s * 1e6)
+        self._recording_worker.add_csv_data(arduino_ts_us, pressure)
 
     @pyqtSlot()
     def _trigger_stop_recording(self):
