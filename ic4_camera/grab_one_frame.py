@@ -71,17 +71,17 @@ def main():
     except ic4.IC4Exception:
         pass
 
-    # 6) Force a very short ExposureTime (1 ms) so a frame appears quickly
+    # 6) Force a very short ExposureTime (30 ms) so a frame appears quickly
     try:
         prop_exp = pm.find_float(ic4.PropId.EXPOSURE_TIME)
-        prop_exp.value = 1000.0
-        print("Set EXPOSURE_TIME to 1 ms")
+        prop_exp.value = 30000.0
+        print("Set EXPOSURE_TIME to 30 ms")
     except ic4.IC4Exception as e:
         print("Could not set EXPOSURE_TIME:", e)
 
     # 7) Force a small manual gain (10)
     try:
-        prop_gain = pm.find_integer(ic4.PropId.GAIN)
+        prop_gain = pm.find_float(ic4.PropId.GAIN)
         prop_gain.value = 10
         print("Set GAIN to 10")
     except ic4.IC4Exception as e:
