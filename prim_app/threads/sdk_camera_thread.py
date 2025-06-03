@@ -8,18 +8,8 @@ log = logging.getLogger(__name__)
 
 
 class SDKCameraThread(QThread):
-    """
-    A minimal thread that:
-      1) Initializes IC4
-      2) Opens the first available camera (using its default settings)
-      3) Emits grabber_ready
-      4) Waits until stop() is called, then closes and exits IC4
-    """
-
-    # Emitted once the grabber is open and ready (UI can now query self.grabber)
     grabber_ready = pyqtSignal()
-
-    # Emitted if any error occurs: (message, code_as_string)
+    frame_ready = pyqtSignal(object, object)  # we’ll wire this up later
     error = pyqtSignal(str, str)
 
     def __init__(self, parent=None):
@@ -27,39 +17,74 @@ class SDKCameraThread(QThread):
         self.grabber = None
         self._stop_requested = False
 
+        # These will be set by MainWindow before start():
+        self._device_info = None  # an ic4.DeviceInfo object
+        self._resolution = None  # a tuple (width, height, pixel_format_name)
+
+    def set_device_info(self, dev_info):
+        """
+        Called from MainWindow._on_start_stop_camera with the selected ic4.DeviceInfo.
+        """
+        self._device_info = dev_info
+
+    def set_resolution(self, resolution_tuple):
+        """
+        Called from MainWindow._on_start_stop_camera with (w, h, pf_name).
+        """
+        self._resolution = resolution_tuple
+
     def run(self):
         try:
-            # ─── 1) Initialize IC4 ──────────────────────────────────────────────
+            # 1) Initialize IC4
             ic4.Library.init(
-                api_log_level=ic4.LogLevel.INFO,
-                log_targets=ic4.LogTarget.STDERR,
+                api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
             )
             log.info("SDKCameraThread: Library.init() succeeded.")
 
-            # ─── 2) Enumerate cameras, pick the first one ───────────────────────
-            devices = ic4.DeviceEnum.devices()
-            if not devices:
-                raise RuntimeError("No IC4 camera devices found.")
-            dev_info = devices[0]
-            log.info(
-                f"SDKCameraThread: Opening camera {dev_info.model_name!r} (S/N {dev_info.serial!r})"
-            )
+            # 2) Verify we have device_info
+            if self._device_info is None:
+                raise RuntimeError("No DeviceInfo passed to SDKCameraThread.")
 
-            # ─── 3) Open the grabber WITHOUT changing any properties ────────────
+            # 3) Open the grabber
             self.grabber = ic4.Grabber()
-            self.grabber.device_open(dev_info)
+            self.grabber.device_open(self._device_info)
             log.info(
-                "SDKCameraThread: device_open() succeeded. Camera is using default settings."
+                f"SDKCameraThread: device_open() succeeded "
+                f"for {self._device_info.model_name!r} (S/N {self._device_info.serial!r})."
             )
 
-            # ─── 4) Emit grabber_ready so the UI knows the camera is open ──────
+            # 4) If MainWindow passed a resolution, apply it now:
+            if self._resolution is not None:
+                w, h, pf_name = self._resolution
+                try:
+                    pf_node = self.grabber.device_property_map.find_enumeration(
+                        "PixelFormat"
+                    )
+                    if pf_node:
+                        pf_node.value = pf_name
+                        log.info(f"SDKCameraThread: Set PixelFormat = {pf_name}")
+                        w_node = self.grabber.device_property_map.find_integer("Width")
+                        h_node = self.grabber.device_property_map.find_integer("Height")
+                        if w_node and h_node:
+                            w_node.value = w
+                            h_node.value = h
+                            log.info(f"SDKCameraThread: Set resolution = {w}×{h}")
+                    else:
+                        log.warning(
+                            "SDKCameraThread: PixelFormat node not found; using camera default."
+                        )
+                except Exception as e:
+                    log.error(f"SDKCameraThread: Failed to set resolution/PF: {e}")
+
+            # 5) At this point, the camera is open and in the requested ULTRA‐SIMPLE “default stream” mode.
+            #    We do NOT start any streaming here; we just emit grabber_ready so the UI can hook into it.
             self.grabber_ready.emit()
 
-            # ─── 5) Stay alive until stop() is called ──────────────────────────
+            # 6) Stay alive until stop() is called:
             while not self._stop_requested:
                 self.msleep(100)
 
-            # ─── 6) Close device when stop() arrives ───────────────────────────
+            # 7) Close the device when stop() arrives
             try:
                 self.grabber.device_close()
                 log.info("SDKCameraThread: device_close() succeeded.")
@@ -67,7 +92,6 @@ class SDKCameraThread(QThread):
                 pass
 
         except Exception as e:
-            # Convert e.code (if present) to string
             msg = str(e)
             code_enum = getattr(e, "code", None)
             code_str = str(code_enum) if code_enum else ""
@@ -75,7 +99,6 @@ class SDKCameraThread(QThread):
             self.error.emit(msg, code_str)
 
         finally:
-            # Always call Library.exit() once per thread
             try:
                 ic4.Library.exit()
                 log.info("SDKCameraThread: Library.exit() called.")
