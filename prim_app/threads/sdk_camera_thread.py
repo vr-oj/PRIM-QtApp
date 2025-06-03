@@ -151,14 +151,14 @@ class SDKCameraThread(QThread):
             # 8) Busy‐loop until stop() is called. frames_queued() will handle images.
             # -----------------------------------------------------------------
             while not self._stop_requested:
-                ic4.sleep(10)  # ~10 ms sleep
+                self.msleep(10)  # ← corrected from ic4.sleep(10)
 
             # -----------------------------------------------------------------
             # 9) On stop request: stop streaming, close device
             # -----------------------------------------------------------------
             self.grabber.stream_stop()
             self.grabber.device_close()
-            log.info("SDKCameraThread: Streaming stopped, device closed.")
+            log.info("SDKCameraThread: Streaming stopped,  device closed.")
 
         except Exception as e:
             # Emit any errors
