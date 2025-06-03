@@ -765,8 +765,8 @@ class MainWindow(QMainWindow):
             basepath=basepath,
             fps=fps,
             frame_size=(w, h),
-            video_ext="tif",     # we want a TIFF stack
-            video_codec=None,    # not used for “.tif”
+            video_ext="tif",  # we want a TIFF stack
+            video_codec=None,  # not used for “.tif”
             parent=self,
         )
         self._recording_worker.start()
@@ -780,7 +780,9 @@ class MainWindow(QMainWindow):
 
         # 6) **Disconnect** the preview-only camera slot so frames don’t bypass the worker
         try:
-            self.camera_thread.frame_ready.disconnect(self.camera_widget._on_frame_ready)
+            self.camera_thread.frame_ready.disconnect(
+                self.camera_widget._on_frame_ready
+            )
         except Exception:
             pass
 
@@ -794,7 +796,7 @@ class MainWindow(QMainWindow):
         self.stop_recording_action.setEnabled(True)
         self.statusBar().showMessage(f"Recording to '{fill_folder}' …", 2000)
 
-        @pyqtSlot(QImage, object)
+    @pyqtSlot(QImage, object)
     def _on_video_frame_and_record(self, qimg, buf):
         """
         Called on each new camera frame.
@@ -828,8 +830,9 @@ class MainWindow(QMainWindow):
         # 5) Enqueue into RecordingWorker; we leave Arduino fields as None for now,
         #    and the worker can match CSV lines later based on timestamp or index.
         if self._is_recording and self._recording_worker:
-            self._recording_worker.add_video_frame((arr, frame_idx, cam_ts_us, None, None))
-
+            self._recording_worker.add_video_frame(
+                (arr, frame_idx, cam_ts_us, None, None)
+            )
 
     @pyqtSlot(int, float, float)
     def _on_serial_data_and_record(self, frame_idx_from_arduino, t_device_s, p):
@@ -839,7 +842,6 @@ class MainWindow(QMainWindow):
         """
         if self._is_recording and self._recording_worker:
             self._recording_worker.add_csv_data(t_device_s, frame_idx_from_arduino, p)
-
 
     @pyqtSlot()
     def _trigger_stop_recording(self):
@@ -855,11 +857,15 @@ class MainWindow(QMainWindow):
 
             # 2) Disconnect our recording-specific slots
             try:
-                self.camera_thread.frame_ready.disconnect(self._on_video_frame_and_record)
+                self.camera_thread.frame_ready.disconnect(
+                    self._on_video_frame_and_record
+                )
             except Exception:
                 pass
             try:
-                self._serial_thread.data_ready.disconnect(self._on_serial_data_and_record)
+                self._serial_thread.data_ready.disconnect(
+                    self._on_serial_data_and_record
+                )
             except Exception:
                 pass
 
@@ -874,7 +880,6 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Recording stopped and saved.", 3000)
         else:
             log.warning("Stop recording requested but no recording is active.")
-
 
     # ─── Menu Actions & Dialog Slots ──────────────────────────────────────────
     def _export_plot_data_as_csv(self):
@@ -1092,8 +1097,6 @@ class MainWindow(QMainWindow):
         can_start = serial_ready and not self._is_recording
         self.start_recording_action.setEnabled(bool(can_start))
         self.stop_recording_action.setEnabled(bool(self._is_recording))
-
-    
 
     # ─── Window Close Cleanup ──────────────────────────────────────────────────
     def closeEvent(self, event):
