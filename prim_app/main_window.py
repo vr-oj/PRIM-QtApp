@@ -368,21 +368,34 @@ class MainWindow(QMainWindow):
                 else:
                     acq_node.value = names[0]
 
-            pf_node = grab.device_property_map.find_enumeration("PixelFormat")
-            if pf_node:
-                for entry in pf_node.entries:
-                    pf_name = entry.name
-                    try:
-                        pf_node.value = pf_name
-                        w_prop = grab.device_property_map.find_integer("Width")
-                        h_prop = grab.device_property_map.find_integer("Height")
-                        if w_prop and h_prop:
-                            w = w_prop.value
-                            h = h_prop.value
-                            display_str = f"{w}×{h} ({pf_name})"
-                            self.resolution_combo.addItem(display_str, (w, h, pf_name))
-                    except Exception:
-                        pass
+                pf_node = grab.device_property_map.find_enumeration("PixelFormat")
+                if pf_node:
+                    for entry in pf_node.entries:
+                        #  skip any PixelFormat that isn’t currently available
+                        if not getattr(entry, "is_available", False):
+                            continue
+
+                        pf_name = entry.name
+                        try:
+                            #  set the camera to that format
+                            pf_node.value = pf_name
+
+                            #  once it succeeds, read back Width/Height
+                            w_prop = grab.device_property_map.find_integer("Width")
+                            h_prop = grab.device_property_map.find_integer("Height")
+                            if w_prop and h_prop:
+                                w = w_prop.value
+                                h = h_prop.value
+                                display_str = f"{w}×{h} ({pf_name})"
+                                self.resolution_combo.addItem(
+                                    display_str, (w, h, pf_name)
+                                )
+                        except Exception as e:
+                            #  if setting this format failed (e.g. Timeout), skip it
+                            log.warning(
+                                f"Skipping PF={pf_name} (unavailable or timeout): {e}"
+                            )
+                            continue
 
             grab.device_close()
 
