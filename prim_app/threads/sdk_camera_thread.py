@@ -8,10 +8,18 @@ log = logging.getLogger(__name__)
 
 
 class SDKCameraThread(QThread):
-    # Emitted once the camera is opened and basic nodes are set.
+    """
+    A minimal thread that:
+      1) Initializes IC4
+      2) Opens the first available camera (using its default settings)
+      3) Emits grabber_ready
+      4) Waits until stop() is called, then closes and exits IC4
+    """
+
+    # Emitted once the grabber is open and ready (UI can now query self.grabber)
     grabber_ready = pyqtSignal()
 
-    # Emitted on any error. The second argument here is a string, not an ErrorCode.
+    # Emitted if any error occurs: (message, code_as_string)
     error = pyqtSignal(str, str)
 
     def __init__(self, parent=None):
@@ -21,13 +29,14 @@ class SDKCameraThread(QThread):
 
     def run(self):
         try:
-            # ─── 1) Initialize IC4 exactly once ────────────────────────────────────
+            # ─── 1) Initialize IC4 ──────────────────────────────────────────────
             ic4.Library.init(
-                api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
+                api_log_level=ic4.LogLevel.INFO,
+                log_targets=ic4.LogTarget.STDERR,
             )
             log.info("SDKCameraThread: Library.init() succeeded.")
 
-            # ─── 2) Enumerate & Open the first camera ─────────────────────────────
+            # ─── 2) Enumerate cameras, pick the first one ───────────────────────
             devices = ic4.DeviceEnum.devices()
             if not devices:
                 raise RuntimeError("No IC4 camera devices found.")
@@ -36,98 +45,21 @@ class SDKCameraThread(QThread):
                 f"SDKCameraThread: Opening camera {dev_info.model_name!r} (S/N {dev_info.serial!r})"
             )
 
+            # ─── 3) Open the grabber WITHOUT changing any properties ────────────
             self.grabber = ic4.Grabber()
             self.grabber.device_open(dev_info)
-            log.info("SDKCameraThread: device_open() succeeded.")
+            log.info(
+                "SDKCameraThread: device_open() succeeded. Camera is using default settings."
+            )
 
-            # ─── 3) Apply the same acquisition settings as grab_one_frame.py ────────
-            # 3a) Try Mono8 if available
-            try:
-                pf_node = self.grabber.device_property_map.find_enumeration(
-                    ic4.PropId.PIXEL_FORMAT
-                )
-                if pf_node:
-                    mono8_options = [
-                        e.name
-                        for e in pf_node.entries
-                        if e.is_available and "Mono8" in e.name
-                    ]
-                    if mono8_options:
-                        pf_node.value = "Mono8"
-                        log.info("  → PIXEL_FORMAT set to Mono8")
-                    else:
-                        log.warning(
-                            "  → No Mono8 entry available; leaving default PF unchanged."
-                        )
-                else:
-                    log.warning("  → PIXEL_FORMAT node not found.")
-            except Exception as e:
-                log.warning(f"  ✗ Cannot set PIXEL_FORMAT: {e}")
-
-            # 3b) AcquisitionMode → Continuous
-            try:
-                acq_node = self.grabber.device_property_map.find_enumeration(
-                    ic4.PropId.ACQUISITION_MODE
-                )
-                if acq_node:
-                    modes = [e.name for e in acq_node.entries if e.is_available]
-                    if "Continuous" in modes:
-                        acq_node.value = "Continuous"
-                        log.info("  → ACQUISITION_MODE set to Continuous")
-                    else:
-                        log.warning(
-                            f"  → 'Continuous' not available (options: {modes}); leaving default."
-                        )
-                else:
-                    log.warning("  → ACQUISITION_MODE node not found.")
-            except Exception as e:
-                log.warning(f"  ✗ Cannot set ACQUISITION_MODE: {e}")
-
-            # 3c) AcquisitionFrameRate → 10.0
-            try:
-                fr_node = self.grabber.device_property_map.find_float(
-                    ic4.PropId.ACQUISITION_FRAME_RATE
-                )
-                if fr_node:
-                    fr_node.value = 10.0
-                    log.info("  → ACQUISITION_FRAME_RATE set to 10.0 FPS")
-                else:
-                    log.warning("  → ACQUISITION_FRAME_RATE node not found.")
-            except Exception as e:
-                log.warning(f"  ✗ Cannot set ACQUISITION_FRAME_RATE: {e}")
-
-            # 3d) ExposureTime → 30000 µs (30 ms)
-            try:
-                exp_node = self.grabber.device_property_map.find_float(
-                    ic4.PropId.EXPOSURE_TIME
-                )
-                if exp_node:
-                    exp_node.value = 30000.0
-                    log.info("  → EXPOSURE_TIME set to 30 ms")
-                else:
-                    log.warning("  → EXPOSURE_TIME node not found.")
-            except Exception as e:
-                log.warning(f"  ✗ Cannot set EXPOSURE_TIME: {e}")
-
-            # 3e) Gain → 10.0
-            try:
-                gain_node = self.grabber.device_property_map.find_float(ic4.PropId.GAIN)
-                if gain_node:
-                    gain_node.value = 10.0
-                    log.info("  → GAIN set to 10.0")
-                else:
-                    log.warning("  → GAIN node not found.")
-            except Exception as e:
-                log.warning(f"  ✗ Cannot set GAIN: {e}")
-
-            # ─── 4) Emit grabber_ready so the UI knows it can query self.grabber now ───
+            # ─── 4) Emit grabber_ready so the UI knows the camera is open ──────
             self.grabber_ready.emit()
 
-            # ─── 5) Wait here until someone calls stop() ─────────────────────────────
+            # ─── 5) Stay alive until stop() is called ──────────────────────────
             while not self._stop_requested:
-                self.msleep(100)  # sleep 100 ms at a time, low CPU usage
+                self.msleep(100)
 
-            # ─── 6) Clean up & close device ────────────────────────────────────────
+            # ─── 6) Close device when stop() arrives ───────────────────────────
             try:
                 self.grabber.device_close()
                 log.info("SDKCameraThread: device_close() succeeded.")
@@ -135,7 +67,7 @@ class SDKCameraThread(QThread):
                 pass
 
         except Exception as e:
-            # If anything fails, convert e.code (if present) to a string
+            # Convert e.code (if present) to string
             msg = str(e)
             code_enum = getattr(e, "code", None)
             code_str = str(code_enum) if code_enum else ""
@@ -143,7 +75,7 @@ class SDKCameraThread(QThread):
             self.error.emit(msg, code_str)
 
         finally:
-            # Always call Library.exit() exactly once per thread
+            # Always call Library.exit() once per thread
             try:
                 ic4.Library.exit()
                 log.info("SDKCameraThread: Library.exit() called.")
