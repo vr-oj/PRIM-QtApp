@@ -7,8 +7,12 @@ import time
 
 class DummySinkListener:
     def sink_connected(self, sink, pixel_format, min_buffers_required):
-        # Always allow the sink to connect.
+        # Always allow the sink to connect
         return True
+
+    def sink_disconnected(self, sink):
+        # Simply ignore
+        pass
 
 
 def main():
@@ -31,7 +35,7 @@ def main():
     grabber.device_open(dev_info)
     print("Grabber opened successfully.")
 
-    # 4) Set AcquisitionMode = Continuous (if available)
+    # 4) Set AcquisitionMode = Continuous
     try:
         acq_node = grabber.device_property_map.find_enumeration(
             ic4.PropId.ACQUISITION_MODE
@@ -42,7 +46,7 @@ def main():
     except Exception as e:
         print("Warning: could not set AcquisitionMode →", e)
 
-    # 5) Pick a known-good PixelFormat (Mono8) if available
+    # 5) Pick Mono8 (if available) or fallback
     try:
         pf_node = grabber.device_property_map.find_enumeration(ic4.PropId.PIXEL_FORMAT)
         if pf_node:
@@ -51,7 +55,6 @@ def main():
                 pf_node.value = "Mono8"
                 print("PixelFormat set to Mono8")
             else:
-                # fallback to first available format
                 pf_node.value = available[0]
                 print(f"Mono8 not available; using {available[0]}")
     except Exception as e:
@@ -68,7 +71,7 @@ def main():
     except Exception as e:
         print("Warning: could not set resolution →", e)
 
-    # 7) Create a minimal listener so the sink can connect
+    # 7) Create and attach a minimal listener to the QueueSink
     listener = DummySinkListener()
     sink = ic4.QueueSink(listener, [ic4.PixelFormat.Mono8], max_output_buffers=1)
 
@@ -82,15 +85,15 @@ def main():
         ic4.Library.exit()
         return
 
-    # 9) Grab 5 frames and display via OpenCV
+    # 9) Grab 5 frames (blocking pop) and display via OpenCV
     for i in range(5):
         time.sleep(0.1)
         try:
-            buf = sink.pop_output_buffer(timeout=1000)
-            arr = buf.numpy_wrap()  # Mono8 as a 2D numpy array
+            buf = sink.pop_output_buffer()  # <-- no timeout parameter here
+            arr = buf.numpy_wrap()  # Mono8 → 2D numpy array
             cv2.imshow("Frame (Mono8)", arr)
             cv2.waitKey(100)
-            sink.queue_buffer(buf)  # give the buffer back
+            sink.queue_buffer(buf)  # Requeue the buffer
         except ic4.IC4Exception as e:
             print("No frame yet or error:", e)
 
