@@ -736,16 +736,20 @@ class MainWindow(QMainWindow):
         # 1) Create next FillN folder
         fill_folder = get_next_fill_folder()
         if not fill_folder or not os.path.isdir(fill_folder):
-            QMessageBox.critical(self, "Recording Error", "Could not create Fill folder.")
+            QMessageBox.critical(
+                self, "Recording Error", "Could not create Fill folder."
+            )
             return
 
-        fill_name = os.path.basename(fill_folder)   # “Fill1”, “Fill2”, etc.
+        fill_name = os.path.basename(fill_folder)  # “Fill1”, “Fill2”, etc.
         basepath = os.path.join(fill_folder, fill_name)
 
         # 2) Check resolution is selected
         resdata = self.resolution_combo.currentData()
         if not resdata:
-            QMessageBox.warning(self, "Recording Error", "Please select a camera resolution first.")
+            QMessageBox.warning(
+                self, "Recording Error", "Please select a camera resolution first."
+            )
             return
         w, h, pf_name = resdata
         fps = DEFAULT_FPS
@@ -770,7 +774,9 @@ class MainWindow(QMainWindow):
 
         # 6) Disconnect preview‐only camera slot (so preview doesn’t double‐consume frames)
         try:
-            self.camera_thread.frame_ready.disconnect(self.camera_widget._on_frame_ready)
+            self.camera_thread.frame_ready.disconnect(
+                self.camera_widget._on_frame_ready
+            )
         except Exception:
             pass
 
@@ -782,10 +788,11 @@ class MainWindow(QMainWindow):
 
         # 9) Mark “armed but not yet live”
         self._is_recording = True
-        self.statusBar().showMessage(f"Recording armed → waiting for Arduino trigger...", 2000)
+        self.statusBar().showMessage(
+            f"Recording armed → waiting for Arduino trigger...", 2000
+        )
         self.start_recording_action.setEnabled(False)
         self.stop_recording_action.setEnabled(True)
-
 
     @pyqtSlot(QImage, object)
     def _on_video_frame_and_record(self, qimg, buf):
@@ -934,7 +941,9 @@ class MainWindow(QMainWindow):
                 self._serial_thread = SerialThread(port=port, parent=self)
                 self._serial_thread.data_ready.connect(self._handle_new_serial_data)
                 self._serial_thread.data_ready.connect(self._on_first_serial_data)
-                self._serial_thread.finished.connect(self._stop_recording_due_to_hardware)
+                self._serial_thread.finished.connect(
+                    self._stop_recording_due_to_hardware
+                )
                 self._serial_thread.error_occurred.connect(self._handle_serial_error)
                 self._serial_thread.status_changed.connect(
                     self._handle_serial_status_change
@@ -1089,7 +1098,7 @@ class MainWindow(QMainWindow):
         self.start_recording_action.setEnabled(bool(can_start))
         self.stop_recording_action.setEnabled(bool(self._is_recording))
 
-        @pyqtSlot(int, float, float)
+    @pyqtSlot(int, float, float)
     def _on_first_serial_data(self, frame_idx: int, t: float, p: float):
         """
         This slot is called on _every_ data_ready from SerialThread,
@@ -1105,7 +1114,9 @@ class MainWindow(QMainWindow):
             return
 
         # At this point: first valid line has arrived → switch into “live capture”:
-        self.statusBar().showMessage("Arduino trigger arrived → recording started.", 2000)
+        self.statusBar().showMessage(
+            "Arduino trigger arrived → recording started.", 2000
+        )
 
         # Tell the RecordingWorker: from now on, you should accept camera frames.
         # We mark a flag inside RecordingWorker (is_live_recording), so that
@@ -1116,7 +1127,7 @@ class MainWindow(QMainWindow):
         # We do _not_ disconnect _on_first_serial_data, because we might still need to pair every CSV line.
         # But we do set a flag inside the worker, so it knows to write.
         log.info("MainWindow: Received first serial packet, worker is now live.")
-    
+
     @pyqtSlot()
     def _stop_recording_due_to_hardware(self):
         """
@@ -1126,7 +1137,9 @@ class MainWindow(QMainWindow):
         if not self._is_recording or self._recording_worker is None:
             return
 
-        log.info("MainWindow: _stop_recording_due_to_hardware() called → finalizing recording.")
+        log.info(
+            "MainWindow: _stop_recording_due_to_hardware() called → finalizing recording."
+        )
 
         # 1) Instruct worker to stop writing
         self._recording_worker.stop_worker()
