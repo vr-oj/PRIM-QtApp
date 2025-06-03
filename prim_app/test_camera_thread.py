@@ -3,7 +3,7 @@
 import sys
 import time
 from PyQt5.QtWidgets import QApplication
-from prim_app.threads.sdk_camera_thread import SDKCameraThread
+from threads.sdk_camera_thread import SDKCameraThread
 
 
 def on_grabber_ready():
