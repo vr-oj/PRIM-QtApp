@@ -345,7 +345,7 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int)
     def _on_device_selected(self, index):
         """
-        Called whenever the user picks a different camera in the “Device” combo.
+        Called whenever the user picks a different camera in “Device” combo.
         Open it briefly, enumerate PixelFormat × (W,H), then close.
         """
         dev_info = self.device_combo.itemData(index)
@@ -382,7 +382,6 @@ class MainWindow(QMainWindow):
                             display_str = f"{w}×{h} ({pf_name})"
                             self.resolution_combo.addItem(display_str, (w, h, pf_name))
                     except Exception:
-                        # skip any PF that fails
                         pass
 
             grab.device_close()
