@@ -33,7 +33,7 @@ def main():
     grabber.device_open(dev_info)
     print("Grabber opened successfully.")
 
-    # 4) Set AcquisitionMode = Continuous
+    # 4) Set AcquisitionMode = Continuous (if available)
     try:
         acq_node = grabber.device_property_map.find_enumeration(
             ic4.PropId.ACQUISITION_MODE
@@ -72,19 +72,23 @@ def main():
     except Exception as e:
         print("Warning: could not set resolution →", e)
 
-    # 7) Attach the dummy listener + create QueueSink
+    # 7) Create and attach DummySinkListener + QueueSink
     listener = DummySinkListener()
-    # Use Mono8 frame format; if you set BGR8 above, this still tries Mono8.
-    # If Mono8 isn’t available, the sink will negotiate a compatible format.
     sink = ic4.QueueSink(listener, [ic4.PixelFormat.Mono8], max_output_buffers=1)
 
     # 8) Start streaming
     try:
         grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
         print("StreamSetup complete.")
-        # IMPORTANT: explicitly start acquisition
-        grabber.acquisition_start()
-        print("grabber.acquisition_start() called.")
+        # Try to start acquisition, but ignore "already active" if it comes up
+        try:
+            grabber.acquisition_start()
+            print("grabber.acquisition_start() called.")
+        except ic4.IC4Exception as e:
+            if e.error_code == ic4.ErrorCode.InvalidOperation:
+                print("Note: acquisition was already active (ignored).")
+            else:
+                raise
     except Exception as e:
         print("❌ Failed to start stream:", e)
         grabber.device_close()
@@ -94,30 +98,35 @@ def main():
     # 9) Give camera a moment to warm up
     time.sleep(1.0)
 
-    # 10) Grab 5 frames
-    print("Grabbing 5 frames...")
+    # 10) Grab 5 frames (blocking pop) and display via OpenCV
+    print("Grabbing 5 frames…")
     cv2.namedWindow("Frame", cv2.WINDOW_NORMAL)
     for i in range(5):
         try:
-            buf = sink.pop_output_buffer()  # blocking call
-            arr = buf.numpy_wrap()  # Mono8 or BGR8 → NumPy array
-            # If BGR8, arr.shape will be (H,W,3). If Mono8, arr.shape is (H,W).
+            buf = sink.pop_output_buffer()  # blocking
+            arr = buf.numpy_wrap()  # Mono8 → (H,W) or BGR8 → (H,W,3)
             cv2.imshow("Frame", arr)
-            cv2.waitKey(200)  # show each frame for 200 ms
+            cv2.waitKey(200)  # hold each frame for 200 ms
             sink.queue_buffer(buf)
         except ic4.IC4Exception as e:
             print("No frame yet or error:", e)
-            # Optionally sleep a bit more if needed:
             time.sleep(0.1)
 
     # 11) Stop acquisition, stop stream, close device
-    grabber.acquisition_stop()
+    try:
+        grabber.acquisition_stop()
+    except Exception:
+        pass  # ignore if it wasn't running
     grabber.stream_stop()
     grabber.device_close()
     cv2.destroyAllWindows()
     print("Streaming stopped, camera closed.")
 
-    # 12) Shutdown library
+    # 12) Explicitly delete objects before shutting down library
+    del sink
+    del grabber
+
+    # 13) Shutdown library
     ic4.Library.exit()
     print("Library.exit() complete.")
 
