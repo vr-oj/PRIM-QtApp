@@ -9,7 +9,7 @@ import imagingcontrol4 as ic4
 
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication
-from PyQt5.QtGui import QIcon, QSurfaceFormat
+from PyQt5.QtGui import QIcon, QSurfaceFormat, QPalette, QColor
 from utils.config import APP_NAME, APP_VERSION as CONFIG_APP_VERSION
 
 import matplotlib
@@ -56,6 +56,24 @@ except ImportError:
     module_log.warning(
         "utils.app_settings not found. Persistent settings will not work."
     )
+
+
+def apply_dark_theme(app):
+    dark_palette = QPalette()
+    dark_palette.setColor(QPalette.Window, QColor(45, 45, 45))
+    dark_palette.setColor(QPalette.WindowText, Qt.white)
+    dark_palette.setColor(QPalette.Base, QColor(30, 30, 30))
+    dark_palette.setColor(QPalette.AlternateBase, QColor(45, 45, 45))
+    dark_palette.setColor(QPalette.ToolTipBase, Qt.white)
+    dark_palette.setColor(QPalette.ToolTipText, Qt.white)
+    dark_palette.setColor(QPalette.Text, Qt.white)
+    dark_palette.setColor(QPalette.Button, QColor(45, 45, 45))
+    dark_palette.setColor(QPalette.ButtonText, Qt.white)
+    dark_palette.setColor(QPalette.BrightText, Qt.red)
+    dark_palette.setColor(QPalette.Link, QColor(42, 130, 218))
+    dark_palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+    dark_palette.setColor(QPalette.HighlightedText, Qt.black)
+    app.setPalette(dark_palette)
 
 
 def load_processed_qss(path):
@@ -112,6 +130,7 @@ def main_app_entry():
 
     # Create the QApplication
     app = QApplication(sys.argv)
+    apply_dark_theme(app)
 
     # Log what OpenGL/QSurfaceFormat we actually got
     actual_fmt = QSurfaceFormat.defaultFormat()
