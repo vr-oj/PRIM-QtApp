@@ -27,7 +27,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# A separate module-level logger for setup steps, if desired:
+# A separate module-level logger for setup steps
 module_log = logging.getLogger("prim_app.setup")
 if not module_log.handlers:
     handler = logging.StreamHandler(sys.stdout)
@@ -39,7 +39,7 @@ if not module_log.handlers:
     module_log.setLevel(logging.INFO)
 
 
-# === Optional: load_app_setting / save_app_setting stubs if missing ===
+# === load_app_setting / save_app_setting stubs if missing ===
 try:
     from utils.app_settings import load_app_setting, save_app_setting
 
