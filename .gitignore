@@ -47,3 +47,4 @@ htmlcov/
 *.sqlite3
 
 prim_app/last_run.txt
+/primenv
