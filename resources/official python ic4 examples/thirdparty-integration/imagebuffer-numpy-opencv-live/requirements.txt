@@ -1,3 +1,0 @@
-PySide6
-imagingcontrol4
-opencv-python
