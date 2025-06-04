@@ -76,7 +76,7 @@ from threads.serial_thread import SerialThread
 from threads.sdk_camera_thread import SDKCameraThread
 from utils.config import DEFAULT_FPS
 from utils.path_helpers import get_next_fill_folder
-from recording import RecordingWorker
+from threads.recording_thread import RecordingThread
 from utils.utils import list_serial_ports
 
 log = logging.getLogger(__name__)
@@ -89,9 +89,8 @@ class MainWindow(QMainWindow):
         # ─── State Variables ─────────────────────────────────────────────────────
         self._serial_thread = None
         self._serial_active = False
-        self._recording_worker = None
+        self._recording_thread = None
         self._is_recording = False
-        self._record_armed = False  # ← has user clicked “Start Recording” (armed) but not yet started actual saving?
         self._serial_timeout_timer = QTimer(self)
         self._serial_timeout_timer.setSingleShot(True)
         self._serial_timeout_timer.setInterval(
@@ -106,9 +105,6 @@ class MainWindow(QMainWindow):
         self.camera_control_panel = None
         self.camera_tabs = None
         self.camera_thread = None  # SDKCameraThread instance
-
-        # This is the actual thread that will do grabbing
-        self.camera_thread = None
 
         # Plot controls
         self.plot_control_panel = None
@@ -134,10 +130,6 @@ class MainWindow(QMainWindow):
         # Populate device list so user can select camera
         self._populate_device_list()
         self._set_initial_control_states()
-
-        # Recording state
-        self._recording_worker = None
-        self._is_recording = False
 
         # Per‐recording frame counter (reset each time we start a recording)
         self._record_frame_count = 0
@@ -599,7 +591,7 @@ class MainWindow(QMainWindow):
         am = mb.addMenu("&Acquisition")
         self.start_recording_action = QAction(
             self.icon_record_start,
-            "Arm &Recording",
+            "Start &Recording",
             self,
             shortcut=Qt.CTRL | Qt.Key_R,
             triggered=self._trigger_start_recording_dialog,
@@ -734,13 +726,9 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _trigger_start_recording_dialog(self):
         """
-        Simplest possible “Start Recording”:
-         1) Create YYYY-MM-DD/FillN folder
-         2) Start RecordingWorker immediately
-         3) Hook camera frames → _on_video_frame_and_record
-         4) Hook serial lines → _on_serial_data_and_record
+        Start a fresh RecordingThread that writes CSV + TIFF stack.
         """
-        # 1) Create next FillN folder (e.g. …/PRIMAcquisition/YYYY-MM-DD/FillN)
+        # 1) Create next “FillN” folder under today’s date
         fill_folder = get_next_fill_folder()
         if not fill_folder or not os.path.isdir(fill_folder):
             QMessageBox.critical(
@@ -748,10 +736,7 @@ class MainWindow(QMainWindow):
             )
             return
 
-        fill_name = os.path.basename(fill_folder)  # “Fill1”, “Fill2”, etc.
-        basepath = os.path.join(fill_folder, fill_name)
-
-        # 2) Check that a camera resolution is selected
+        # 2) Check that a camera resolution is selected (so camera is streaming)
         resdata = self.resolution_combo.currentData()
         if not resdata:
             QMessageBox.warning(
@@ -759,128 +744,62 @@ class MainWindow(QMainWindow):
             )
             return
         w, h, pf_name = resdata
-        fps = DEFAULT_FPS
 
-        # 3) Instantiate & start the RecordingWorker (it goes live immediately)
-        self._recording_worker = RecordingWorker(
-            basepath=basepath,
-            fps=fps,
-            frame_size=(w, h),
-            video_ext="tif",  # we want a TIFF stack
-            video_codec=None,  # not used for “.tif”
-            parent=self,
-        )
-        self._recording_worker.start()
-
-        # 4) Wait until the RecordingWorker is fully initialized
-        while not self._recording_worker.is_ready_to_record:
-            QCoreApplication.processEvents()
-
-        # 5) Reset our per-recording counter
-        self._record_frame_count = 0
-
-        # 6) **Disconnect** the preview-only camera slot so frames don’t bypass the worker
-        try:
-            self.camera_thread.frame_ready.disconnect(
-                self.camera_widget._on_frame_ready
+        # 3) Ensure SerialThread is connected (we need the actual pyserial.Serial)
+        if (
+            self._serial_thread is None
+            or not self._serial_thread.isRunning()
+            or not hasattr(self._serial_thread, "serial")
+        ):
+            QMessageBox.warning(
+                self,
+                "Recording Error",
+                "PRIM device is not connected. Please connect first.",
             )
-        except Exception:
-            pass
+            return
 
-        # 7) **Immediately** hook camera → worker
-        self.camera_thread.frame_ready.connect(self._on_video_frame_and_record)
-        # 8) **Immediately** hook Arduino → worker
-        self._serial_thread.data_ready.connect(self._on_serial_data_and_record)
+        # 4) Instantiate and start the RecordingThread
+        try:
+            self._recording_thread = RecordingThread(
+                serial_port=self._serial_thread.serial,
+                grabber=self.camera_thread.grabber,
+                record_dir=fill_folder,
+            )
+            self._recording_thread.start()
+        except Exception as e:
+            log.error(f"Failed to start RecordingThread: {e}")
+            QMessageBox.critical(self, "Recording Error", str(e))
+            self._recording_thread = None
+            return
 
-        # 9) Update UI state
+        # 5) Update our state & UI
         self._is_recording = True
         self.start_recording_action.setEnabled(False)
         self.stop_recording_action.setEnabled(True)
         self.statusBar().showMessage(f"Recording to '{fill_folder}' …", 2000)
 
-    @pyqtSlot(QImage, object)
-    def _on_video_frame_and_record(self, qimg, buf):
-        """
-        Called on each new camera frame.
-        1) Display it in the live preview (passing both QImage and raw buffer).
-        2) Extract the NumPy array + timestamp, assign our own frame_index,
-           and enqueue for recording.
-        """
-        # 1) Live preview (we still show it, but preview is rerouted once we stop)
-        try:
-            self.camera_widget._on_frame_ready(qimg, buf)
-        except Exception as e:
-            log.error(f"Error updating live preview: {e}")
-
-        # 2) Extract NumPy array from the IC4 buffer
-        try:
-            arr = buf.numpy_wrap().copy()
-        except Exception as e:
-            log.error(f"Failed to convert buffer to NumPy: {e}")
-            return
-
-        # 3) Read camera timestamp from metadata (µs)
-        try:
-            cam_ts_us = int(buf.meta_data.get("Timestamp", 0))
-        except Exception:
-            cam_ts_us = 0
-
-        # 4) Use our own per-recording frame counter as frame index
-        frame_idx = self._record_frame_count
-        self._record_frame_count += 1
-
-        # 5) Enqueue into RecordingWorker; we leave Arduino fields as None for now,
-        #    and the worker can match CSV lines later based on timestamp or index.
-        if self._is_recording and self._recording_worker:
-            self._recording_worker.add_video_frame(
-                (arr, frame_idx, cam_ts_us, None, None)
-            )
-
-    @pyqtSlot(int, float, float)
-    def _on_serial_data_and_record(self, idx: int, t_device_s: float, p: float):
-        if self._is_recording and self._recording_worker:
-            # only pass (timestamp, pressure) into the recorder
-            self._recording_worker.add_csv_data(t_device_s, p)
-
-            return
-
-        # Convert seconds→µs for the CSV writer
-        arduino_ts_us = int(t_device_s * 1e6)
-        self._recording_worker.add_csv_data(arduino_ts_us, pressure)
-
     @pyqtSlot()
     def _trigger_stop_recording(self):
         """
-        Stop the active RecordingWorker, wait for it to finish, and restore live preview.
+        Stop the active RecordingThread, wait for it to finish, and reset UI.
         """
-        if self._is_recording and self._recording_worker:
-            # 1) Signal the worker to finish writing TIFF + CSV
-            self._recording_worker.stop_worker()
-            if not self._recording_worker.wait(5000):
-                self._recording_worker.terminate()
-                self._recording_worker.wait(1000)
-
-            # 2) Disconnect our recording-specific slots
-            try:
-                self.camera_thread.frame_ready.disconnect(
-                    self._on_video_frame_and_record
+        if self._is_recording and self._recording_thread:
+            # 1) Signal the thread to stop
+            self._recording_thread.stop()
+            # 2) Wait up to 5 seconds for it to finish
+            if not self._recording_thread.wait(5000):
+                log.warning(
+                    "RecordingThread did not finish cleanly; forcing terminate."
                 )
-            except Exception:
-                pass
-            try:
-                self._serial_thread.data_ready.disconnect(
-                    self._on_serial_data_and_record
-                )
-            except Exception:
-                pass
+                self._recording_thread.terminate()
+                self._recording_thread.wait(1000)
 
-            # 3) Re-attach the preview-only slot so you see live feed again
-            self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
-
-            # 4) Reset flags and UI
-            self._recording_worker = None
+            # 3) Clear references & update state
+            self._recording_thread = None
             self._is_recording = False
-            self.start_recording_action.setEnabled(True)
+            self.start_recording_action.setEnabled(
+                self._serial_thread is not None and self._serial_thread.isRunning()
+            )
             self.stop_recording_action.setEnabled(False)
             self.statusBar().showMessage("Recording stopped and saved.", 3000)
         else:
@@ -912,31 +831,21 @@ class MainWindow(QMainWindow):
     # ─── Toggle Serial Connection / Simulated Data ────────────────────────────
     def _toggle_serial_connection(self):
         """
-        Toggle between Connect/Disconnect purely based on whether self._serial_thread
-        is running.  No extra flags needed.
-
-        - If _serial_thread is None or not running → start a new SerialThread,
-          immediately set the QAction to “Disconnect PRIM Device,” and disable the combo.
-        - Otherwise (thread is running) → stop it, set _serial_thread = None,
-          immediately flip QAction back to “Connect PRIM Device,” and re‐enable the combo.
+        Toggle between Connect/Disconnect of the PRIM (Arduino) device.
+        Also updates the enable state of the Start/Stop Recording actions.
         """
-        # (1) If there is no running thread, go into “CONNECT” branch
+        # (1) If no thread or not running → CONNECT
         if self._serial_thread is None or not self._serial_thread.isRunning():
-            # --- User clicked “Connect PRIM Device” ---
             data = self.serial_port_combobox.currentData()
             port = data.value() if isinstance(data, QVariant) else data
-
             if (
                 port is None
                 and self.serial_port_combobox.currentText() != "🔌 Simulated Data"
             ):
-                # They selected something invalid (neither Simulated nor a real COM)
                 QMessageBox.warning(self, "Serial Connection", "Please select a port.")
                 return
 
-            log.info(f"Starting SerialThread on port: {port or 'Simulation'}")
             try:
-                # If there is any leftover object, force‐stop and delete it
                 if self._serial_thread:
                     if self._serial_thread.isRunning():
                         self._serial_thread.stop()
@@ -946,7 +855,6 @@ class MainWindow(QMainWindow):
                     self._serial_thread.deleteLater()
                     self._serial_thread = None
 
-                # Create and start the new thread
                 self._serial_thread = SerialThread(port=port, parent=self)
                 self._serial_thread.data_ready.connect(self._handle_new_serial_data)
                 self._serial_thread.error_occurred.connect(self._handle_serial_error)
@@ -958,11 +866,8 @@ class MainWindow(QMainWindow):
                 )
                 self._serial_thread.start()
 
-                # Immediately flip the QAction to “Disconnect PRIM Device”
                 self.connect_serial_action.setIcon(self.icon_disconnect)
                 self.connect_serial_action.setText("Disconnect PRIM Device")
-
-                # Disable the combo so they can’t switch mid‐stream
                 self.serial_port_combobox.setEnabled(False)
 
             except Exception as e:
@@ -971,29 +876,21 @@ class MainWindow(QMainWindow):
                 if self._serial_thread:
                     self._serial_thread.deleteLater()
                 self._serial_thread = None
-                # Re‐enable the combo in case it got disabled
                 self.serial_port_combobox.setEnabled(True)
                 self._update_recording_actions_enable_state()
 
-        # (2) Otherwise, a thread is already running → go into “DISCONNECT” branch
+        # (2) Otherwise → DISCONNECT
         else:
-            log.info("Stopping SerialThread on user request...")
             try:
                 self._serial_thread.stop()
             except Exception as e:
                 log.error(f"Error while stopping SerialThread: {e}")
 
-            # Immediately flip QAction back to “Connect PRIM Device”
             self.connect_serial_action.setIcon(self.icon_connect)
             self.connect_serial_action.setText("Connect PRIM Device")
-
-            # Re‐enable port‐combo so they can pick another port (or Simulated)
             self.serial_port_combobox.setEnabled(True)
-
-            # Drop our reference so next click will “connect” again
             self._serial_thread = None
 
-        # Finally, update the record‐button enable states (Start/Stop Recording)
         self._update_recording_actions_enable_state()
 
     @pyqtSlot(str)
@@ -1006,11 +903,7 @@ class MainWindow(QMainWindow):
         )
         self.top_ctrl.update_connection_status(status, connected_flag)
 
-        # If the thread died unexpectedly (status_changed says “Disconnected”),
-        # make sure our internal flag stays False and flip the button:
-
         if not connected_flag and self._serial_active:
-            # The thread just reported “Disconnected,” so reset:
             self._serial_active = False
             self.connect_serial_action.setIcon(self.icon_connect)
             self.connect_serial_action.setText("Connect PRIM Device")
@@ -1029,67 +922,47 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str)
     def _handle_serial_error(self, msg: str):
         log.error(f"Serial error: {msg}")
-        # Show it in the status bar so user sees it
         self.statusBar().showMessage(f"Serial Error: {msg}", 6000)
-        # Also re-evaluate whether the recording buttons are enabled
         self._update_recording_actions_enable_state()
 
     @pyqtSlot()
     def _handle_serial_thread_finished(self):
-        log.info("SerialThread finished signal received.")
+        log.info("SerialThread finished.")
         sender = self.sender()
 
         if self._serial_thread is sender:
-            # Clean up the thread object
             self._serial_thread.deleteLater()
             self._serial_thread = None
-
-            # Immediately flip QAction back to “Connect PRIM Device”
             self.connect_serial_action.setIcon(self.icon_connect)
             self.connect_serial_action.setText("Connect PRIM Device")
             self.serial_port_combobox.setEnabled(True)
-
-            log.info("SerialThread instance cleaned up.")
         else:
-            log.warning(
-                "Received 'finished' from an unknown/old SerialThread instance."
-            )
+            log.warning("Unknown SerialThread finished.")
 
-        # Re‐evaluate “Start/Stop Recording” button states
         self._update_recording_actions_enable_state()
 
     @pyqtSlot(int, float, float)
     def _handle_new_serial_data(self, idx: int, t: float, p: float):
         """
-        Called whenever SerialThread emits data_ready(idx, t, p).
-        Pushes new data into TopControlPanel and the live plot.
+        When SerialThread emits new (frame_idx, time, pressure):
+         1) Update TopControlPanel
+         2) Update live plot
+         3) Log to console if visible
+         4) (No need to queue CSV here: RecordingThread reads Serial directly.)
         """
-        # 1) Update TopControlPanel (frame count, device time, pressure)
+        # 1) TopControlPanel
         self.top_ctrl.update_prim_data(idx, t, p)
 
-        # 2) Read the auto-scale checkboxes from PlotControlPanel
+        # 2) Live plot
         ax = self.plot_control_panel.auto_x_cb.isChecked()
         ay = self.plot_control_panel.auto_y_cb.isChecked()
-
-        # 3) Send the new sample to the PressurePlotWidget
         self.pressure_plot_widget.update_plot(t, p, ax, ay)
 
-        # 4) Also log it to the console dock if visible
+        # 3) Console log
         if self.dock_console.isVisible():
             self.console_out_textedit.append(
                 f"PRIM Data: Idx={idx}, Time={t:.3f}s, P={p:.2f}"
             )
-
-        # 5) If we are actively recording, queue it to the CSV
-        if self._is_recording and self._recording_worker:
-            try:
-                self._recording_worker.add_csv_data(t, idx, p)
-            except Exception:
-                log.exception("Error queueing CSV data for recording.")
-                self.statusBar().showMessage(
-                    "CSV queue error. Stopping recording.", 5000
-                )
-                self._trigger_stop_recording()
 
     def _update_recording_actions_enable_state(self):
         """
@@ -1117,19 +990,22 @@ class MainWindow(QMainWindow):
             )
             if reply == QMessageBox.Yes:
                 self._trigger_stop_recording()
-                if self._recording_worker and hasattr(self._recording_worker, "wait"):
-                    if not self._recording_worker.wait(5000):
-                        log.warning("Recording worker did not finish cleanly.")
+                if self._recording_thread and hasattr(self._recording_thread, "wait"):
+                    if not self._recording_thread.wait(5000):
+                        log.warning("RecordingThread did not finish cleanly.")
             else:
                 event.ignore()
                 return
 
         threads_to_clean = []
 
-        # CameraThread (we stored it in self.camera_thread)
-        cam_thread = self.camera_thread
+        # CameraThread
         threads_to_clean.append(
-            ("SDKCameraThread", cam_thread, getattr(cam_thread, "stop", None))
+            (
+                "SDKCameraThread",
+                self.camera_thread,
+                getattr(self.camera_thread, "stop", None),
+            )
         )
 
         # SerialThread
@@ -1141,12 +1017,12 @@ class MainWindow(QMainWindow):
             )
         )
 
-        # RecordingWorker
+        # RecordingThread
         threads_to_clean.append(
             (
-                "RecordingWorker",
-                self._recording_worker,
-                getattr(self._recording_worker, "stop_worker", None),
+                "RecordingThread",
+                self._recording_thread,
+                getattr(self._recording_thread, "stop", None),
             )
         )
 
@@ -1164,7 +1040,7 @@ class MainWindow(QMainWindow):
                             log.warning(
                                 f"No stop method for {name}. Attempting terminate."
                             )
-                        timeout = 3000 if name == "RecordingWorker" else 1500
+                        timeout = 3000 if name == "RecordingThread" else 1500
                         if hasattr(
                             thread_instance, "wait"
                         ) and not thread_instance.wait(timeout):
@@ -1189,6 +1065,7 @@ class MainWindow(QMainWindow):
             log.info("DEBUG: IC4 library exited cleanly.")
         except Exception:
             pass
+
         QApplication.processEvents()
         log.info("All threads cleaned up. Proceeding with close.")
         super().closeEvent(event)
