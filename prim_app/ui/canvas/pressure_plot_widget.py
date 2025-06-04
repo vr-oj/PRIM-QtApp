@@ -52,7 +52,7 @@ class PressurePlotWidget(QWidget):
         layout.addWidget(self.scrollbar)
         self.scrollbar.valueChanged.connect(self._on_scroll)
 
-        # MODIFIED: Apply a simple stylesheet to the scrollbar for better visibility
+        # Apply a simple stylesheet to the scrollbar for better visibility
         self.scrollbar.setStyleSheet(
             """
             QScrollBar:horizontal {
@@ -119,8 +119,8 @@ class PressurePlotWidget(QWidget):
 
     def _update_placeholder(self, text=None):
         if text:
-            self.line.set_data([], [])  #
-            if self.hover_annotation.get_visible():  # Hide hover if placeholder appears
+            self.line.set_data([], [])
+            if self.hover_annotation.get_visible():
                 self.hover_annotation.set_visible(False)
             if self.placeholder:
                 self.placeholder.set_text(text)
@@ -139,11 +139,7 @@ class PressurePlotWidget(QWidget):
                 )
         else:
             if self.placeholder:
-                self.placeholder.set_visible(
-                    False
-                )  # Just hide, no need to remove and recreate
-                # self.placeholder.remove() # Removing and recreating can be less efficient
-                # self.placeholder = None
+                self.placeholder.set_visible(False)
         self.canvas.draw_idle()
 
     def _find_nearest_datapoint(self, x_coord):
@@ -226,8 +222,8 @@ class PressurePlotWidget(QWidget):
     @pyqtSlot(float, float, bool, bool)
     def update_plot(self, t, p, auto_x, auto_y):
         # Remove placeholder on first data
-        if not self.times and self.placeholder and self.placeholder.get_visible():  #
-            self._update_placeholder(None)  # This will hide the placeholder
+        if not self.times and self.placeholder and self.placeholder.get_visible():
+            self._update_placeholder(None)
 
         # Append new data
         self.times.append(t)  #
@@ -245,18 +241,15 @@ class PressurePlotWidget(QWidget):
                 start, end = self.times[0], self.times[-1]
                 pad = max(1, (end - start) * 0.05)
                 self.ax.set_xlim(start - pad * 0.1, end + pad * 0.9)
-            elif self.times:  # handles the case of a single data point
+            elif self.times:
                 t0 = self.times[-1]
                 self.ax.set_xlim(t0 - 0.5, t0 + 0.5)
         else:
             # Manual X range
             if self.manual_xlim:
                 self.ax.set_xlim(self.manual_xlim)
-                # Show and update scrollbar
                 self._update_scrollbar()
-            elif (
-                self.times
-            ):  # If no manual set yet, default to full trace when auto_x is turned off
+            elif self.times:
                 self.manual_xlim = (self.times[0], self.times[-1])
                 self.ax.set_xlim(self.manual_xlim)
                 self._update_scrollbar()
@@ -264,7 +257,7 @@ class PressurePlotWidget(QWidget):
         # Y-axis handling
         if auto_y:
             self.manual_ylim = None  # Clear manual Y limits if auto_y is on
-            if self.pressures:  # Ensure there's data to calculate min/max
+            if self.pressures:
                 mn, mx = min(self.pressures), max(self.pressures)
                 pad = max(
                     abs(mx - mn) * 0.1, 2.0
@@ -273,7 +266,6 @@ class PressurePlotWidget(QWidget):
         else:
             if self.manual_ylim:  # Apply manual Y limits if they exist
                 self.ax.set_ylim(self.manual_ylim)
-            # If no manual_ylim is set and auto_y is false, it will keep the last auto-scaled Y or default
             elif not self.pressures:  # If no data and not auto_y, set to default
                 self.ax.set_ylim(PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX)
 
@@ -284,7 +276,7 @@ class PressurePlotWidget(QWidget):
             self.canvas.draw_idle()
 
     def _update_scrollbar(self):
-        if not self.times or not self.manual_xlim:  # Ensure data and manual_xlim exist
+        if not self.times or not self.manual_xlim:
             self.scrollbar.hide()
             return
 

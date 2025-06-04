@@ -19,13 +19,10 @@ class TopControlPanel(QWidget):
     Composite panel combining camera controls, device status, and plot controls.
     """
 
-    # generic passthrough
     parameter_changed = pyqtSignal(str, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-
-        # Layout
         layout = QHBoxLayout(self)
         layout.setContentsMargins(3, 1, 3, 1)
         layout.setSpacing(5)

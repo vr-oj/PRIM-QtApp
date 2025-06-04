@@ -26,8 +26,6 @@ class CameraControlPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-
-        # This will be set by MainWindow once the grabber is open:
         self.grabber = None
 
         # ───– Build the Qt widgets (all disabled by default) –────────────────
@@ -56,7 +54,7 @@ class CameraControlPanel(QWidget):
         self.gain_spin.valueChanged.connect(self._on_gain_changed)
         self.layout.addRow(self.gain_label, self.gain_spin)
 
-        # 3) Auto-Exposure checkbox (if available)
+        # 3) Auto-Exposure checkbox
         self.ae_checkbox = QCheckBox("Auto Exposure")
         self.ae_checkbox.setEnabled(False)
         self.ae_checkbox.stateChanged.connect(self._on_auto_exposure_toggled)
@@ -78,7 +76,7 @@ class CameraControlPanel(QWidget):
         self.framerate_spin.valueChanged.connect(self._on_framerate_changed)
         self.layout.addRow(self.framerate_label, self.framerate_spin)
 
-        # 6) Pixel Format dropdown (enum) – optional
+        # 6) Pixel Format dropdown (enum)
         self.pf_label = QLabel("Pixel Format:")
         self.pf_combo = QComboBox()
         self.pf_combo.setEnabled(False)

@@ -812,7 +812,7 @@ class MainWindow(QMainWindow):
         )
         if path:
             try:
-                data = self.pressure_plot_widget.get_plot_data()  # assume method exists
+                data = self.pressure_plot_widget.get_plot_data()
                 with open(path, "w", newline="") as f:
                     writer = csv.writer(f)
                     writer.writerow(["Time (s)", "Pressure (mmHg)"])

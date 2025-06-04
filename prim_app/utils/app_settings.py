@@ -2,7 +2,7 @@
 import json
 import os
 import logging
-from .config import APP_CONFIG_DIR  # Uses existing APP_CONFIG_DIR
+from .config import APP_CONFIG_DIR
 
 log = logging.getLogger(__name__)
 

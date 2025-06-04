@@ -1,8 +1,8 @@
 # PRIM-QTAPP/prim_app/utils/utils.py
 import time
-import cv2  # For list_cameras, keep if used elsewhere or for other camera types
+import cv2
 import serial.tools.list_ports
-import re  # Added for to_prop_name
+import re
 
 
 def list_serial_ports():

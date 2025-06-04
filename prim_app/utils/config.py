@@ -17,12 +17,11 @@ PRIM_RESULTS_DIR = os.path.join(DOCUMENTS_DIR, "PRIMAcquisition Results")
 Path(PRIM_RESULTS_DIR).mkdir(parents=True, exist_ok=True)
 
 # ─── Recording settings ─────────────────────────────────────────────────────────
-# We default to TIFF stacks only; AVI is no longer the primary format.
-DEFAULT_VIDEO_EXTENSION = "tif"  # Use TIFF stack by default
+DEFAULT_VIDEO_EXTENSION = "tif"
 DEFAULT_VIDEO_CODEC = None  # Not used when recording to TIFF
-SUPPORTED_FORMATS = ["tif"]  # Only TIFF is supported for new recordings
-DEFAULT_FPS = 10  # Camera frames per second target
-DEFAULT_CAMERA_INDEX = 0  # Default device index (if needed)
+SUPPORTED_FORMATS = ["tif"]
+DEFAULT_FPS = 10
+DEFAULT_CAMERA_INDEX = 0  # Default device index
 
 # Frame size fallback (actual size will be queried from camera at runtime)
 DEFAULT_FRAME_SIZE = (640, 480)  # (width, height)

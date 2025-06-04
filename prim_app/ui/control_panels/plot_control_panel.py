@@ -22,7 +22,6 @@ class PlotControlPanel(QGroupBox):
     Panel with controls for the live plot (Pressure vs. Time).
     """
 
-    # Signals that MainWindow expects to connect:
     autoscale_x_changed = pyqtSignal(bool)
     autoscale_y_changed = pyqtSignal(bool)
     x_axis_limits_changed = pyqtSignal(float, float)
