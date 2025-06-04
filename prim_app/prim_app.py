@@ -12,13 +12,11 @@ from PyQt5.QtCore import Qt, QCoreApplication
 from PyQt5.QtGui import QIcon, QSurfaceFormat
 from utils.config import APP_NAME, APP_VERSION as CONFIG_APP_VERSION
 
-# (You can keep or remove matplotlib logging tweaks if you don’t need them)
 import matplotlib
 
 logging.getLogger("matplotlib").setLevel(logging.INFO)
 logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
 logging.getLogger("fontTools").setLevel(logging.WARNING)
-
 
 # ------------------------------
 # Configure Python-level logging

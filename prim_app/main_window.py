@@ -104,7 +104,7 @@ class MainWindow(QMainWindow):
         self.camera_widget = None
         self.camera_control_panel = None
         self.camera_tabs = None
-        self.camera_thread = None  # SDKCameraThread instance
+        self.camera_thread = None
 
         # Plot controls
         self.plot_control_panel = None
@@ -383,13 +383,13 @@ class MainWindow(QMainWindow):
                     log.info(
                         f"  → Default PF = {default_pf}, Width = {w_val}, Height = {h_val}"
                     )
-                    # Also add the default out‐of‐the‐box resolution
+                    # Add the default out‐of‐the‐box resolution
                     self.resolution_combo.addItem(
                         f"{w_val}×{h_val} ({default_pf})", (w_val, h_val, default_pf)
                     )
                 else:
                     log.warning("  → Could not read default Width/Height.")
-                # (Note: do NOT return here; keep trying PixelFormat loop below.)
+
             except Exception as e:
                 log.warning(f"  → Error reading default Width/Height: {e}")
 
@@ -450,7 +450,7 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             log.error(f"[ _on_device_selected ] Top‐level exception: {e}")
-            # If you like, show a message box for visibility:
+            # Show a message box for visibility:
             # QMessageBox.critical(self, "Error", f"Error enumerating formats: {e}")
 
     @pyqtSlot()
