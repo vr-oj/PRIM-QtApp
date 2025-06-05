@@ -10,7 +10,7 @@ from PyQt5.QtGui import QImage
 log = logging.getLogger(__name__)
 
 
-class SDKCameraThread(QThread, ic4.QueueSinkListener):
+class SDKCameraThread(QThread):
     """
     Opens the camera (using the DeviceInfo + resolution passed in via set_* methods),
     then starts a QueueSink‐based stream. Each new frame is emitted as a QImage via
@@ -31,9 +31,9 @@ class SDKCameraThread(QThread, ic4.QueueSinkListener):
         self.grabber: ic4.Grabber | None = None
         self._stop_requested = False
 
-        # These will be set by MainWindow before start():
+        # Will be set by MainWindow before start():
         self._device_info: ic4.DeviceInfo | None = None
-        # resolution_tuple is (width, height, pixel_format_name), e.g. (2448, 2048, "Mono8")
+        # resolution_tuple is (width, height, pixel_format_name)
         self._resolution: tuple[int, int, str] | None = None
 
         # Keep a reference to the sink so we can stop it later
@@ -45,7 +45,7 @@ class SDKCameraThread(QThread, ic4.QueueSinkListener):
     def set_resolution(self, resolution_tuple: tuple[int, int, str]):
         """
         resolution_tuple: (width, height, pixel_format_name).
-        Pixel format name must be exactly one of the camera’s valid enumeration entries.
+        Pixel format name must exactly match one of the camera’s valid enumeration entries.
         """
         self._resolution = resolution_tuple
 
@@ -91,8 +91,7 @@ class SDKCameraThread(QThread, ic4.QueueSinkListener):
                     if pf_name not in valid_pf_names:
                         log.warning(
                             f"SDKCameraThread: Requested PixelFormat={pf_name!r} is not valid. "
-                            f"Valid options are: {valid_pf_names}. "
-                            "Skipping PF assignment."
+                            f"Valid options are: {valid_pf_names}. Skipping PF assignment."
                         )
                     else:
                         try:
@@ -169,7 +168,6 @@ class SDKCameraThread(QThread, ic4.QueueSinkListener):
             self.grabber_ready.emit()
 
             # ─── Build QueueSink requesting Mono8 (fallback to native PF if needed)─
-            # We prefer Mono8 in the sink so downstream always sees 8‐bit data.
             try:
                 self._sink = ic4.QueueSink(
                     self, [ic4.PixelFormat.Mono8], max_output_buffers=8
@@ -206,7 +204,6 @@ class SDKCameraThread(QThread, ic4.QueueSinkListener):
 
             # ─── Frame loop: IC4 calls frames_queued() whenever a new buffer is ready ─
             while not self._stop_requested:
-                # Sleep briefly so the thread isn’t spinning at 100%
                 self.msleep(10)
 
             # ─── Stop streaming & close device ─────────────────────────────────
@@ -250,15 +247,21 @@ class SDKCameraThread(QThread, ic4.QueueSinkListener):
                     break
 
             # 3) 'latest_buf' is now truly the freshest buffer
-            arr = latest_buf.numpy_wrap()  # e.g. (H, W) dtype=uint8 or uint16
+            arr = (
+                latest_buf.numpy_wrap()
+            )  # shape=(H, W, 1) or (H, W, 3), dtype=uint8/uint16
 
             # 4) Convert to 8‐bit grayscale if needed (Mono8 cameras skip this)
             if arr.dtype == np.uint8:
-                gray8 = arr
+                gray8 = (
+                    arr[..., 0] if arr.ndim == 3 else arr
+                )  # strip channel dimension if present
             else:
+                # find max, scale into [0..255]
                 max_val = float(arr.max()) if arr.max() > 0 else 1.0
                 scale = 255.0 / max_val
                 gray8 = (arr.astype(np.float32) * scale).astype(np.uint8)
+                gray8 = gray8[..., 0] if gray8.ndim == 3 else gray8
 
             h, w = gray8.shape[:2]
 
@@ -286,7 +289,10 @@ class SDKCameraThread(QThread, ic4.QueueSinkListener):
             code_str = str(code_enum) if code_enum else ""
             self.error.emit(str(e), code_str)
 
-    # ─── Required listener methods for QueueSink ───────────────────────────
+    # ─── “Listener” methods for QueueSink ────────────────────────────────
+    # We implement these two methods; IC4 will detect them by duck-typing,
+    # so we do not need to explicitly inherit from QueueSinkListener.
+
     def sink_connected(
         self, sink: ic4.QueueSink, pixel_format, min_buffers_required
     ) -> bool:
