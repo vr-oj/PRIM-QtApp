@@ -43,6 +43,8 @@ class SDKCameraThread(QThread):
 
     def set_resolution(self, resolution_tuple):
         # resolution_tuple is (w, h, pf_name), e.g. (2448, 2048, "Mono8")
+        # We keep this around in case you want to read it,
+        # but we will NOT attempt to apply it in run().
         self._resolution = resolution_tuple
 
     def run(self):
@@ -71,28 +73,9 @@ class SDKCameraThread(QThread):
                 f"'{self._device_info.model_name}' (S/N '{self._device_info.serial}')."
             )
 
-            # ─── Apply PixelFormat & resolution ────────────────────────────────
-            if self._resolution is not None:
-                w, h, pf_name = self._resolution
-                try:
-                    pf_node = self.grabber.device_property_map.find_enumeration(
-                        "PixelFormat"
-                    )
-                    if pf_node:
-                        pf_node.value = pf_name
-                        log.info(f"SDKCameraThread: Set PixelFormat = {pf_name}")
-                        w_node = self.grabber.device_property_map.find_integer("Width")
-                        h_node = self.grabber.device_property_map.find_integer("Height")
-                        if w_node and h_node:
-                            w_node.value = w
-                            h_node.value = h
-                            log.info(f"SDKCameraThread: Set resolution = {w}×{h}")
-                    else:
-                        log.warning(
-                            "SDKCameraThread: PixelFormat node not found; using default."
-                        )
-                except Exception as e:
-                    log.warning(f"SDKCameraThread: Could not set resolution/PF: {e}")
+            # ─── [REMOVED] Apply PixelFormat & resolution ──────────────────────
+            # We are no longer forcing the camera into a specific PF or resolution here.
+            # The grabber will remain in its factory default PixelFormat/Width/Height.
 
             # ─── Force Continuous acquisition mode ───────────────────────────────
             try:
