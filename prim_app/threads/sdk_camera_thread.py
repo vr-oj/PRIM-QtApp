@@ -26,41 +26,96 @@ class SDKCameraThread(QThread):
         self.grabber = None
         self._sink = None
         self._running = False
-        self.mode = "live"  # 'live' or 'trigger'
+        self.mode = "live"  # 'live', 'trigger', or 'idle'
         self.latest_frame = None
         self._frame_counter = 0
+        self._device_info = None
+        self._resolution = None
+
+    def set_device_info(self, dev_info):
+        """
+        Store the DeviceInfo chosen by the user.
+        """
+        self._device_info = dev_info
+
+    def set_resolution(self, resolution_tuple):
+        """
+        Store the resolution tuple (w, h, pf_name) chosen by the user.
+        """
+        self._resolution = resolution_tuple
 
     def run(self):
         try:
-            # Initialize IC4 and open the first available device
-            ic4.DeviceEnum.initialize()
-            device_list = ic4.DeviceEnum.devices()
-            if not device_list:
-                log.error("No IC4 devices found.")
+            # Initialize the IC4 library
+            try:
+                ic4.Library.init(
+                    api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
+                )
+                log.info("SDKCameraThread: Library.init() succeeded.")
+            except RuntimeError:
+                # Already initialized
+                pass
+
+            # Ensure a device was selected
+            if not self._device_info:
+                log.error("SDKCameraThread: No device info provided.")
                 return
-            dev_info = device_list[0]
+
+            # Open the chosen device
             self.grabber = ic4.Grabber()
-            self.grabber.device_open(dev_info)
-            log.info(f"SDKCameraThread: Opened device {dev_info.model_name}")
+            self.grabber.device_open(self._device_info)
+            log.info(f"SDKCameraThread: Opened device {self._device_info.model_name}")
+
+            # If resolution was set, apply it now
+            if self._resolution:
+                try:
+                    w, h, pf_name = self._resolution
+                    # Set pixel format
+                    pf_node = self.grabber.device_property_map.find_enumeration(
+                        "PixelFormat"
+                    )
+                    if pf_node and pf_name in [entry.name for entry in pf_node.entries]:
+                        pf_node.value = pf_name
+                        # Set Width/Height
+                        w_node = self.grabber.device_property_map.find_integer("Width")
+                        h_node = self.grabber.device_property_map.find_integer("Height")
+                        if w_node and h_node:
+                            w_node.value = w
+                            h_node.value = h
+                            log.info(
+                                f"SDKCameraThread: Set resolution = {w}×{h} ({pf_name})"
+                            )
+                        else:
+                            log.warning(
+                                "SDKCameraThread: Could not find Width/Height properties."
+                            )
+                    else:
+                        log.warning(
+                            "SDKCameraThread: PixelFormat node not found or invalid."
+                        )
+                except Exception as e:
+                    log.warning(f"SDKCameraThread: Could not set resolution: {e}")
 
             # Start in continuous live mode
             self._start_continuous()
             self._running = True
 
-            # Enter event loop; keep thread alive to handle stop requests
+            # Event loop to keep thread alive
             while self._running:
                 self.msleep(10)
 
         except Exception as e:
             log.error(f"SDKCameraThread: Exception in run(): {e}")
         finally:
-            # Ensure cleanup
+            # Cleanup before exiting
             self._stop_continuous()
-            ic4.DeviceEnum.exit()
+            ic4.Library.exit()
             log.info("SDKCameraThread: Exiting thread.")
 
     def stop(self):
-        """Stop the camera thread and cleanup."""
+        """
+        Stop the camera thread and cleanup.
+        """
         self._running = False
         self.wait()
 
@@ -72,9 +127,7 @@ class SDKCameraThread(QThread):
         """
         Configure camera for continuous streaming with QueueSink.
         """
-        # Create QueueSink for Mono8 format
         self._sink = ic4.QueueSink(self, [ic4.PixelFormat.Mono8], max_output_buffers=4)
-        # Arm continuous streaming
         from imagingcontrol4 import StreamSetupOption
 
         self.grabber.stream_setup(
@@ -82,7 +135,6 @@ class SDKCameraThread(QThread):
             setup_option=StreamSetupOption.ACQUISITION_START,
         )
         log.info("SDKCameraThread: Continuous live mode started.")
-        # Hook queue callback
         self._sink.signal_frame_ready.connect(self.frames_queued)
         self.mode = "live"
 
@@ -109,7 +161,7 @@ class SDKCameraThread(QThread):
         Switch camera to hardware-trigger (FrameStart) mode.
         After this, each TTL pulse on the designated line yields one frame.
         """
-        # Ensure any existing sink is stopped
+        # Stop live streaming if active
         self._stop_continuous()
 
         # Set AcquisitionMode = Continuous (required to arm trigger)
