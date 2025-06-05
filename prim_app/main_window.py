@@ -66,7 +66,7 @@ from ui.canvas.pressure_plot_widget import PressurePlotWidget
 
 from threads.serial_thread import SerialThread
 from threads.sdk_camera_thread import SDKCameraThread
-from recording import RecordingWorker
+from threads.recording_thread import RecordingThread
 from utils.utils import list_serial_ports
 
 log = logging.getLogger(__name__)
