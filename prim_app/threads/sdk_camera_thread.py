@@ -102,7 +102,7 @@ class SDKCameraThread(QThread):
                 pf_list = [ic4.PixelFormat.Mono8]
 
             try:
-                self._sink = ic4.QueueSink(self, pf_list, max_output_buffers=1)
+                self._sink = ic4.QueueSink(self, pf_list, max_output_buffers=4)
                 names = [pf.name for pf in pf_list]
                 log.info(f"SDKCameraThread: Created QueueSink for PFs = {names}")
             except Exception as e:
