@@ -35,16 +35,14 @@ class SDKCameraThread(QThread):
         self._device_info = None  # an ic4.DeviceInfo instance
         self._resolution = None  # tuple (width, height, pixel_format_name)
 
+        # Keep a reference to the sink so we can stop it later
+        self._sink = None
+
     def set_device_info(self, dev_info):
-        """
-        Called by MainWindow to tell us which DeviceInfo to open.
-        """
         self._device_info = dev_info
 
     def set_resolution(self, resolution_tuple):
-        """
-        Called by MainWindow to tell us which (w, h, pixel_format) to use.
-        """
+        # resolution_tuple is (w, h, pf_name), e.g. (2448, 2048, "Mono8")
         self._resolution = resolution_tuple
 
     def run(self):
@@ -66,7 +64,7 @@ class SDKCameraThread(QThread):
                 )
                 log.info("SDKCameraThread: Library.init() succeeded.")
             except RuntimeError:
-                # Already initialized, that’s fine.
+                # Already initialized; ignore.
                 pass
 
             # ─── 2) Ensure MainWindow gave us a DeviceInfo ────────────────────
@@ -153,7 +151,7 @@ class SDKCameraThread(QThread):
                     self, [ic4.PixelFormat.Mono8], max_output_buffers=1
                 )
             except Exception:
-                # If Mono8 isn’t available, fall back to the native PF if possible:
+                # If Mono8 isn’t available, fall back to native PF if possible
                 native_pf = self._resolution[2] if self._resolution else None
                 if native_pf and hasattr(ic4.PixelFormat, native_pf):
                     self._sink = ic4.QueueSink(
@@ -192,9 +190,8 @@ class SDKCameraThread(QThread):
         except Exception as ex:
             log.critical(f"SDKCameraThread: Exception in run(): {ex}")
             self.error.emit(str(ex), "RunError")
-
         finally:
-            # Ensure we clean up the sink if still attached
+            # Cleanup if still streaming
             try:
                 if self._sink is not None:
                     self._sink.signal_frame_ready.disconnect(self.frames_queued)
@@ -208,12 +205,11 @@ class SDKCameraThread(QThread):
                 ic4.Library.exit()
             except Exception:
                 pass
-
             log.info("SDKCameraThread: Thread exiting (cleaned up).")
 
     # ─── Required listener methods for QueueSink ─────────────────────────────
     def sink_connected(self, sink, pixel_format, min_buffers_required) -> bool:
-        # Return True so that the sink actually attaches
+        # Return True so the sink actually attaches
         return True
 
     def sink_disconnected(self, sink) -> None:
@@ -235,7 +231,7 @@ class SDKCameraThread(QThread):
             buf = sink.pop_output_buffer()
             arr = buf.numpy_wrap()  # arr: 2D array, dtype uint8 or uint16
 
-            # Downconvert 16-bit → 8-bit if necessary:
+            # Downconvert 16-bit → 8-bit if needed:
             if arr.dtype == np.uint8:
                 gray8 = arr
             else:
