@@ -39,10 +39,16 @@ class SDKCameraThread(QThread):
         self._sink = None
 
     def set_device_info(self, dev_info):
+        """
+        Called by MainWindow to tell us which DeviceInfo to open.
+        """
         self._device_info = dev_info
 
     def set_resolution(self, resolution_tuple):
-        # resolution_tuple is (w, h, pf_name), e.g. (2448, 2048, "Mono8")
+        """
+        Called by MainWindow to tell us which (w, h, pixel_format) to use.
+        resolution_tuple is (width, height, pixel_format), e.g. (2448, 2048, "Mono8").
+        """
         self._resolution = resolution_tuple
 
     def run(self):
