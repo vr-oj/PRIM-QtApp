@@ -1,122 +1,127 @@
-# prim_app/threads/recording_thread.py
-
 import os
 import csv
 import queue
-import numpy as np
 import tifffile
 from PyQt5.QtCore import QThread, pyqtSlot
 
 
 class RecordingThread(QThread):
     """
-    QThread that:
-      1) Listens for “(frame_idx, elapsed_time, pressure)” from SerialThread.data_ready
-      2) Whenever a packet arrives: write the CSV line, then grab exactly one frame from IC4
-         (using the passed-in grabber), flame it into a multi‐page TIFF.
-      3) Exit cleanly when told to stop.
+    QThread that pairs each incoming serial packet (frame_idx, elapsed_time, pressure)
+    with exactly one camera-triggered frame (emitted via camera_thread.frame_for_save).
+    Workflow:
+      1) Upon SerialThread.data_ready → enqueue_serial_data(idx, time, pressure)
+      2) Upon SDKCameraThread.frame_for_save(arr) → enqueue_triggered_frame(arr)
+      3) In run(): for every serial packet, block until next triggered frame arrives, then write both to disk:
+           - CSV line: [idx, elapsed_time, pressure]
+           - TIFF page: the corresponding NumPy array
+      4) Exit cleanly when stop() is called.
     """
 
-    def __init__(self, serial_thread, grabber, record_dir, parent=None):
+    def __init__(self, serial_thread, camera_thread, record_dir, parent=None):
         super().__init__(parent)
-
-        # Instead of holding a pyserial object, we hold the SerialThread instance
         self.serial_thread = serial_thread
-
-        # The IC4 grabber (already started/opened) that we will call `.CaptureSA()` on:
-        self.grabber = grabber
-
-        # Where to write CSV + multipage-TIFF
+        self.camera_thread = camera_thread
         self.record_dir = record_dir
 
-        # A thread‐safe queue to store incoming data packets
+        # Queues for pending serial packets and triggered frames
         self.data_queue = queue.Queue()
-
-        # Keep running until stop() is called
+        self.frame_queue = queue.Queue()
         self._running = True
 
-        # Connect SerialThread.data_ready → self.enqueue_data
-        # SerialThread emits (idx:int, t:float, p:float)
-        self.serial_thread.data_ready.connect(self.enqueue_data)
+        # Connect signals
+        self.serial_thread.data_ready.connect(self.enqueue_serial_data)
+        self.camera_thread.frame_for_save.connect(self.enqueue_triggered_frame)
 
     @pyqtSlot(int, float, float)
-    def enqueue_data(self, frame_idx, elapsed_time, pressure_value):
+    def enqueue_serial_data(self, frame_idx, elapsed_time, pressure_value):
         """
-        This slot is invoked every time SerialThread emits .data_ready(idx, t, p).
-        We simply put the triple into our queue so that run() can process it.
+        Slot for SerialThread data_ready(int, float, float).
+        Enqueue the triple if still running.
         """
-        # Do not enqueue if user has already stopped recording
         if self._running:
             self.data_queue.put((frame_idx, elapsed_time, pressure_value))
 
+    @pyqtSlot(object)
+    def enqueue_triggered_frame(self, arr):
+        """
+        Slot for SDKCameraThread.frame_for_save(np.ndarray).
+        Enqueue the raw frame array if still running.
+        """
+        if self._running:
+            # Store the NumPy array directly
+            self.frame_queue.put(arr.copy())
+
     def run(self):
-        # ─── 1) Prepare CSV on disk ─────────────────────────────────────────────────
+        # 1) Prepare CSV file
         csv_path = os.path.join(self.record_dir, "experiment_data.csv")
+        print(f"[RecordingThread] Opening CSV → {csv_path}")
         try:
             csv_file = open(csv_path, "w", newline="")
         except Exception as e:
             print(f"[RecordingThread] ERROR opening CSV: {e}")
             return
-
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(["frame_index", "elapsed_time_s", "pressure_value"])
 
-        # ─── 2) Prepare TIFF Writer ─────────────────────────────────────────────────
+        # 2) Prepare multipage TIFF writer
         tiff_path = os.path.join(self.record_dir, "experiment_video.tiff")
+        print(f"[RecordingThread] Opening TIFF → {tiff_path}")
         try:
-            # bigtiff=False is fine unless your run is >4GB
-            tiff_writer = tifffile.TiffWriter(tiff_path, bigtiff=False)
+            tiff_writer = tifffile.TiffWriter(tiff_path, bigtiff=False, append=False)
         except Exception as e:
             print(f"[RecordingThread] ERROR opening TIFF: {e}")
-            try:
-                csv_file.close()
-            except:
-                pass
+            csv_file.close()
             return
 
-        # ─── 3) Main loop: pop (idx, t, p) from queue, write CSV, then capture one frame ───
+        # 3) Main loop: pair each serial packet with a triggered frame
         while self._running:
             try:
-                idx, t, p = self.data_queue.get(timeout=0.1)
+                pkt_idx, pkt_time, pkt_pressure = self.data_queue.get(timeout=0.2)
             except queue.Empty:
-                continue  # no new packet—loop again
+                continue
 
-            # 3a) Write CSV row
-            csv_writer.writerow([idx, f"{t:.6f}", f"{p:.6f}"])
+            # Write CSV row
+            csv_writer.writerow([pkt_idx, f"{pkt_time:.6f}", f"{pkt_pressure:.6f}"])
             csv_file.flush()
 
-            # 3b) Immediately grab one frame from the IC4 grabber
+            # Now block until the matching triggered frame arrives
             try:
-                # CaptureSA returns a NumPy array (height x width x channels)
-                shot = self.grabber.CaptureSA()
-                # Convert to 8‐bit if needed
-                # (assume CAPTURESA already returns 8‐bit [0..255], or else you can scale)
-                if shot is not None:
-                    # Write one page/frame to the multipage-TIFF
-                    tiff_writer.write(shot, photometric="minisblack")
-            except Exception as e:
-                print(f"[RecordingThread] WARNING: failed to grab TIFF frame: {e}")
-                # We continue even if a frame is missing; CSV is already written.
+                arr = self.frame_queue.get(timeout=1.0)
+            except queue.Empty:
+                print(
+                    f"[RecordingThread] WARN: no triggered frame for serial idx={pkt_idx}"
+                )
+                continue
 
-        # ─── 4) Clean up on exit ──────────────────────────────────────────────────────
+            # Write the NumPy array as one page in the TIFF
+            try:
+                print(
+                    f"[RecordingThread] Writing TIFF page for serial idx={pkt_idx}, shape={arr.shape}"
+                )
+                tiff_writer.write(arr, photometric="minisblack")
+            except Exception as e:
+                print(f"[RecordingThread] ERROR writing TIFF page @ idx={pkt_idx}: {e}")
+
+        # 4) Clean up
+        print("[RecordingThread] Stopping; closing CSV+TIFF …")
         try:
             tiff_writer.close()
-        except Exception:
-            pass
-
+        except Exception as e:
+            print(f"[RecordingThread] ERROR closing TIFF: {e}")
         try:
             csv_file.close()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[RecordingThread] ERROR closing CSV: {e}")
 
     def stop(self):
         """
-        Called from the main/UI thread to gracefully stop recording.
+        Stop recording: terminate run(), close files, and disconnect signals.
         """
         self._running = False
-        self.wait()  # block until run() finishes
-        # Disconnect the SerialThread signal so we don't enqueue after stop()
+        self.wait()
         try:
-            self.serial_thread.data_ready.disconnect(self.enqueue_data)
+            self.serial_thread.data_ready.disconnect(self.enqueue_serial_data)
+            self.camera_thread.frame_for_save.disconnect(self.enqueue_triggered_frame)
         except Exception:
             pass

@@ -93,9 +93,6 @@ class MainWindow(QMainWindow):
         self._is_recording = False
         self._serial_timeout_timer = QTimer(self)
         self._serial_timeout_timer.setSingleShot(True)
-        self._serial_timeout_timer.setInterval(
-            500
-        )  # 0.5 s of no serial → stop recording
 
         # Camera‐related
         self.device_combo = None
@@ -491,7 +488,7 @@ class MainWindow(QMainWindow):
             self.lbl_cam_frame.setText("0")
             self.lbl_cam_resolution.setText("N/A")
 
-            # Actually start the thread
+            # Actually start the thread (this calls _start_continuous internally)
             self.camera_thread.start()
             self.btn_start_camera.setText("Stop Camera")
             self.camera_control_panel.setEnabled(False)
@@ -727,6 +724,7 @@ class MainWindow(QMainWindow):
     def _trigger_start_recording_dialog(self):
         """
         Start a fresh RecordingThread that writes CSV + TIFF stack.
+        Also switch the camera out of continuous mode and into hardware-trigger mode.
         """
         # 1) Create next “FillN” folder under today’s date
         fill_folder = get_next_fill_folder()
@@ -758,11 +756,22 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # 4) Instantiate and start the RecordingThread
+        # 4) Switch camera from continuous live mode into hardware-trigger mode
+        try:
+            self.camera_thread._start_trigger_mode()
+        except Exception as e:
+            log.error(f"Failed to arm camera trigger mode: {e}")
+            QMessageBox.critical(
+                self, "Recording Error", f"Camera trigger failed:\n{e}"
+            )
+            return
+
+        # 5) Instantiate and start the RecordingThread
         try:
             self._recording_thread = RecordingThread(
-                serial_thread=self._serial_thread,
-                grabber=self.camera_thread.grabber,
+                serial_thread=self._
+_serial_thread,
+                camera_thread=self.camera_thread,
                 record_dir=fill_folder,
             )
             self._recording_thread.start()
@@ -770,9 +779,15 @@ class MainWindow(QMainWindow):
             log.error(f"Failed to start RecordingThread: {e}")
             QMessageBox.critical(self, "Recording Error", str(e))
             self._recording_thread = None
+            # If we failed to start recording, revert camera back to live mode:
+            try:
+                self.camera_thread._stop_trigger_mode()
+                self.camera_thread._start_continuous()
+            except Exception:
+                pass
             return
 
-        # 5) Update our state & UI
+        # 6) Update our state & UI
         self._is_recording = True
         self.start_recording_action.setEnabled(False)
         self.stop_recording_action.setEnabled(True)
@@ -781,7 +796,8 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _trigger_stop_recording(self):
         """
-        Stop the active RecordingThread, wait for it to finish, and reset UI.
+        Stop the active RecordingThread, wait for it to finish, then
+        take the camera out of hardware-trigger mode and return to live preview.
         """
         if self._is_recording and self._recording_thread:
             # 1) Signal the thread to stop
@@ -797,6 +813,18 @@ class MainWindow(QMainWindow):
             # 3) Clear references & update state
             self._recording_thread = None
             self._is_recording = False
+
+            # 4) Switch camera back to continuous live mode
+            try:
+                self.camera_thread._stop_trigger_mode()
+                self.camera_thread._start_continuous()
+            except Exception as e:
+                log.error(f"Error returning camera to live mode: {e}")
+                QMessageBox.warning(
+                    self, "Camera Warning", f"Could not restore live preview:\n{e}"
+                )
+
+            # 5) Restore UI state: Start Recording only if SerialThread is still connected
             self.start_recording_action.setEnabled(
                 self._serial_thread is not None and self._serial_thread.isRunning()
             )

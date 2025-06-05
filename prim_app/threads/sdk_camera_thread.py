@@ -1,10 +1,7 @@
-# File: prim_app/threads/sdk_camera_thread.py
-
 import logging
-import imagingcontrol4 as ic4
 import numpy as np
-
-from PyQt5.QtCore import QThread, pyqtSignal
+import imagingcontrol4 as ic4
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 
 log = logging.getLogger(__name__)
@@ -12,229 +9,209 @@ log = logging.getLogger(__name__)
 
 class SDKCameraThread(QThread):
     """
-    Opens the camera (using the DeviceInfo + resolution passed in via set_* methods),
-    then starts a QueueSink-based stream. Each new frame is emitted as a QImage via
-    frame_ready(QImage, buffer). When stop() is called, stops streaming and closes the device.
+    Camera thread that:
+      - Starts in continuous QueueSink mode for live preview
+      - On demand (when asked by main), switches to hardware-trigger mode
+        to capture one frame per Arduino pulse, then returns to live mode.
     """
 
-    # Emitted once the grabber is open (but before streaming starts).
-    grabber_ready = pyqtSignal()
-
-    # Emitted for each new frame: (QImage, raw_buffer_object)
+    # Signals:
+    #   frame_ready: emitted each time a new QImage is available for live display
+    #   frame_for_save: emitted each time a camera-triggered frame arrives
     frame_ready = pyqtSignal(QImage, object)
-
-    # Emitted on error: (message, code_as_string)
-    error = pyqtSignal(str, str)
+    frame_for_save = pyqtSignal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.grabber = None
-        self._stop_requested = False
-
-        # Will be set by MainWindow before start():
-        self._device_info = None  # an ic4.DeviceInfo instance
-        self._resolution = None  # tuple (width, height, pixel_format_name)
-
-        # Keep a reference to the sink so we can stop it later
         self._sink = None
-
-    def set_device_info(self, dev_info):
-        self._device_info = dev_info
-
-    def set_resolution(self, resolution_tuple):
-        # resolution_tuple is (w, h, pf_name), e.g. (2448, 2048, "Mono8")
-        self._resolution = resolution_tuple
+        self._running = False
+        self.mode = "live"  # 'live' or 'trigger'
+        self.latest_frame = None
+        self._frame_counter = 0
 
     def run(self):
         try:
-            # ─── Initialize IC4 (with “already called” catch) ─────────────────
-            try:
-                ic4.Library.init(
-                    api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
-                )
-                log.info("SDKCameraThread: Library.init() succeeded.")
-            except RuntimeError as e:
-                if "already called" in str(e):
-                    log.info("SDKCameraThread: IC4 already initialized; continuing.")
-                else:
-                    raise
-
-            # ─── Verify device_info was set ────────────────────────────────────
-            if self._device_info is None:
-                raise RuntimeError("No DeviceInfo passed to SDKCameraThread.")
-
-            # ─── Open the grabber ───────────────────────────────────────────────
+            # Initialize IC4 and open the first available device
+            ic4.DeviceEnum.initialize()
+            device_list = ic4.DeviceEnum.devices()
+            if not device_list:
+                log.error("No IC4 devices found.")
+                return
+            dev_info = device_list[0]
             self.grabber = ic4.Grabber()
-            self.grabber.device_open(self._device_info)
-            log.info(
-                f"SDKCameraThread: device_open() succeeded for "
-                f"'{self._device_info.model_name}' (S/N '{self._device_info.serial}')."
-            )
+            self.grabber.device_open(dev_info)
+            log.info(f"SDKCameraThread: Opened device {dev_info.model_name}")
 
-            # ─── Apply PixelFormat & resolution ────────────────────────────────
-            if self._resolution is not None:
-                w, h, pf_name = self._resolution
-                try:
-                    pf_node = self.grabber.device_property_map.find_enumeration(
-                        "PixelFormat"
-                    )
-                    if pf_node:
-                        pf_node.value = pf_name
-                        log.info(f"SDKCameraThread: Set PixelFormat = {pf_name}")
-                        w_node = self.grabber.device_property_map.find_integer("Width")
-                        h_node = self.grabber.device_property_map.find_integer("Height")
-                        if w_node and h_node:
-                            w_node.value = w
-                            h_node.value = h
-                            log.info(f"SDKCameraThread: Set resolution = {w}×{h}")
-                    else:
-                        log.warning(
-                            "SDKCameraThread: PixelFormat node not found; using default."
-                        )
-                except Exception as e:
-                    log.warning(f"SDKCameraThread: Could not set resolution/PF: {e}")
+            # Start in continuous live mode
+            self._start_continuous()
+            self._running = True
 
-            # ─── Force Continuous acquisition mode ───────────────────────────────
-            try:
-                acq_node = self.grabber.device_property_map.find_enumeration(
-                    "AcquisitionMode"
-                )
-                if acq_node:
-                    entries = [e.name for e in acq_node.entries]
-                    if "Continuous" in entries:
-                        acq_node.value = "Continuous"
-                        log.info("SDKCameraThread: Set AcquisitionMode = Continuous")
-                    else:
-                        acq_node.value = entries[0]
-                        log.info(f"SDKCameraThread: Set AcquisitionMode = {entries[0]}")
-            except Exception as e:
-                log.warning(f"SDKCameraThread: Could not set AcquisitionMode: {e}")
-
-            # ─── Disable trigger so camera will free‐run ─────────────────────────
-            try:
-                trig_node = self.grabber.device_property_map.find_enumeration(
-                    "TriggerMode"
-                )
-                if trig_node:
-                    trig_node.value = "Off"
-                    log.info("SDKCameraThread: Set TriggerMode = Off")
-                else:
-                    log.warning(
-                        "SDKCameraThread: TriggerMode node not found; assuming free‐run."
-                    )
-            except Exception as e:
-                log.warning(f"SDKCameraThread: Could not disable TriggerMode: {e}")
-
-            # ─── Signal “grabber_ready” so UI can enable controls ────────────────
-            self.grabber_ready.emit()
-
-            # ─── Build QueueSink requesting Mono8 (fallback to native PF if needed)─
-            try:
-                self._sink = ic4.QueueSink(
-                    self, [ic4.PixelFormat.Mono8], max_output_buffers=1
-                )
-            except:
-                native_pf = self._resolution[2] if self._resolution else None
-                if native_pf and hasattr(ic4.PixelFormat, native_pf):
-                    self._sink = ic4.QueueSink(
-                        self,
-                        [getattr(ic4.PixelFormat, native_pf)],
-                        max_output_buffers=1,
-                    )
-                else:
-                    raise RuntimeError(
-                        "SDKCameraThread: Unable to create QueueSink for Mono8 or native PF."
-                    )
-
-            # ─── Start streaming immediately ───────────────────────────────────────
-            from imagingcontrol4 import StreamSetupOption
-
-            self.grabber.stream_setup(
-                self._sink,
-                setup_option=StreamSetupOption.ACQUISITION_START,
-            )
-            log.info(
-                "SDKCameraThread: stream_setup(ACQUISITION_START) succeeded. Entering frame loop…"
-            )
-
-            # ─── Frame loop: IC4 calls frames_queued() whenever a new buffer is ready ─
-            while not self._stop_requested:
+            # Enter event loop; keep thread alive to handle stop requests
+            while self._running:
                 self.msleep(10)
 
-            # ─── Stop streaming & close device ───────────────────────────────────
-            self.grabber.stream_stop()
-            self.grabber.device_close()
-            log.info("SDKCameraThread: Streaming stopped, device closed.")
-
         except Exception as e:
-            msg = str(e)
-            code_enum = getattr(e, "code", None)
-            code_str = str(code_enum) if code_enum else ""
-            log.exception("SDKCameraThread: encountered an error.")
-            self.error.emit(msg, code_str)
-
+            log.error(f"SDKCameraThread: Exception in run(): {e}")
         finally:
-            try:
-                ic4.Library.exit()
-                log.info("SDKCameraThread: Library.exit() called.")
-            except Exception:
-                pass
+            # Ensure cleanup
+            self._stop_continuous()
+            ic4.DeviceEnum.exit()
+            log.info("SDKCameraThread: Exiting thread.")
+
+    def stop(self):
+        """Stop the camera thread and cleanup."""
+        self._running = False
+        self.wait()
+
+    ###########################
+    # Continuous (live) mode
+    ###########################
+
+    def _start_continuous(self):
+        """
+        Configure camera for continuous streaming with QueueSink.
+        """
+        # Create QueueSink for Mono8 format
+        self._sink = ic4.QueueSink(self, [ic4.PixelFormat.Mono8], max_output_buffers=4)
+        # Arm continuous streaming
+        from imagingcontrol4 import StreamSetupOption
+
+        self.grabber.stream_setup(
+            self._sink,
+            setup_option=StreamSetupOption.ACQUISITION_START,
+        )
+        log.info("SDKCameraThread: Continuous live mode started.")
+        # Hook queue callback
+        self._sink.signal_frame_ready.connect(self.frames_queued)
+        self.mode = "live"
+
+    def _stop_continuous(self):
+        """
+        Stop continuous streaming (QueueSink).
+        """
+        try:
+            if self._sink is not None:
+                self._sink.signal_frame_ready.disconnect(self.frames_queued)
+                self.grabber.stream_stop()
+                self._sink.close()
+                self._sink = None
+                log.info("SDKCameraThread: Continuous live mode stopped.")
+        except Exception as e:
+            log.error(f"SDKCameraThread: Error stopping continuous mode: {e}")
+
+    ###############################
+    # Hardware-trigger (record) mode
+    ###############################
+
+    def _start_trigger_mode(self):
+        """
+        Switch camera to hardware-trigger (FrameStart) mode.
+        After this, each TTL pulse on the designated line yields one frame.
+        """
+        # Ensure any existing sink is stopped
+        self._stop_continuous()
+
+        # Set AcquisitionMode = Continuous (required to arm trigger)
+        try:
+            acq_mode = self.grabber.device_property_map.find_enumeration(
+                "AcquisitionMode"
+            )
+            if acq_mode and "Continuous" in [e.name for e in acq_mode.entries]:
+                acq_mode.value = "Continuous"
+            else:
+                log.warning(
+                    "SDKCameraThread: Cannot set AcquisitionMode to Continuous."
+                )
+        except Exception as e:
+            log.error(f"SDKCameraThread: Failed to set AcquisitionMode: {e}")
+
+        # Select TriggerSelector = FrameStart
+        try:
+            trig_sel = self.grabber.device_property_map.find_enumeration(
+                "TriggerSelector"
+            )
+            if trig_sel and "FrameStart" in [e.name for e in trig_sel.entries]:
+                trig_sel.value = "FrameStart"
+            else:
+                log.warning(
+                    "SDKCameraThread: Cannot set TriggerSelector to FrameStart."
+                )
+        except Exception as e:
+            log.error(f"SDKCameraThread: Error setting TriggerSelector: {e}")
+
+        # Turn TriggerMode = On
+        try:
+            trig_mode = self.grabber.device_property_map.find_enumeration("TriggerMode")
+            if trig_mode and "On" in [e.name for e in trig_mode.entries]:
+                trig_mode.value = "On"
+            else:
+                log.warning("SDKCameraThread: Cannot set TriggerMode to On.")
+        except Exception as e:
+            log.error(f"SDKCameraThread: Error setting TriggerMode: {e}")
+
+        # Select TriggerSource = Line0
+        try:
+            trig_src = self.grabber.device_property_map.find_enumeration(
+                "TriggerSource"
+            )
+            if trig_src and "Line0" in [e.name for e in trig_src.entries]:
+                trig_src.value = "Line0"
+            else:
+                log.warning("SDKCameraThread: Cannot set TriggerSource to Line0.")
+        except Exception as e:
+            log.error(f"SDKCameraThread: Error setting TriggerSource: {e}")
+
+        # Arm QueueSink in trigger mode
+        from imagingcontrol4 import StreamSetupOption
+
+        self._sink = ic4.QueueSink(self, [ic4.PixelFormat.Mono8], max_output_buffers=4)
+        self.grabber.stream_setup(
+            self._sink,
+            setup_option=StreamSetupOption.ACQUISITION_START,
+        )
+        self._sink.signal_frame_ready.connect(self.frames_queued)
+        self.mode = "trigger"
+        log.info("SDKCameraThread: Trigger mode armed (FrameStart on Line0).")
+
+    def _stop_trigger_mode(self):
+        """
+        Disable hardware-trigger mode and stop sink.
+        """
+        try:
+            if self._sink is not None:
+                self._sink.signal_frame_ready.disconnect(self.frames_queued)
+                self.grabber.stream_stop()
+                self._sink.close()
+                self._sink = None
+                log.info("SDKCameraThread: Trigger mode stopped.")
+        except Exception as e:
+            log.error(f"SDKCameraThread: Error stopping trigger mode: {e}")
+        self.mode = "idle"
 
     def frames_queued(self, sink):
         """
-        This callback is invoked by IC4 each time a new buffer is available.
-        Pop the buffer, convert to QImage, emit it, and allow IC4 to recycle it.
+        Called whenever a new buffer arrives into the sink (either live or trigger).
+        We convert to QImage for live preview and emit frame_for_save when in trigger mode.
         """
         try:
             buf = sink.pop_output_buffer()
-            arr = buf.numpy_wrap()  # arr: shape=(H, W) dtype=uint8 or uint16
+            arr = buf.numpy_wrap()  # Raw NumPy array (Mono8)
 
-            # Downconvert 16-bit to 8-bit if necessary
-            if arr.dtype == np.uint8:
-                gray8 = arr
-            else:
-                max_val = float(arr.max()) if arr.max() > 0 else 1.0
-                scale = 255.0 / max_val
-                gray8 = (arr.astype(np.float32) * scale).astype(np.uint8)
+            # Always update latest_frame for snapshot
+            self.latest_frame = arr.copy()
 
-            h, w = gray8.shape[:2]
+            # If in trigger mode, emit this frame for saving
+            if self.mode == "trigger":
+                self.frame_for_save.emit(arr.copy())
 
-            # Build a QImage from single-channel grayscale
+            # Convert to 8-bit for QImage (safe even if arr already uint8)
+            gray8 = arr if arr.dtype == np.uint8 else (arr >> 8).astype(np.uint8)
+            h, w = gray8.shape
             qimg = QImage(gray8.data, w, h, gray8.strides[0], QImage.Format_Grayscale8)
-
-            # ❗️ Important: copy the QImage now, before re-queueing the buffer.
             qimg_copy = qimg.copy()
-
-            # Emit the copy to the UI
             self.frame_ready.emit(qimg_copy, buf)
 
-            # Re-enqueue the buffer so IC4 can reuse it for the next frame
-            try:
-                sink.queue_buffer(buf)
-            except Exception as e2:
-                log.error(
-                    f"SDKCameraThread.frames_queued: could not re-queue buffer: {e2}"
-                )
-
+            buf.queue()  # Return buffer to IC4
         except Exception as e:
-            log.error(
-                f"SDKCameraThread.frames_queued: Error popping/converting buffer: {e}"
-            )
-            code_enum = getattr(e, "code", None)
-            code_str = str(code_enum) if code_enum else ""
-            self.error.emit(str(e), code_str)
-
-    # ─── Required listener methods for QueueSink ─────────────────────────────
-    def sink_connected(self, sink, pixel_format, min_buffers_required) -> bool:
-        # Return True so the sink actually attaches
-        return True
-
-    def sink_disconnected(self, sink) -> None:
-        # Called when the sink is torn down—no action needed
-        pass
-
-    def stop(self):
-        """
-        Request the streaming loop to end. After this, run() will clean up.
-        """
-        self._stop_requested = True
+            log.error(f"SDKCameraThread.frames_queued error: {e}")
