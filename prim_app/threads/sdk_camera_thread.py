@@ -102,7 +102,7 @@ class SDKCameraThread(QThread):
                 pf_list = [ic4.PixelFormat.Mono8]
 
             try:
-                self._sink = ic4.QueueSink(self, pf_list, max_output_buffers=16)
+                self._sink = ic4.QueueSink(self, pf_list, max_output_buffers=8)
                 names = [pf.name for pf in pf_list]
                 log.info(f"SDKCameraThread: Created QueueSink for PFs = {names}")
             except Exception as e:
@@ -193,15 +193,21 @@ class SDKCameraThread(QThread):
                 pass
 
     def frames_queued(self, sink):
-        """
-        This callback is invoked by IC4 each time a new buffer is available.
-        Pop the buffer, convert to QImage, emit it, and allow IC4 to recycle it.
-        """
         try:
-            buf = sink.pop_output_buffer()
-            arr = buf.numpy_wrap()  # arr: shape=(H, W) dtype=uint8 or uint16
+            # 1) Pop all queued buffers until only the newest one remains
+            latest_buf = sink.pop_output_buffer()
+            while True:
+                try:
+                    # Keep popping until there are no more buffers
+                    older = sink.pop_output_buffer(timeout=0)
+                    # We don't convert 'older'; we just return it so IC4 can reuse it
+                    sink.queue_buffer(older)
+                except Exception:
+                    break
 
-            # Downconvert 16-bit to 8-bit if necessary
+            # 'latest_buf' is now the freshest buffer
+            arr = latest_buf.numpy_wrap()
+            # ...convert as before...
             if arr.dtype == np.uint8:
                 gray8 = arr
             else:
@@ -210,28 +216,17 @@ class SDKCameraThread(QThread):
                 gray8 = (arr.astype(np.float32) * scale).astype(np.uint8)
 
             h, w = gray8.shape[:2]
-
-            # Build a QImage from single-channel grayscale
             qimg = QImage(gray8.data, w, h, gray8.strides[0], QImage.Format_Grayscale8)
-
-            # ❗️ Important: copy the QImage now, before re-queueing the buffer.
             qimg_copy = qimg.copy()
 
-            # Emit the copy to the UI
-            self.frame_ready.emit(qimg_copy, buf)
+            # 2) Emit only the latest frame
+            self.frame_ready.emit(qimg_copy, latest_buf)
 
-            # Re-enqueue the buffer so IC4 can reuse it for the next frame
-            try:
-                sink.queue_buffer(buf)
-            except Exception as e2:
-                log.error(
-                    f"SDKCameraThread.frames_queued: could not re-queue buffer: {e2}"
-                )
+            # 3) Re-queue the latest buffer so IC4 can reuse it
+            sink.queue_buffer(latest_buf)
 
         except Exception as e:
-            log.error(
-                f"SDKCameraThread.frames_queued: Error popping/converting buffer: {e}"
-            )
+            log.error(f"frames_queued error: {e}")
             code_enum = getattr(e, "code", None)
             code_str = str(code_enum) if code_enum else ""
             self.error.emit(str(e), code_str)
