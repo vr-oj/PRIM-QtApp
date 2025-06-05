@@ -91,8 +91,6 @@ class MainWindow(QMainWindow):
         self._serial_active = False
         self._recording_thread = None
         self._is_recording = False
-        self._serial_timeout_timer = QTimer(self)
-        self._serial_timeout_timer.setSingleShot(True)
 
         # Camera‐related
         self.device_combo = None
