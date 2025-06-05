@@ -473,7 +473,7 @@ class MainWindow(QMainWindow):
             self.camera_thread.set_resolution((w, h, pf_name))
 
             # 1) When the grabber is open & streaming, enable the sliders, etc.
-            self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
+            self.camera_thread.frame_ready.connect(self._on_grabber_ready)
 
             # 2) Each time a new frame is ready, update the QtCameraWidget
             self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
