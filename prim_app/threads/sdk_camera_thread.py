@@ -43,13 +43,12 @@ class SDKCameraThread(QThread):
 
     def set_resolution(self, resolution_tuple):
         # resolution_tuple is (w, h, pf_name), e.g. (2448, 2048, "Mono8")
-        # We keep this around in case you want to read it,
-        # but we will NOT attempt to apply it in run().
+        # We keep it for potential future use, but we will not force‐apply it here.
         self._resolution = resolution_tuple
 
     def run(self):
         try:
-            # ─── Initialize IC4 (with “already called” catch) ─────────────────
+            # ─── 1) Initialize IC4 (with “already called” catch) ─────────────────
             try:
                 ic4.Library.init(
                     api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
@@ -61,11 +60,11 @@ class SDKCameraThread(QThread):
                 else:
                     raise
 
-            # ─── Verify device_info was set ────────────────────────────────────
+            # ─── 2) Verify device_info was set ───────────────────────────────────
             if self._device_info is None:
                 raise RuntimeError("No DeviceInfo passed to SDKCameraThread.")
 
-            # ─── Open the grabber ───────────────────────────────────────────────
+            # ─── 3) Open the grabber ──────────────────────────────────────────────
             self.grabber = ic4.Grabber()
             self.grabber.device_open(self._device_info)
             log.info(
@@ -73,9 +72,45 @@ class SDKCameraThread(QThread):
                 f"'{self._device_info.model_name}' (S/N '{self._device_info.serial}')."
             )
 
-            # ─── (No PF/resolution forcing here) ───────────────────────────────
+            # ─── 4) Build QueueSink (before any GenICam settings) ─────────────────
+            native_pf_node = self.grabber.device_property_map.find_enumeration(
+                "PixelFormat"
+            )
+            pf_list = []
 
-            # ─── 1) Force Continuous acquisition mode ─────────────────────────────
+            if native_pf_node:
+                # Get the camera’s supported PF names
+                all_pf_names = [entry.name for entry in native_pf_node.entries]
+
+                # a) If “Mono8” is supported, add it first
+                if "Mono8" in all_pf_names:
+                    pf_list.append(ic4.PixelFormat.Mono8)
+
+                # b) Determine the camera’s current/default PF name
+                default_pf_name = native_pf_node.value if native_pf_node else None
+
+                # c) If default PF is not “Mono8” (and is valid), add it
+                if (
+                    default_pf_name
+                    and default_pf_name != "Mono8"
+                    and hasattr(ic4.PixelFormat, default_pf_name)
+                ):
+                    pf_list.append(getattr(ic4.PixelFormat, default_pf_name))
+
+            # d) If pf_list is still empty, fall back to Mono8
+            if not pf_list:
+                pf_list = [ic4.PixelFormat.Mono8]
+
+            try:
+                self._sink = ic4.QueueSink(self, pf_list, max_output_buffers=1)
+                names = [pf.name for pf in pf_list]
+                log.info(f"SDKCameraThread: Created QueueSink for PFs = {names}")
+            except Exception as e:
+                log.error(f"SDKCameraThread: Unable to create QueueSink: {e}")
+                raise
+
+            # ─── 5) Force Continuous acquisition mode ───────────────────────────────
+            #    (Doing this _after_ sink creation helps avoid negotiation hangups)
             try:
                 acq_node = self.grabber.device_property_map.find_enumeration(
                     "AcquisitionMode"
@@ -91,7 +126,7 @@ class SDKCameraThread(QThread):
             except Exception as e:
                 log.warning(f"SDKCameraThread: Could not set AcquisitionMode: {e}")
 
-            # ─── 2) Disable trigger so camera will free‐run ─────────────────────────
+            # ─── 6) Disable trigger so camera will free‐run ─────────────────────────
             try:
                 trig_node = self.grabber.device_property_map.find_enumeration(
                     "TriggerMode"
@@ -106,47 +141,10 @@ class SDKCameraThread(QThread):
             except Exception as e:
                 log.warning(f"SDKCameraThread: Could not disable TriggerMode: {e}")
 
-            # ─── 3) Signal “grabber_ready” so UI can enable controls ───────────────
+            # ─── 7) Signal “grabber_ready” so UI can enable controls ───────────────
             self.grabber_ready.emit()
 
-            # ─── 4) Build QueueSink, preferring the camera’s native PF (no duplicates) ─
-            native_pf_node = self.grabber.device_property_map.find_enumeration(
-                "PixelFormat"
-            )
-            pf_list = []
-
-            if native_pf_node:
-                # Get the camera’s supported PF names
-                all_pf_names = [entry.name for entry in native_pf_node.entries]
-
-                # 1) If “Mono8” is supported, add it first
-                if "Mono8" in all_pf_names:
-                    pf_list.append(ic4.PixelFormat.Mono8)
-
-                # 2) Determine the camera’s current/default PF name
-                default_pf_name = native_pf_node.value if native_pf_node else None
-
-                # 3) If default PF is not “Mono8” (and is a known PixelFormat), add it
-                if (
-                    default_pf_name
-                    and default_pf_name != "Mono8"
-                    and hasattr(ic4.PixelFormat, default_pf_name)
-                ):
-                    pf_list.append(getattr(ic4.PixelFormat, default_pf_name))
-
-            # 4) If pf_list is still empty, fall back to Mono8
-            if not pf_list:
-                pf_list = [ic4.PixelFormat.Mono8]
-
-            try:
-                self._sink = ic4.QueueSink(self, pf_list, max_output_buffers=1)
-                names = [pf.name for pf in pf_list]
-                log.info(f"SDKCameraThread: Created QueueSink for PFs = {names}")
-            except Exception as e:
-                log.error(f"SDKCameraThread: Unable to create QueueSink: {e}")
-                raise
-
-            # ─── 5) Now start streaming (at whatever PF the QueueSink negotiated) ─────
+            # ─── 8) Now start streaming ───────────────────────────────────────────
             from imagingcontrol4 import StreamSetupOption
 
             try:
@@ -171,11 +169,11 @@ class SDKCameraThread(QThread):
                     pass
                 return
 
-            # ─── 6) Frame loop: IC4 calls frames_queued() whenever a new buffer is ready ─
+            # ─── 9) Frame loop: IC4 calls frames_queued() whenever a new buffer is ready ─
             while not self._stop_requested:
                 self.msleep(10)
 
-            # ─── 7) Stop streaming & close device ───────────────────────────────────
+            # ─── 10) Stop streaming & close device ──────────────────────────────────
             self.grabber.stream_stop()
             self.grabber.device_close()
             log.info("SDKCameraThread: Streaming stopped, device closed.")
