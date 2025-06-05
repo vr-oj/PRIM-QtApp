@@ -77,7 +77,7 @@ class SDKCameraThread(QThread):
             # We are no longer forcing the camera into a specific PF or resolution here.
             # The grabber will remain in its factory default PixelFormat/Width/Height.
 
-            # ─── Force Continuous acquisition mode ───────────────────────────────
+            # ─── 1) Force Continuous acquisition mode (so camera is in free‐run) ───
             try:
                 acq_node = self.grabber.device_property_map.find_enumeration(
                     "AcquisitionMode"
@@ -93,7 +93,7 @@ class SDKCameraThread(QThread):
             except Exception as e:
                 log.warning(f"SDKCameraThread: Could not set AcquisitionMode: {e}")
 
-            # ─── Disable trigger so camera will free‐run ─────────────────────────
+            # ─── 2) Disable TriggerMode (so it doesn’t wait for external trigger) ─
             try:
                 trig_node = self.grabber.device_property_map.find_enumeration(
                     "TriggerMode"
@@ -108,37 +108,62 @@ class SDKCameraThread(QThread):
             except Exception as e:
                 log.warning(f"SDKCameraThread: Could not disable TriggerMode: {e}")
 
-            # ─── Signal “grabber_ready” so UI can enable controls ────────────────
+            # ─── 3) Signal “grabber_ready” so UI can enable “Start” button ───────
             self.grabber_ready.emit()
 
-            # ─── Build QueueSink requesting Mono8 (fallback to native PF if needed)─
-            try:
-                self._sink = ic4.QueueSink(
-                    self, [ic4.PixelFormat.Mono8], max_output_buffers=1
-                )
-            except:
-                native_pf = self._resolution[2] if self._resolution else None
-                if native_pf and hasattr(ic4.PixelFormat, native_pf):
-                    self._sink = ic4.QueueSink(
-                        self,
-                        [getattr(ic4.PixelFormat, native_pf)],
-                        max_output_buffers=1,
-                    )
-                else:
-                    raise RuntimeError(
-                        "SDKCameraThread: Unable to create QueueSink for Mono8 or native PF."
-                    )
+            # ─── 4) Build QueueSink, preferring the camera’s native PF instead of hard‐coding Mono8 ─
+            # First, figure out exactly what PixelFormats the camera supports:
+            native_pf_node = self.grabber.device_property_map.find_enumeration(
+                "PixelFormat"
+            )
+            pf_list = []
+            if native_pf_node:
+                # Try “Mono8” first, but also add the camera’s default if Mono8 isn’t available
+                all_pf_names = [entry.name for entry in native_pf_node.entries]
+                if "Mono8" in all_pf_names:
+                    pf_list.append(ic4.PixelFormat.Mono8)
+                # fallback to whatever the camera reports as default
+                default_pf_name = native_pf_node.value if native_pf_node else None
+                if default_pf_name and hasattr(ic4.PixelFormat, default_pf_name):
+                    pf_list.append(getattr(ic4.PixelFormat, default_pf_name))
 
-            # ─── Start streaming immediately ───────────────────────────────────────
+            # If we still have no valid PF in pf_list, just try Mono8 anyway
+            if not pf_list:
+                pf_list = [ic4.PixelFormat.Mono8]
+
+            try:
+                self._sink = ic4.QueueSink(self, pf_list, max_output_buffers=1)
+                log.info(
+                    f"SDKCameraThread: Created QueueSink for PFs = {[pf.name for pf in pf_list]}"
+                )
+            except Exception as e:
+                log.error(f"SDKCameraThread: Unable to create QueueSink: {e}")
+                raise
+
+            # ─── 5) Now start streaming (at whatever PF the QueueSink negotiated) ──────
             from imagingcontrol4 import StreamSetupOption
 
-            self.grabber.stream_setup(
-                self._sink,
-                setup_option=StreamSetupOption.ACQUISITION_START,
-            )
-            log.info(
-                "SDKCameraThread: stream_setup(ACQUISITION_START) succeeded. Entering frame loop…"
-            )
+            try:
+                self.grabber.stream_setup(
+                    self._sink,
+                    setup_option=StreamSetupOption.ACQUISITION_START,
+                )
+                log.info(
+                    "SDKCameraThread: stream_setup(ACQUISITION_START) succeeded. Entering frame loop…"
+                )
+            except Exception as e:
+                log.error(f"SDKCameraThread: Failed to start acquisition: {e}")
+                # Emit error back to UI
+                code_enum = getattr(e, "code", None)
+                code_str = str(code_enum) if code_enum else ""
+                self.error.emit(str(e), code_str)
+                # Since streaming didn’t start, clean up and return:
+                try:
+                    self.grabber.device_close()
+                    ic4.Library.exit()
+                except:
+                    pass
+                return
 
             # ─── Frame loop: IC4 calls frames_queued() whenever a new buffer is ready ─
             while not self._stop_requested:
