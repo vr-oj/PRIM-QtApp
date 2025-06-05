@@ -1,4 +1,4 @@
-# prim_app/threads/sdk_camera_thread.py
+# File: prim_app/threads/sdk_camera_thread.py
 
 import logging
 import imagingcontrol4 as ic4
@@ -35,7 +35,7 @@ class SDKCameraThread(QThread):
         self._device_info = None  # an ic4.DeviceInfo instance
         self._resolution = None  # tuple (width, height, pixel_format_name)
 
-        # Keep a reference to the sink so we can stop it later
+        # Keep a reference to the sink so we can stop it on teardown
         self._sink = None
 
     def set_device_info(self, dev_info):
@@ -53,31 +53,32 @@ class SDKCameraThread(QThread):
 
     def run(self):
         """
-        Main thread entry.  Does exactly what was working before:
-          1) Initialize IC4
-          2) Open self._device_info
-          3) Apply self._resolution (if provided)
-          4) Force AcquisitionMode = Continuous
-          5) Create a Mono8 QueueSink → start streaming
-          6) Emit grabber_ready()
-          7) Loop (sleep) until stop() is called
+        Main thread entry.  Performs exactly the sequence that was working before:
+          1) Initialize IC4 library (once per process).
+          2) Open the chosen device (self._device_info).
+          3) If self._resolution is provided, set PF + Width + Height.
+          4) Force AcquisitionMode = Continuous.
+          5) Build a Mono8 QueueSink and call stream_setup(ACQUISITION_START).
+          6) Emit grabber_ready() so the UI can enable live‐view controls.
+          7) Enter a small‐sleep loop until stop() is called.
+          8) On exit, stream_stop(), device_close(), then cleanup.
         """
         try:
-            # ─── 1) Initialize the IC4 library (once per process) ──────────────
+            # ─── 1) Initialize IC4 library ──────────────────────────────────────
             try:
                 ic4.Library.init(
                     api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
                 )
                 log.info("SDKCameraThread: Library.init() succeeded.")
             except RuntimeError:
-                # Already initialized; ignore.
+                # Probably already initialized by another thread; ignore.
                 pass
 
-            # ─── 2) Ensure MainWindow gave us a DeviceInfo ────────────────────
+            # ─── 2) Ensure MainWindow passed a DeviceInfo ───────────────────────
             if self._device_info is None:
                 raise RuntimeError("No DeviceInfo passed to SDKCameraThread.")
 
-            # ─── 3) Open the Grabber ──────────────────────────────────────────
+            # ─── 3) Open the Grabber ───────────────────────────────────────────
             self.grabber = ic4.Grabber()
             self.grabber.device_open(self._device_info)
             log.info(
@@ -85,11 +86,10 @@ class SDKCameraThread(QThread):
                 f"'{self._device_info.model_name}' (S/N '{self._device_info.serial}')."
             )
 
-            # ─── 4) If resolution was provided, apply it (PF, Width, Height) ─
+            # ─── 4) If resolution was provided, apply PF, Width, and Height ────
             if self._resolution:
                 w, h, pf_name = self._resolution
                 try:
-                    # Set PixelFormat first:
                     pf_node = self.grabber.device_property_map.find_enumeration(
                         "PixelFormat"
                     )
@@ -115,7 +115,7 @@ class SDKCameraThread(QThread):
                 except Exception as e:
                     log.warning(f"SDKCameraThread: Could not set resolution/PF: {e}")
 
-            # ─── 5) Force AcquisitionMode = Continuous ────────────────────────
+            # ─── 5) Force AcquisitionMode = Continuous ──────────────────────────
             try:
                 acq_node = self.grabber.device_property_map.find_enumeration(
                     "AcquisitionMode"
@@ -131,7 +131,7 @@ class SDKCameraThread(QThread):
             except Exception as e:
                 log.warning(f"SDKCameraThread: Could not set AcquisitionMode: {e}")
 
-            # ─── 6) Disable any trigger (so camera is free-running) ─────────
+            # ─── 6) Disable any hardware trigger (free-run mode) ───────────────
             try:
                 trig_sel = self.grabber.device_property_map.find_enumeration(
                     "TriggerSelector"
@@ -148,16 +148,16 @@ class SDKCameraThread(QThread):
             except Exception:
                 pass
 
-            # ─── 7) Signal “grabber_ready” so the UI can enable controls ─────
+            # ─── 7) Notify MainWindow that the grabber is ready to stream ───────
             self.grabber_ready.emit()
 
-            # ─── 8) Build a Mono8 QueueSink ──────────────────────────────────
+            # ─── 8) Build a Mono8 QueueSink (max_output_buffers=1) ─────────────
             try:
                 self._sink = ic4.QueueSink(
                     self, [ic4.PixelFormat.Mono8], max_output_buffers=1
                 )
             except Exception:
-                # If Mono8 isn’t available, fall back to native PF if possible
+                # If Mono8 isn’t available, fall back to “native PF” if that’s set:
                 native_pf = self._resolution[2] if self._resolution else None
                 if native_pf and hasattr(ic4.PixelFormat, native_pf):
                     self._sink = ic4.QueueSink(
@@ -170,7 +170,7 @@ class SDKCameraThread(QThread):
                         "SDKCameraThread: Unable to create QueueSink for Mono8 or native PF."
                     )
 
-            # ─── 9) Start continuous streaming immediately ─────────────────────
+            # ─── 9) Start continuous streaming immediately ───────────────────────
             from imagingcontrol4 import StreamSetupOption
 
             self.grabber.stream_setup(
@@ -181,15 +181,15 @@ class SDKCameraThread(QThread):
                 "SDKCameraThread: stream_setup(ACQUISITION_START) succeeded. Entering frame loop…"
             )
 
-            # ─── 10) Hook sink callback ───────────────────────────────────────
+            # ─── 10) Hook sink callback so each new buffer calls frames_queued() ──
             self._sink.signal_frame_ready.connect(self.frames_queued)
 
-            # ─── 11) Enter a small‐sleep loop until stop() is called ─────────
+            # ─── 11) Keep the thread alive until stop() is requested ────────────
             self._stop_requested = False
             while not self._stop_requested:
                 self.msleep(10)
 
-            # ─── 12) Stop streaming & close device ───────────────────────────
+            # ─── 12) Stop streaming & close device on exit ─────────────────────
             self.grabber.stream_stop()
             self.grabber.device_close()
 
@@ -211,6 +211,7 @@ class SDKCameraThread(QThread):
                 ic4.Library.exit()
             except Exception:
                 pass
+
             log.info("SDKCameraThread: Thread exiting (cleaned up).")
 
     # ─── Required listener methods for QueueSink ─────────────────────────────
@@ -224,7 +225,7 @@ class SDKCameraThread(QThread):
 
     def stop(self):
         """
-        Request the streaming loop to end.  This will cause run() to clean up and exit.
+        Request the streaming loop to end. After this, run() will clean up and exit.
         """
         self._stop_requested = True
 
