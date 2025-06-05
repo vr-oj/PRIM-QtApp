@@ -767,8 +767,7 @@ class MainWindow(QMainWindow):
         # 5) Instantiate and start the RecordingThread
         try:
             self._recording_thread = RecordingThread(
-                serial_thread=self._
-_serial_thread,
+                serial_thread=self._serial_thread,
                 camera_thread=self.camera_thread,
                 record_dir=fill_folder,
             )
