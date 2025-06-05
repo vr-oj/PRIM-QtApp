@@ -749,7 +749,7 @@ class MainWindow(QMainWindow):
         if (
             self._serial_thread is None
             or not self._serial_thread.isRunning()
-            or not hasattr(self._serial_thread, "serial")
+            or not hasattr(self._serial_thread, "ser")
         ):
             QMessageBox.warning(
                 self,
@@ -761,7 +761,7 @@ class MainWindow(QMainWindow):
         # 4) Instantiate and start the RecordingThread
         try:
             self._recording_thread = RecordingThread(
-                serial_port=self._serial_thread.serial,
+                serial_port=self._serial_thread.ser,
                 grabber=self.camera_thread.grabber,
                 record_dir=fill_folder,
             )
