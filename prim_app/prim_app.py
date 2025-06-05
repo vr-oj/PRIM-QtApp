@@ -9,16 +9,14 @@ import imagingcontrol4 as ic4
 
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication
-from PyQt5.QtGui import QIcon, QSurfaceFormat
+from PyQt5.QtGui import QIcon, QSurfaceFormat, QPalette, QColor
 from utils.config import APP_NAME, APP_VERSION as CONFIG_APP_VERSION
 
-# (You can keep or remove matplotlib logging tweaks if you don’t need them)
 import matplotlib
 
 logging.getLogger("matplotlib").setLevel(logging.INFO)
 logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
 logging.getLogger("fontTools").setLevel(logging.WARNING)
-
 
 # ------------------------------
 # Configure Python-level logging
@@ -29,7 +27,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# A separate module-level logger for setup steps, if desired:
+# A separate module-level logger for setup steps
 module_log = logging.getLogger("prim_app.setup")
 if not module_log.handlers:
     handler = logging.StreamHandler(sys.stdout)
@@ -41,7 +39,7 @@ if not module_log.handlers:
     module_log.setLevel(logging.INFO)
 
 
-# === Optional: load_app_setting / save_app_setting stubs if missing ===
+# === load_app_setting / save_app_setting stubs if missing ===
 try:
     from utils.app_settings import load_app_setting, save_app_setting
 
@@ -58,6 +56,24 @@ except ImportError:
     module_log.warning(
         "utils.app_settings not found. Persistent settings will not work."
     )
+
+
+def apply_dark_theme(app):
+    dark_palette = QPalette()
+    dark_palette.setColor(QPalette.Window, QColor(45, 45, 45))
+    dark_palette.setColor(QPalette.WindowText, Qt.white)
+    dark_palette.setColor(QPalette.Base, QColor(30, 30, 30))
+    dark_palette.setColor(QPalette.AlternateBase, QColor(45, 45, 45))
+    dark_palette.setColor(QPalette.ToolTipBase, Qt.white)
+    dark_palette.setColor(QPalette.ToolTipText, Qt.white)
+    dark_palette.setColor(QPalette.Text, Qt.white)
+    dark_palette.setColor(QPalette.Button, QColor(45, 45, 45))
+    dark_palette.setColor(QPalette.ButtonText, Qt.white)
+    dark_palette.setColor(QPalette.BrightText, Qt.red)
+    dark_palette.setColor(QPalette.Link, QColor(42, 130, 218))
+    dark_palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+    dark_palette.setColor(QPalette.HighlightedText, Qt.black)
+    app.setPalette(dark_palette)
 
 
 def load_processed_qss(path):
@@ -114,6 +130,7 @@ def main_app_entry():
 
     # Create the QApplication
     app = QApplication(sys.argv)
+    apply_dark_theme(app)
 
     # Log what OpenGL/QSurfaceFormat we actually got
     actual_fmt = QSurfaceFormat.defaultFormat()
