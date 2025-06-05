@@ -1,310 +1,179 @@
-# File: prim_app/threads/sdk_camera_thread.py
-
+import sys
 import logging
-import imagingcontrol4 as ic4
-import numpy as np
-
+import threading
 from PyQt5.QtCore import QThread, pyqtSignal
-from PyQt5.QtGui import QImage
+import ic4
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class SDKCameraThread(QThread):
     """
-    Opens the camera (using the DeviceInfo + resolution passed in via set_* methods),
-    then starts a QueueSink‐based stream. Each new frame is emitted as a QImage via
-    frame_ready(QImage, buffer). When stop() is called, stops streaming and closes the device.
+    QThread subclass that opens a camera via IC Imaging Control 4, configures it,
+    and continually grabs frames from a QueueSink. Each new frame is emitted
+    via a PyQt signal as a raw numpy array.
+
+    Emits:
+        new_frame(array, width, height): whenever a new frame arrives
+        error(str): if any camera error occurs
     """
 
-    # Emitted once the grabber is open (but before streaming starts).
-    grabber_ready = pyqtSignal()
+    # Emitted whenever we have a new frame ready. The frame is passed as a raw
+    # byte-array (numpy-compatible), along with width and height.
+    new_frame = pyqtSignal(object, int, int)
 
-    # Emitted for each new frame: (QImage, raw_buffer_object)
-    frame_ready = pyqtSignal(QImage, object)
+    # Emitted if any error occurs inside the thread.
+    error = pyqtSignal(str)
 
-    # Emitted on error: (message, code_as_string)
-    error = pyqtSignal(str, str)
-
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        camera_serial: str,
+        pixel_format: str = "Mono8",
+        width: int = 2448,
+        height: int = 2048,
+        parent=None,
+    ):
+        """
+        Args:
+            camera_serial: the serial number (S/N) of the camera to open
+            pixel_format: one of the camera’s supported pixel-format names
+            width, height: desired acquisition resolution
+            parent: standard QObject parent for the QThread
+        """
         super().__init__(parent)
-        self.grabber: ic4.Grabber | None = None
+        self._camera_serial = camera_serial
+        self._pixel_format = pixel_format
+        self._target_width = width
+        self._target_height = height
+
         self._stop_requested = False
 
-        # Will be set by MainWindow before start():
-        self._device_info: ic4.DeviceInfo | None = None
-        # resolution_tuple is (width, height, pixel_format_name)
-        self._resolution: tuple[int, int, str] | None = None
-
-        # Keep a reference to the sink so we can stop it later
-        self._sink: ic4.QueueSink | None = None
-
-    def set_device_info(self, dev_info: ic4.DeviceInfo):
-        self._device_info = dev_info
-
-    def set_resolution(self, resolution_tuple: tuple[int, int, str]):
-        """
-        resolution_tuple: (width, height, pixel_format_name).
-        Pixel format name must exactly match one of the camera’s valid enumeration entries.
-        """
-        self._resolution = resolution_tuple
-
-    def run(self):
-        try:
-            # ─── Initialize IC4 (with “already called” catch) ─────────────────
-            try:
-                ic4.Library.init(
-                    api_log_level=ic4.LogLevel.INFO,
-                    log_targets=ic4.LogTarget.STDERR,
-                )
-                log.info("SDKCameraThread: Library.init() succeeded.")
-            except RuntimeError as e:
-                if "already called" in str(e):
-                    log.info("SDKCameraThread: IC4 already initialized; continuing.")
-                else:
-                    raise
-
-            # ─── Verify device_info was set ───────────────────────────────────
-            if self._device_info is None:
-                raise RuntimeError("No DeviceInfo passed to SDKCameraThread.")
-
-            # ─── Open the grabber ──────────────────────────────────────────────
-            self.grabber = ic4.Grabber()
-            self.grabber.device_open(self._device_info)
-            log.info(
-                f"SDKCameraThread: device_open() succeeded for "
-                f"'{self._device_info.model_name}' (S/N '{self._device_info.serial}')."
-            )
-
-            # ─── Apply PixelFormat & resolution (if provided) ─────────────────
-            if self._resolution is not None:
-                w, h, pf_name = self._resolution
-
-                # 1) Find the PixelFormat enumeration node
-                pf_node: ic4.PropEnumeration | None = (
-                    self.grabber.device_property_map.find_enumeration("PixelFormat")
-                )
-                if pf_node:
-                    # 2) Collect all valid entry names
-                    valid_pf_names = [entry.name for entry in pf_node.entries]
-
-                    if pf_name not in valid_pf_names:
-                        log.warning(
-                            f"SDKCameraThread: Requested PixelFormat={pf_name!r} is not valid. "
-                            f"Valid options are: {valid_pf_names}. Skipping PF assignment."
-                        )
-                    else:
-                        try:
-                            pf_node.value = pf_name
-                            log.info(f"SDKCameraThread: Set PixelFormat = {pf_name!r}")
-                        except ic4.IC4Exception as e:
-                            log.error(
-                                f"SDKCameraThread: Failed to set PixelFormat to {pf_name!r}: "
-                                f"{e.code}, {e.message}"
-                            )
-
-                        # 3) Only after PF is set do we set Width/Height
-                        w_node: ic4.PropInteger | None = (
-                            self.grabber.device_property_map.find_integer("Width")
-                        )
-                        h_node: ic4.PropInteger | None = (
-                            self.grabber.device_property_map.find_integer("Height")
-                        )
-                        if w_node and h_node:
-                            try:
-                                w_node.value = w
-                                h_node.value = h
-                                log.info(f"SDKCameraThread: Set resolution = {w}×{h}")
-                            except ic4.IC4Exception as e:
-                                log.warning(
-                                    f"SDKCameraThread: Could not set resolution {w}×{h}: "
-                                    f"{e.code}, {e.message}"
-                                )
-                        else:
-                            log.warning(
-                                "SDKCameraThread: Could not find Width/Height properties after PF assignment."
-                            )
-                else:
-                    log.warning(
-                        "SDKCameraThread: PixelFormat node not found; using camera default."
-                    )
-
-            # ─── Force Continuous acquisition mode ─────────────────────────────
-            try:
-                acq_node: ic4.PropEnumeration | None = (
-                    self.grabber.device_property_map.find_enumeration("AcquisitionMode")
-                )
-                if acq_node:
-                    entries = [e.name for e in acq_node.entries]
-                    if "Continuous" in entries:
-                        acq_node.value = "Continuous"
-                        log.info("SDKCameraThread: Set AcquisitionMode = Continuous")
-                    else:
-                        acq_node.value = entries[0]
-                        log.info(f"SDKCameraThread: Set AcquisitionMode = {entries[0]}")
-                else:
-                    log.warning(
-                        "SDKCameraThread: Could not find AcquisitionMode; proceeding."
-                    )
-            except Exception as e:
-                log.warning(f"SDKCameraThread: Could not set AcquisitionMode: {e}")
-
-            # ─── Disable trigger so camera will free‐run ────────────────────────
-            try:
-                trig_node: ic4.PropEnumeration | None = (
-                    self.grabber.device_property_map.find_enumeration("TriggerMode")
-                )
-                if trig_node:
-                    trig_node.value = "Off"
-                    log.info("SDKCameraThread: Set TriggerMode = Off")
-                else:
-                    log.warning(
-                        "SDKCameraThread: TriggerMode node not found; assuming free‐run."
-                    )
-            except Exception as e:
-                log.warning(f"SDKCameraThread: Could not disable TriggerMode: {e}")
-
-            # ─── Signal “grabber_ready” so UI can enable controls ───────────────
-            self.grabber_ready.emit()
-
-            # ─── Build QueueSink requesting Mono8 (fallback to native PF if needed)─
-            try:
-                self._sink = ic4.QueueSink(
-                    self, [ic4.PixelFormat.Mono8], max_output_buffers=8
-                )
-                log.info(
-                    "SDKCameraThread: Created QueueSink for PFs = ['Mono8'], max_output_buffers=8"
-                )
-            except Exception:
-                # If Mono8 is not available, fall back to the camera’s native PF:
-                native_pf = self._resolution[2] if self._resolution else None
-                if native_pf and hasattr(ic4.PixelFormat, native_pf):
-                    pf_enum_value = getattr(ic4.PixelFormat, native_pf)
-                    self._sink = ic4.QueueSink(
-                        self, [pf_enum_value], max_output_buffers=8
-                    )
-                    log.info(
-                        f"SDKCameraThread: Fallback QueueSink created for native PF = {native_pf!r}, max_output_buffers=8"
-                    )
-                else:
-                    raise RuntimeError(
-                        "SDKCameraThread: Unable to create QueueSink for Mono8 or native PF."
-                    )
-
-            # ─── Start streaming immediately ───────────────────────────────────
-            from imagingcontrol4 import StreamSetupOption
-
-            self.grabber.stream_setup(
-                self._sink,
-                setup_option=StreamSetupOption.ACQUISITION_START,
-            )
-            log.info(
-                "SDKCameraThread: stream_setup(ACQUISITION_START) succeeded. Entering frame loop…"
-            )
-
-            # ─── Frame loop: IC4 calls frames_queued() whenever a new buffer is ready ─
-            while not self._stop_requested:
-                self.msleep(10)
-
-            # ─── Stop streaming & close device ─────────────────────────────────
-            if self.grabber.is_streaming:
-                self.grabber.stream_stop()
-            if self.grabber.is_device_open:
-                self.grabber.device_close()
-            log.info("SDKCameraThread: Streaming stopped, device closed.")
-
-        except Exception as e:
-            msg = str(e)
-            code_enum = getattr(e, "code", None)
-            code_str = str(code_enum) if code_enum else ""
-            log.exception("SDKCameraThread: encountered an error.")
-            self.error.emit(msg, code_str)
-
-        finally:
-            try:
-                ic4.Library.exit()
-                log.info("SDKCameraThread: Library.exit() called.")
-            except Exception:
-                pass
-
-    def frames_queued(self, sink: ic4.QueueSink):
-        """
-        This callback is invoked by IC4 each time a new buffer is available.
-        We pop all available buffers (keeping only the very newest), convert it to QImage,
-        emit it to the UI, then call buf.queue_buffer() so IC4 can reuse them.
-        """
-        try:
-            # 1) Pop the first buffer → treat as 'latest_buf' initially
-            latest_buf: ic4.ImageBuffer = sink.pop_output_buffer()
-
-            # 2) Drain any other buffers, immediately returning them
-            while True:
-                try:
-                    older: ic4.ImageBuffer = sink.pop_output_buffer(timeout=0)
-                    older.queue_buffer()
-                except Exception:
-                    # No more buffers available
-                    break
-
-            # 3) 'latest_buf' is now truly the freshest buffer
-            arr = (
-                latest_buf.numpy_wrap()
-            )  # shape=(H, W, 1) or (H, W, 3), dtype=uint8/uint16
-
-            # 4) Convert to 8‐bit grayscale if needed (Mono8 cameras skip this)
-            if arr.dtype == np.uint8:
-                gray8 = (
-                    arr[..., 0] if arr.ndim == 3 else arr
-                )  # strip channel dimension if present
-            else:
-                # find max, scale into [0..255]
-                max_val = float(arr.max()) if arr.max() > 0 else 1.0
-                scale = 255.0 / max_val
-                gray8 = (arr.astype(np.float32) * scale).astype(np.uint8)
-                gray8 = gray8[..., 0] if gray8.ndim == 3 else gray8
-
-            h, w = gray8.shape[:2]
-
-            # 5) Build a QImage from single‐channel grayscale
-            qimg = QImage(
-                gray8.data,
-                w,
-                h,
-                gray8.strides[0],
-                QImage.Format_Grayscale8,
-            )
-            qimg_copy = qimg.copy()  # copy before returning the buffer
-
-            # 6) Emit only the newest frame to the UI
-            self.frame_ready.emit(qimg_copy, latest_buf)
-
-            # 7) Return the newest buffer to IC4
-            latest_buf.queue_buffer()
-
-        except Exception as e:
-            log.error(
-                f"SDKCameraThread.frames_queued: error popping/converting buffer: {e}"
-            )
-            code_enum = getattr(e, "code", None)
-            code_str = str(code_enum) if code_enum else ""
-            self.error.emit(str(e), code_str)
-
-    # ─── “Listener” methods for QueueSink ────────────────────────────────
-    # We implement these two methods; IC4 will detect them by duck-typing,
-    # so we do not need to explicitly inherit from QueueSinkListener.
-
-    def sink_connected(
-        self, sink: ic4.QueueSink, pixel_format, min_buffers_required
-    ) -> bool:
-        # Return True so the QueueSink actually attaches
-        return True
-
-    def sink_disconnected(self, sink: ic4.QueueSink) -> None:
-        # Called when the sink is torn down—no action needed
-        pass
+        # We’ll store references here so that Python doesn’t collect them prematurely:
+        self._grabber = None  # ic4.Grabber
+        self._sink = None  # ic4.QueueSink
 
     def stop(self):
         """
-        Request the streaming loop to end. After this, run() will clean up.
+        Signals the thread to stop. Once this is called, the next time the loop in run()
+        checks, it will break and shut down cleanly.
         """
         self._stop_requested = True
+
+    def run(self):
+        """
+        Main thread entry point. Initializes IC4 (only on the first camera open),
+        opens the camera, configures it, creates a QueueSink, starts streaming, and
+        enters a loop that pops buffers from the sink, emits them, and then lets them
+        be recycled automatically.
+        """
+        try:
+            # Initialize IC4 (if not already initialized).
+            if not ic4.Library.is_initialized():
+                ic4.Library.init()
+                logger.info("SDKCameraThread: IC4 Library initialized.")
+            else:
+                logger.info("SDKCameraThread: IC4 already initialized; continuing.")
+
+            # Create a Grabber, open the device by serial number:
+            self._grabber = ic4.Grabber()
+            self._grabber.device_open(serial=self._camera_serial)
+            logger.info(
+                f"SDKCameraThread: device_open() succeeded for S/N '{self._camera_serial}'."
+            )
+
+            # Set PixelFormat, Resolution, AcquisitionMode, and TriggerMode:
+            # (If any of these fail, IC4 will throw an exception.)
+            node_map = self._grabber.device_node_map()
+
+            # PixelFormat
+            node_map["PixelFormat".encode("utf-8")].value = self._pixel_format
+            logger.info(f"SDKCameraThread: Set PixelFormat = '{self._pixel_format}'")
+
+            # Width & Height
+            node_map["Width".encode("utf-8")].value = self._target_width
+            node_map["Height".encode("utf-8")].value = self._target_height
+            logger.info(
+                f"SDKCameraThread: Set resolution = {self._target_width}×{self._target_height}"
+            )
+
+            # AcquisitionMode → Continuous
+            node_map["AcquisitionMode".encode("utf-8")].value = "Continuous"
+            logger.info("SDKCameraThread: Set AcquisitionMode = Continuous")
+
+            # TriggerMode → Off
+            node_map["TriggerMode".encode("utf-8")].value = "Off"
+            logger.info("SDKCameraThread: Set TriggerMode = Off")
+
+            # Create a QueueSink that will hold up to 8 output buffers for our chosen pixel format:
+            pf_list = [self._pixel_format]
+            max_buffers = 8
+            self._sink = ic4.QueueSink(pf_list, max_output_buffers=max_buffers)
+            logger.info(
+                f"SDKCameraThread: Created QueueSink for PFs = {pf_list}, max_output_buffers={max_buffers}"
+            )
+
+            # Attach the sink to the grabber and start streaming:
+            self._grabber.stream_put(self._sink)
+            self._grabber.stream_setup(ic4.StreamCommand.ACQUISITION_START)
+            logger.info(
+                "SDKCameraThread: stream_setup(ACQUISITION_START) succeeded. Entering frame loop…"
+            )
+
+            # Frame‐popping loop:
+            while not self._stop_requested:
+                try:
+                    # Wait up to 1000 ms for the next buffer. If none arrives, a timeout exception is raised.
+                    buf = self._sink.pop_output_buffer(timeout_ms=1000)
+                except ic4.IC4Exception as e:
+                    # If it’s a timeout, just loop back and check _stop_requested again.
+                    if e.error_code == ic4.ErrorCode.Timeout:
+                        continue
+                    else:
+                        # Any other error must be reported and break out.
+                        raise
+
+                # We got a valid ImageBuffer → convert it to a numpy array:
+                try:
+                    img_bytes = buf.ptr_data()  # raw pointer to image bytes
+                    size = buf.image_size()  # total number of bytes
+                    width = buf.image_width()
+                    height = buf.image_height()
+
+                    # Copy out to Python bytes; after this, dropping 'buf' will automatically requeue it:
+                    raw = img_bytes[:size]  # memcpy‐style; create a bytes object
+
+                    # Emit the raw bytes plus dimensions
+                    self.new_frame.emit(raw, width, height)
+                finally:
+                    # IMPORTANT: simply delete our reference to buf so that IC4 can recycle it:
+                    del buf
+
+            # If we ever exit the loop (stop requested), stop acquisition:
+            self._grabber.stream_setup(ic4.StreamCommand.ACQUISITION_STOP)
+            logger.info("SDKCameraThread: stream_setup(ACQUISITION_STOP) called.")
+
+        except Exception as ex:
+            # Catch any exceptions; emit an error signal, then clean up and exit.
+            msg = f"{ex.__class__.__name__}: {ex}"
+            logger.error(f"SDKCameraThread: UNHANDLED ERROR → {msg}")
+            self.error.emit(msg)
+
+            # If the grabber was open/streaming, try to stop it properly:
+            try:
+                if self._grabber is not None:
+                    self._grabber.stream_setup(ic4.StreamCommand.ACQUISITION_STOP)
+            except Exception:
+                pass
+        finally:
+            # Ensure we close the device and release IC4 objects:
+            try:
+                if self._grabber is not None and self._grabber.device_is_open():
+                    self._grabber.device_close()
+                    logger.info("SDKCameraThread: device_close() succeeded.")
+            except Exception:
+                pass
+
+            # Release references so Python can garbage‐collect IC4 objects:
+            self._sink = None
+            self._grabber = None
+            logger.info("SDKCameraThread: Thread exiting cleanly.")
