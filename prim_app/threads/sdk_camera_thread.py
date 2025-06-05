@@ -194,27 +194,27 @@ class SDKCameraThread(QThread):
 
     def frames_queued(self, sink):
         """
-        This callback is invoked by IC4 each time a new buffer is available.
-        We pop all available buffers (keeping only the very newest), convert it to QImage,
-        emit it to the UI, and then call buf.release() to return each buffer to IC4.
+        Called whenever a new buffer arrives. We pop all buffers,
+        keeping only the very latest, convert it to QImage, emit it,
+        then call buf.queue_buffer() to return it to IC4.
         """
         try:
-            # 1) Pop the first buffer (treat this initially as 'latest_buf')
+            # 1) Pop the first buffer → treat as 'latest_buf' initially
             latest_buf = sink.pop_output_buffer()
 
-            # 2) Pop any other buffers; immediately release them
+            # 2) Drain any other buffers, immediately returning them
             while True:
                 try:
                     older = sink.pop_output_buffer(timeout=0)
-                    older.release()
+                    older.queue_buffer()
                 except Exception:
-                    # No more buffers in the queue
+                    # No more buffers available
                     break
 
-            # 3) 'latest_buf' now holds the freshest buffer
+            # 3) 'latest_buf' is now the freshest buffer
             arr = latest_buf.numpy_wrap()  # shape=(H, W), dtype=uint8 for Mono8
 
-            # 4) Convert to 8-bit grayscale if needed (Mono8 cameras skip this)
+            # 4) Convert to 8-bit if necessary
             if arr.dtype == np.uint8:
                 gray8 = arr
             else:
@@ -226,13 +226,13 @@ class SDKCameraThread(QThread):
 
             # 5) Build a QImage from single-channel grayscale
             qimg = QImage(gray8.data, w, h, gray8.strides[0], QImage.Format_Grayscale8)
-            qimg_copy = qimg.copy()  # copy before release
+            qimg_copy = qimg.copy()  # copy before returning the buffer
 
-            # 6) Emit only the newest frame to the UI
+            # 6) Emit only the latest frame to the UI
             self.frame_ready.emit(qimg_copy, latest_buf)
 
-            # 7) Release the newest buffer so IC4 can reuse it
-            latest_buf.release()
+            # 7) Return the latest buffer to IC4
+            latest_buf.queue_buffer()
 
         except Exception as e:
             log.error(
