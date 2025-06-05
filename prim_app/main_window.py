@@ -400,45 +400,6 @@ class MainWindow(QMainWindow):
                     acq_node.value = names[0]
                     log.info(f"    • Set AcquisitionMode = {names[0]}")
 
-            # 5) Enumerate all PixelFormat entries (and availability flags)
-            pf_node = grab.device_property_map.find_enumeration("PixelFormat")
-            if pf_node is None:
-                log.error(
-                    "  → pf_node is None (could not find PixelFormat enumeration)."
-                )
-            else:
-                all_pf_entries = [entry.name for entry in pf_node.entries]
-                avail_flags = [
-                    getattr(entry, "is_available", False) for entry in pf_node.entries
-                ]
-                log.info(f"  → PixelFormat entries: {all_pf_entries}")
-                log.info(f"  → PixelFormat availability: {avail_flags}")
-
-                # 6) Try each available PixelFormat, then read back Width/Height
-                for entry in pf_node.entries:
-                    pf_name = entry.name
-                    if not getattr(entry, "is_available", False):
-                        log.debug(f"    • Skipping PF={pf_name} (is_available=False)")
-                        continue
-
-                    try:
-                        pf_node.value = pf_name
-                        w_prop = grab.device_property_map.find_integer("Width")
-                        h_prop = grab.device_property_map.find_integer("Height")
-                        if w_prop and h_prop:
-                            w = w_prop.value
-                            h = h_prop.value
-                            display_str = f"{w}×{h} ({pf_name})"
-                            log.info(f"    • Added resolution: {display_str}")
-                            self.resolution_combo.addItem(display_str, (w, h, pf_name))
-                        else:
-                            log.warning(
-                                f"    • PF={pf_name} succeeded, but could not read Width/Height."
-                            )
-                    except Exception as e:
-                        log.warning(f"    • Could not set PF={pf_name}: {e}")
-                        continue
-
             # 7) Close the camera
             grab.device_close()
             log.info("  → grab.device_close() succeeded")
