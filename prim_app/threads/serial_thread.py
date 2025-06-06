@@ -116,8 +116,8 @@ class SerialThread(QThread):
                                 )
                             else:
                                 try:
-                                    t_device = float(parts[0])
-                                    frame_idx_device = int(parts[1])
+                                    frame_idx_device = int(parts[0])
+                                    t_device = float(parts[1])
                                     p = float(parts[2])
                                 except ValueError as ve:
                                     log.error(f"Parse error for line '{line}': {ve}")
