@@ -36,7 +36,16 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QVariant, QDateTime, QSize
+from PyQt5.QtCore import (
+    Qt,
+    pyqtSlot,
+    QTimer,
+    QVariant,
+    QDateTime,
+    QSize,
+    QThread,
+    QMetaObject,
+)
 from PyQt5.QtGui import QIcon, QKeySequence, QImage
 
 import prim_app
@@ -66,7 +75,7 @@ from ui.canvas.pressure_plot_widget import PressurePlotWidget
 
 from threads.serial_thread import SerialThread
 from threads.sdk_camera_thread import SDKCameraThread
-from threads.recording_thread import RecordingThread
+from recording_manager import RecordingManager
 from utils.utils import list_serial_ports
 
 log = logging.getLogger(__name__)
@@ -79,8 +88,8 @@ class MainWindow(QMainWindow):
         # ─── State Variables ─────────────────────────────────────────────────────
         self._serial_thread = None
         self._serial_active = False
-        self._recording_worker = None
-        self._is_recording = False
+        self._recorder_thread = None
+        self._recorder_worker = None
 
         # Camera‐related
         self.device_combo = None
@@ -514,7 +523,7 @@ class MainWindow(QMainWindow):
             "Start &Recording",
             self,
             shortcut=Qt.CTRL | Qt.Key_R,
-            triggered=self._trigger_start_recording_dialog,
+            triggered=self._on_start_recording,
             enabled=False,
         )
         am.addAction(self.start_recording_action)
@@ -523,7 +532,7 @@ class MainWindow(QMainWindow):
             "Stop R&ecording",
             self,
             shortcut=Qt.CTRL | Qt.Key_T,
-            triggered=self._trigger_stop_recording,
+            triggered=self._on_stop_recording,
             enabled=False,
         )
         am.addAction(self.stop_recording_action)
@@ -642,22 +651,6 @@ class MainWindow(QMainWindow):
         if hasattr(self, "plot_control_panel"):
             self.plot_control_panel.setEnabled(True)
 
-    # ─── Camera/Recording Dialogs & Methods ──────────────────────────────────
-    # ─── Placeholder Stubs for Recording Actions ───────────────────────────────
-    def _trigger_start_recording_dialog(self):
-        """
-        Stub for “Start Recording” action.
-        Eventually this should pop up your record‐settings dialog; for now, do nothing.
-        """
-        log.info("Start Recording requested (stub).")
-
-    def _trigger_stop_recording(self):
-        """
-        Stub for “Stop Recording” action.
-        Eventually this should stop your RecordingWorker; for now, do nothing.
-        """
-        log.info("Stop Recording requested (stub).")
-
     # ─── Menu Actions & Dialog Slots ──────────────────────────────────────────
     def _export_plot_data_as_csv(self):
         path, _ = QFileDialog.getSaveFileName(
@@ -745,7 +738,7 @@ class MainWindow(QMainWindow):
                 self._serial_thread = None
                 # Re‐enable the combo in case it got disabled
                 self.serial_port_combobox.setEnabled(True)
-                self._update_recording_actions_enable_state()
+                self._refresh_recording_button_states()
 
         # (2) Otherwise, a thread is already running → go into “DISCONNECT” branch
         else:
@@ -766,7 +759,7 @@ class MainWindow(QMainWindow):
             self._serial_thread = None
 
         # Finally, update the record‐button enable states (Start/Stop Recording)
-        self._update_recording_actions_enable_state()
+        self._refresh_recording_button_states()
 
     @pyqtSlot(str)
     def _handle_serial_status_change(self, status: str):
@@ -778,25 +771,7 @@ class MainWindow(QMainWindow):
         )
         self.top_ctrl.update_connection_status(status, connected_flag)
 
-        # If the thread died unexpectedly (status_changed says “Disconnected”),
-        # make sure our internal flag stays False and flip the button:
-
-        if not connected_flag and self._serial_active:
-            # The thread just reported “Disconnected,” so reset:
-            self._serial_active = False
-            self.connect_serial_action.setIcon(self.icon_connect)
-            self.connect_serial_action.setText("Connect PRIM Device")
-            self.serial_port_combobox.setEnabled(True)
-
-            if self._is_recording:
-                QMessageBox.information(
-                    self,
-                    "Recording Stopped",
-                    "PRIM device disconnected during recording.",
-                )
-                self._trigger_stop_recording()
-
-        self._update_recording_actions_enable_state()
+        self._refresh_recording_button_states()
 
     @pyqtSlot(str)
     def _handle_serial_error(self, msg: str):
@@ -804,7 +779,7 @@ class MainWindow(QMainWindow):
         # Show it in the status bar so user sees it
         self.statusBar().showMessage(f"Serial Error: {msg}", 6000)
         # Also re-evaluate whether the recording buttons are enabled
-        self._update_recording_actions_enable_state()
+        self._refresh_recording_button_states()
 
     @pyqtSlot()
     def _handle_serial_thread_finished(self):
@@ -828,7 +803,7 @@ class MainWindow(QMainWindow):
             )
 
         # Re‐evaluate “Start/Stop Recording” button states
-        self._update_recording_actions_enable_state()
+        self._refresh_recording_button_states()
 
     @pyqtSlot(int, float, float)
     def _handle_new_serial_data(self, idx: int, t: float, p: float):
@@ -852,49 +827,99 @@ class MainWindow(QMainWindow):
                 f"PRIM Data: Idx={idx}, Time={t:.3f}s, P={p:.2f}"
             )
 
-        # 5) If we are actively recording, queue it to the CSV
-        if self._is_recording and self._recording_worker:
-            try:
-                self._recording_worker.add_csv_data(t, idx, p)
-            except Exception:
-                log.exception("Error queueing CSV data for recording.")
-                self.statusBar().showMessage(
-                    "CSV queue error. Stopping recording.", 5000
-                )
-                self._trigger_stop_recording()
+    # ──────────────────────────────────────────────────────────────
+    # Recording Management
+    # ──────────────────────────────────────────────────────────────
 
-    def _update_recording_actions_enable_state(self):
+    @pyqtSlot()
+    def _on_start_recording(self):
         """
-        Enable “Start Recording” only if serial is connected and not currently recording.
-        Enable “Stop Recording” only if a recording is in progress.
+        Called when the user clicks ‘Start Recording’.
+        Prompts for output directory, starts RecordingManager in its own thread,
+        and connects camera & serial signals to it.
+        """
+        # 1) Ask the user where to save files
+        outdir = QFileDialog.getExistingDirectory(
+            self, "Select Folder to Save Recording"
+        )
+        if not outdir:
+            return  # user cancelled
+
+        # 2) Create a QThread and a RecordingManager, then move the worker into that thread
+        self._recorder_thread = QThread(self)
+        self._recorder_worker = RecordingManager(output_dir=outdir)
+        self._recorder_worker.moveToThread(self._recorder_thread)
+
+        # 3) When the thread starts, call start_recording() on the worker
+        self._recorder_thread.started.connect(self._recorder_worker.start_recording)
+        # 4) When the worker emits ‘finished’, quit the thread and delete the worker
+        self._recorder_worker.finished.connect(self._recorder_thread.quit)
+        self._recorder_worker.finished.connect(self._recorder_worker.deleteLater)
+        self._recorder_thread.finished.connect(self._recorder_thread.deleteLater)
+
+        # 5) Hook up camera & serial signals to the worker’s slots
+        self._serial_thread.data_ready.connect(self._recorder_worker.append_pressure)
+        self.camera_thread.frame_ready.connect(self._recorder_worker.append_frame)
+
+        # 6) Start the recording thread
+        self._recorder_thread.start()
+
+        # 7) Update button states
+        self._refresh_recording_button_states()
+        print("[MainWindow] Recording started.")
+
+    @pyqtSlot()
+    def _on_stop_recording(self):
+        """
+        Called when the user clicks ‘Stop Recording’.
+        Disconnects signals and tells the worker to stop.
+        """
+        if not self._recorder_worker or not self._recorder_thread:
+            return
+
+        # 1) Disconnect signals so no new data is queued
+        try:
+            self._serial_thread.data_ready.disconnect(
+                self._recorder_worker.append_pressure
+            )
+        except Exception:
+            pass
+        try:
+            self.camera_thread.frame_ready.disconnect(
+                self._recorder_worker.append_frame
+            )
+        except Exception:
+            pass
+
+        # 2) Tell the worker to stop (it will flush & close files, then emit ‘finished’)
+        QMetaObject.invokeMethod(
+            self._recorder_worker, "stop_recording", Qt.QueuedConnection
+        )
+
+        # 3) Update button states
+        self._refresh_recording_button_states()
+        print("[MainWindow] Stop recording requested.")
+
+    def _refresh_recording_button_states(self):
+        """
+        Enable “Start Recording” only if serial is connected and no recorder thread is running.
+        Enable “Stop Recording” only if a RecordingManager thread is active.
         """
         serial_ready = (
             self._serial_thread is not None and self._serial_thread.isRunning()
         )
-        can_start = serial_ready and not self._is_recording
-        self.start_recording_action.setEnabled(bool(can_start))
-        self.stop_recording_action.setEnabled(bool(self._is_recording))
+        recorder_running = (
+            self._recorder_thread is not None and self._recorder_thread.isRunning()
+        )
+        can_start = serial_ready and not recorder_running
+        can_stop = recorder_running
+
+        self.start_recording_action.setEnabled(can_start)
+        self.stop_recording_action.setEnabled(can_stop)
 
     # ─── Window Close Cleanup ──────────────────────────────────────────────────
     def closeEvent(self, event):
         log.info("MainWindow closeEvent triggered.")
-
-        if self._is_recording:
-            reply = QMessageBox.question(
-                self,
-                "Confirm Exit While Recording",
-                "A recording session is currently active. Stop recording and exit?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if reply == QMessageBox.Yes:
-                self._trigger_stop_recording()
-                if self._recording_worker and hasattr(self._recording_worker, "wait"):
-                    if not self._recording_worker.wait(5000):
-                        log.warning("Recording worker did not finish cleanly.")
-            else:
-                event.ignore()
-                return
 
         threads_to_clean = []
 
@@ -913,12 +938,12 @@ class MainWindow(QMainWindow):
             )
         )
 
-        # RecordingWorker
+        # RecordingManager (in its QThread)
         threads_to_clean.append(
             (
-                "RecordingWorker",
-                self._recording_worker,
-                getattr(self._recording_worker, "stop_worker", None),
+                "RecordingManager",
+                self._recorder_thread,
+                None,  # We handle stopping via signals/slots below
             )
         )
 
@@ -950,6 +975,15 @@ class MainWindow(QMainWindow):
                         log.error(f"Exception stopping {name}: {e}")
                 if hasattr(thread_instance, "deleteLater"):
                     thread_instance.deleteLater()
+        # If a recording thread is still alive, make sure we send stop_recording()
+        if (
+            self._recorder_worker
+            and self._recorder_thread
+            and self._recorder_thread.isRunning()
+        ):
+            QMetaObject.invokeMethod(
+                self._recorder_worker, "stop_recording", Qt.QueuedConnection
+            )
 
         try:
             self.device_combo.clear()
