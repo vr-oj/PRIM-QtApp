@@ -7,6 +7,7 @@ import json
 import numpy as np
 import tifffile
 from PyQt5.QtCore import QObject, pyqtSlot, pyqtSignal
+from PyQt5.QtGui import QImage
 
 
 class RecordingManager(QObject):
@@ -32,6 +33,9 @@ class RecordingManager(QObject):
 
         # Once True, slots will actually write; once False, they do nothing.
         self.is_recording = False
+
+        # Keep track of how many frames we have written:
+        self._frame_counter = 0
 
     @pyqtSlot()
     def start_recording(self):
@@ -92,12 +96,15 @@ class RecordingManager(QObject):
                 f"[RecordingManager] Error writing CSV row ({frameIdx}, {t_device}, {pressure}): {e}"
             )
 
-    @pyqtSlot(int, object)
-    def append_frame(self, frameIdx, qimage):
+    @pyqtSlot(QImage, object)
+    def append_frame(self, qimage, raw):
         """
         Slot connected to CameraThread.frame_ready(frameIdx, QImage).
         Converts QImage → numpy array, then writes a new page to the TIFF with
         a JSON 'frameIdx' tag in the page_description.
+        Slot connected to SDKCameraThread.frame_ready(QImage, raw_data).
+        Converts QImage → numpy array, then writes a new page to the TIFF. Each
+        page is tagged with a sequential frame index starting at zero.
         """
         if not self.is_recording or self.tif_writer is None:
             return
@@ -105,8 +112,11 @@ class RecordingManager(QObject):
         try:
             arr = self._qimage_to_numpy(qimage)
             metadata = {"frameIdx": frameIdx}
+            arr = self._qimage_to_numpy(qimage)
+            metadata = {"frameIdx": self._frame_counter}
             # Write one page to the multipage TIFF:
             self.tif_writer.write(arr, description=json.dumps(metadata))
+            self._frame_counter += 1
         except Exception as e:
             print(
                 f"[RecordingManager] Error writing TIFF page for frame {frameIdx}: {e}"
