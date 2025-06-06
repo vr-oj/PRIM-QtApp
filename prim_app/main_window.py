@@ -263,10 +263,6 @@ class MainWindow(QMainWindow):
         )
         self.bottom_split.addWidget(self.pressure_plot_widget)
 
-        total_width = self.width() if self.width() > 0 else 800
-        # e.g. 40% for camera, 60% for plot at startup:
-        self.bottom_split.setSizes([int(total_width * 0.1), int(total_width * 0.2)])
-
         self.bottom_split.setStretchFactor(0, 1)
         self.bottom_split.setStretchFactor(1, 1)
 
