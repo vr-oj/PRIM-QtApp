@@ -48,3 +48,4 @@ htmlcov/
 
 prim_app/last_run.txt
 /primenv
+*.zip
