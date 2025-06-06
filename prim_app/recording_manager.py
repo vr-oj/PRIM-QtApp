@@ -46,6 +46,9 @@ class RecordingManager(QObject):
         # Frame counter (resets to 0 when first tick arrives)
         self._frame_counter = 0
 
+        self._last_deviceTime = None
+        self._last_pressure = None
+
     @pyqtSlot()
     def start_recording(self):
         """
@@ -88,7 +91,9 @@ class RecordingManager(QObject):
             try:
                 self.csv_file = open(self._csv_path, "w", newline="")
                 self.csv_writer = csv.writer(self.csv_file)
-                self.csv_writer.writerow(["frameIdx", "deviceTime", "pressure"])
+                self.csv_writer.writerow([frameIdx, t_device, pressure])
+                self._last_deviceTime = t_device
+                self._last_pressure = pressure
             except Exception as e:
                 print(f"[RecordingManager] Failed to open CSV: {e}")
                 self.is_recording = False
@@ -136,7 +141,11 @@ class RecordingManager(QObject):
         if self.tif_writer:
             try:
                 arr = self._qimage_to_numpy(qimage)
-                metadata = {"frameIdx": self._frame_counter}
+                metadata = {
+                    "frameIdx": self._frame_counter,
+                    "deviceTime": self._last_deviceTime,
+                    "pressure": self._last_pressure,
+                }
                 self.tif_writer.write(arr, description=json.dumps(metadata))
                 self._frame_counter += 1
             except Exception as e:
