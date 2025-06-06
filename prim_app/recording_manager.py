@@ -99,9 +99,6 @@ class RecordingManager(QObject):
     @pyqtSlot(QImage, object)
     def append_frame(self, qimage, raw):
         """
-        Slot connected to CameraThread.frame_ready(frameIdx, QImage).
-        Converts QImage → numpy array, then writes a new page to the TIFF with
-        a JSON 'frameIdx' tag in the page_description.
         Slot connected to SDKCameraThread.frame_ready(QImage, raw_data).
         Converts QImage → numpy array, then writes a new page to the TIFF. Each
         page is tagged with a sequential frame index starting at zero.
@@ -110,16 +107,19 @@ class RecordingManager(QObject):
             return
 
         try:
+            # Convert QImage → H×W×3 numpy array
             arr = self._qimage_to_numpy(qimage)
-            metadata = {"frameIdx": frameIdx}
-            arr = self._qimage_to_numpy(qimage)
+            # Use the internal frame counter as our "frameIdx" metadata
             metadata = {"frameIdx": self._frame_counter}
-            # Write one page to the multipage TIFF:
+            # Write one page to the multipage TIFF
             self.tif_writer.write(arr, description=json.dumps(metadata))
             self._frame_counter += 1
         except Exception as e:
+            # Reference the same counter in the error message (minus one, since
+            # we only increment after a successful write)
+            failed_idx = max(0, self._frame_counter)
             print(
-                f"[RecordingManager] Error writing TIFF page for frame {frameIdx}: {e}"
+                f"[RecordingManager] Error writing TIFF page for frame {failed_idx}: {e}"
             )
 
     @pyqtSlot()
