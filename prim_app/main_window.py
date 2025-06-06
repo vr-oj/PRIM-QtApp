@@ -6,6 +6,7 @@ import re
 import logging
 import csv
 import json
+from datetime import datetime
 import imagingcontrol4 as ic4
 
 from PyQt5.QtWidgets import (
