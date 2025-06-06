@@ -18,9 +18,9 @@ class RecordingManager(QObject):
     and writes those to a CSV and a multipage TIFF respectively. When stop_recording()
     is called, it flushes and closes both files and emits 'finished'.
 
-    This version buffers any camera frames until the first Arduino (pressure) tick arrives.
-    Once the first pressure sample comes in, it opens both CSV and TIFF and dumps all
-    buffered frames, ensuring that CSV rows and TIFF pages stay aligned.
+    This version DROPS every camera frame until the first Arduino tick arrives,
+    then starts writing lock‐step: one CSV row per pressure tick, one TIFF page
+    per frame after that. No “extra” frames at the beginning or end.
     """
 
     # Emitted when the recording truly finishes closing files.
@@ -30,28 +30,28 @@ class RecordingManager(QObject):
         super().__init__(parent)
         self.output_dir = output_dir
 
-        # Paths (set in start_recording, but files actually opened on first pressure)
+        # Paths (we compute them in start_recording but only open on first pressure)
         self._csv_path = None
         self._tiff_path = None
 
-        # File handles and writers (only created once first pressure arrives)
+        # File handles & writers (initialized on first tick)
         self.csv_file = None
         self.csv_writer = None
         self.tif_writer = None
 
-        # Flags & buffers
+        # Recording flags
         self.is_recording = False
         self._got_first_sample = False
-        self._pending_frames = (
-            []
-        )  # Will hold QImage instances until first pressure tick
+
+        # Frame counter (resets to 0 when first tick arrives)
         self._frame_counter = 0
 
     @pyqtSlot()
     def start_recording(self):
         """
         Called when the QThread hosting this object starts.
-        Prepares paths but does not open files until the first pressure tick.
+        Pre‐computes file paths but does NOT open them yet. We wait until
+        the first append_pressure() call to actually open CSV + TIFF.
         """
         timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
         base_name = f"recording_{timestamp}"
@@ -60,46 +60,46 @@ class RecordingManager(QObject):
         self._csv_path = os.path.join(self.output_dir, f"{base_name}_pressure.csv")
         self._tiff_path = os.path.join(self.output_dir, f"{base_name}_video.tif")
 
-        # Reset flags and buffers
+        # Reset flags & counters
         self.is_recording = True
         self._got_first_sample = False
-        self._pending_frames.clear()
         self._frame_counter = 0
 
         print(
             f"[RecordingManager] Ready to record →\n  CSV will be: {self._csv_path}\n  TIFF will be: {self._tiff_path}"
         )
-        print(f"[RecordingManager] Waiting for first pressure sample to open files...")
+        print("[RecordingManager] Waiting for the first Arduino tick to open files...")
 
     @pyqtSlot(int, float, float)
     def append_pressure(self, frameIdx, t_device, pressure):
         """
         Slot connected to SerialThread.data_ready(frameIdx, t_device, pressure).
-        On the first call, opens CSV and TIFF, dumps any buffered frames,
-        then writes the first pressure row. Subsequent calls simply append.
+        On the very first call, opens CSV + TIFF and sets _got_first_sample=True.
+        Then writes each pressure row as it arrives.
         """
         if not self.is_recording:
             return
 
-        # If this is the first pressure sample, open files & drain buffer
+        # If this is the first pressure sample, open CSV and TIFF now
         if not self._got_first_sample:
             self._got_first_sample = True
 
-            # 1) Open CSV and write header
+            # 1) Open the CSV file and write header
             try:
                 self.csv_file = open(self._csv_path, "w", newline="")
                 self.csv_writer = csv.writer(self.csv_file)
                 self.csv_writer.writerow(["frameIdx", "deviceTime", "pressure"])
             except Exception as e:
-                print(f"[RecordingManager] Failed to open CSV for writing: {e}")
+                print(f"[RecordingManager] Failed to open CSV: {e}")
                 self.is_recording = False
                 return
 
-            # 2) Open the multipage TIFF writer
+            # 2) Open the multipage TIFF writer (bigtiff=True for >4GB)
             try:
                 self.tif_writer = tifffile.TiffWriter(self._tiff_path, bigtiff=True)
             except Exception as e:
-                print(f"[RecordingManager] Failed to open TIFF for writing: {e}")
+                print(f"[RecordingManager] Failed to open TIFF: {e}")
+                # Close CSV if TIFF fails
                 if self.csv_file:
                     self.csv_file.close()
                     self.csv_file = None
@@ -110,21 +110,9 @@ class RecordingManager(QObject):
             print(
                 f"[RecordingManager] Recording truly started →\n  CSV: {self._csv_path}\n  TIFF: {self._tiff_path}"
             )
+            # From now on, append_frame() will write frames starting at counter=0.
 
-            # 3) Dump any buffered frames that arrived before the first pressure sample
-            for buffered_qimage in self._pending_frames:
-                try:
-                    arr = self._qimage_to_numpy(buffered_qimage)
-                    metadata = {"frameIdx": self._frame_counter}
-                    self.tif_writer.write(arr, description=json.dumps(metadata))
-                    self._frame_counter += 1
-                except Exception as e:
-                    print(
-                        f"[RecordingManager] Error writing buffered frame {self._frame_counter}: {e}"
-                    )
-            self._pending_frames.clear()
-
-        # Now, write the current pressure sample
+        # Write this pressure row
         if self.csv_writer:
             try:
                 self.csv_writer.writerow([frameIdx, t_device, pressure])
@@ -137,18 +125,14 @@ class RecordingManager(QObject):
     def append_frame(self, qimage, raw):
         """
         Slot connected to SDKCameraThread.frame_ready(QImage, raw_data).
-        Buffers frames until first pressure arrives; after that, writes directly.
+        DROPS every frame until the first Arduino tick has arrived.
+        After that, writes each frame into the TIFF with a sequential frameIdx.
         """
-        if not self.is_recording:
+        if not self.is_recording or not self._got_first_sample:
+            # We have not seen a pressure tick yet → drop this frame entirely.
             return
 
-        # If first pressure hasn't arrived yet, buffer this frame
-        if not self._got_first_sample:
-            # Store the QImage itself; we'll convert and flush once we open TIFF
-            self._pending_frames.append(qimage)
-            return
-
-        # Once we've seen the first pressure, the TIFF writer should be open
+        # Once first tick has arrived, tif_writer must be open
         if self.tif_writer:
             try:
                 arr = self._qimage_to_numpy(qimage)
@@ -164,15 +148,15 @@ class RecordingManager(QObject):
     @pyqtSlot()
     def stop_recording(self):
         """
-        Slot to be called from the main/UI thread when the user clicks "Stop Recording".
-        Closes TIFF and CSV (if open), clears state, and emits 'finished'.
+        Slot to be called from the main/UI thread when user clicks “Stop Recording”.
+        Closes TIFF + CSV (if open), resets state, and emits finished.
         """
         if not self.is_recording:
             return
 
         self.is_recording = False
 
-        # Close TIFF writer (if it was opened)
+        # 1) Close TIFF writer (if it opened)
         try:
             if self.tif_writer:
                 self.tif_writer.close()
@@ -180,7 +164,7 @@ class RecordingManager(QObject):
         except Exception as e:
             print(f"[RecordingManager] Error closing TIFF: {e}")
 
-        # Close CSV file (if it was opened)
+        # 2) Close CSV file (if it opened)
         try:
             if self.csv_file:
                 self.csv_file.close()
@@ -189,8 +173,7 @@ class RecordingManager(QObject):
         except Exception as e:
             print(f"[RecordingManager] Error closing CSV: {e}")
 
-        # Clear any buffers and reset state
-        self._pending_frames.clear()
+        # Reset flags
         self._got_first_sample = False
         self._frame_counter = 0
 
@@ -200,17 +183,12 @@ class RecordingManager(QObject):
     def _qimage_to_numpy(self, qimage):
         """
         Convert a PyQt5 QImage → H×W×3 numpy.ndarray (uint8, RGB).
-        If the QImage has an alpha channel, we discard it.
+        If there’s an alpha channel, drop it.
         """
-        # Ensure it’s in a known format (ARGB32) so bits() is contiguous.
         qimg = qimage.convertToFormat(qimage.Format_ARGB32)
-
-        w = qimg.width()
-        h = qimg.height()
+        w, h = qimg.width(), qimg.height()
         ptr = qimg.bits()
         ptr.setsize(qimg.byteCount())
         arr = np.frombuffer(ptr, np.uint8).reshape((h, w, 4))
-        # Drop alpha channel → BGR order because QImage stores it that way
-        # We want RGB order. Swap channels 0 and 2.
-        arr_rgb = arr[:, :, [2, 1, 0]]
+        arr_rgb = arr[:, :, [2, 1, 0]]  # Swap B<->R to get RGB
         return arr_rgb
