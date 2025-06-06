@@ -87,6 +87,7 @@ class PressurePlotWidget(QWidget):
         self.manual_xlim = None
         self.manual_ylim = (PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX)
         self.ax.set_ylim(self.manual_ylim)
+        self.window_duration = 100  # Duration of the visible window in seconds
 
         # Placeholder text
         self.placeholder = self.ax.text(
@@ -226,57 +227,57 @@ class PressurePlotWidget(QWidget):
     @pyqtSlot(float, float, bool, bool)
     def update_plot(self, t, p, auto_x, auto_y):
         # Remove placeholder on first data
-        if not self.times and self.placeholder and self.placeholder.get_visible():  #
-            self._update_placeholder(None)  # This will hide the placeholder
+        if not self.times and self.placeholder and self.placeholder.get_visible():
+            self._update_placeholder(None)
 
         # Append new data
-        self.times.append(t)  #
-        self.pressures.append(p)  #
-        self.line.set_data(self.times, self.pressures)  #
+        self.times.append(t)
+        self.pressures.append(p)
+        self.line.set_data(self.times, self.pressures)
 
+        # Remember the current axis limits so we only redraw if something changes:
         current_xlim = self.ax.get_xlim()
         current_ylim = self.ax.get_ylim()
 
-        # Auto-scale X
+        # ─── X-axis handling ───────────────────────────────
         if auto_x:
+            # Clear any manual X-limits and let matplotlib autoscale
             self.manual_xlim = None
             self.scrollbar.hide()
             if len(self.times) > 1:
                 start, end = self.times[0], self.times[-1]
                 pad = max(1, (end - start) * 0.05)
                 self.ax.set_xlim(start - pad * 0.1, end + pad * 0.9)
-            elif self.times:  # handles the case of a single data point
+            elif self.times:  # single data point
                 t0 = self.times[-1]
                 self.ax.set_xlim(t0 - 0.5, t0 + 0.5)
         else:
-            # Manual X range
-            if self.manual_xlim:
-                self.ax.set_xlim(self.manual_xlim)
-                # Show and update scrollbar
-                self._update_scrollbar()
-            elif (
-                self.times
-            ):  # If no manual set yet, default to full trace when auto_x is turned off
-                self.manual_xlim = (self.times[0], self.times[-1])
-                self.ax.set_xlim(self.manual_xlim)
-                self._update_scrollbar()
+            # SLIDING WINDOW: always show [t_latest - window_duration, t_latest]
+            t_latest = self.times[-1]
+            xmin = max(0.0, t_latest - self.window_duration)
+            xmax = t_latest
+            self.manual_xlim = (xmin, xmax)
+            self.ax.set_xlim(self.manual_xlim)
 
-        # Y-axis handling
+            # Hide scrollbar since we're “following” the newest point
+            self.scrollbar.hide()
+
+        # ─── Y-axis handling ───────────────────────────────
         if auto_y:
-            self.manual_ylim = None  # Clear manual Y limits if auto_y is on
-            if self.pressures:  # Ensure there's data to calculate min/max
+            self.manual_ylim = None  # clear any manual Y-limits
+            if self.pressures:
                 mn, mx = min(self.pressures), max(self.pressures)
-                pad = max(
-                    abs(mx - mn) * 0.1, 2.0
-                )  # Ensure pad is at least 2.0 for small ranges
+                pad = max(abs(mx - mn) * 0.1, 2.0)
                 self.ax.set_ylim(mn - pad, mx + pad)
         else:
-            if self.manual_ylim:  # Apply manual Y limits if they exist
+            if self.manual_ylim:
+                # Use whatever manual Y-limits have been set previously
                 self.ax.set_ylim(self.manual_ylim)
-            # If no manual_ylim is set and auto_y is false, it will keep the last auto-scaled Y or default
-            elif not self.pressures:  # If no data and not auto_y, set to default
+            elif not self.pressures:
+                # No data yet → fallback to default
                 self.ax.set_ylim(PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX)
 
+        # ─── Only redraw if limits or data changed ───────
         new_xlim = self.ax.get_xlim()
         new_ylim = self.ax.get_ylim()
 
