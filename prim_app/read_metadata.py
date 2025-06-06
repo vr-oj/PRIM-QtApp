@@ -2,7 +2,7 @@ import tifffile
 import json
 
 # Replace "recording_video.tif" with the actual file name (or full path)
-tif_path = "recording_2025-06-06_10-09-32_video.tif"
+tif_path = "C:/Users/Tykocki Lab - PRIM/Documents/PRIMAcquisition Results/2025-06-06/Fill1/recording_2025-06-06_12-35-41_video.tif"
 
 with tifffile.TiffFile(tif_path) as tif:
     for page in tif.pages:
