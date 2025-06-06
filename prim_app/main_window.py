@@ -910,13 +910,11 @@ class MainWindow(QMainWindow):
         Called when the user clicks ‘Stop Recording’.
         Disconnects signals and tells the worker to stop.
         """
-        # If there’s no active worker/thread, do nothing.
-        if not getattr(self, "_recorder_worker", None) or not getattr(
-            self, "_recorder_thread", None
-        ):
+        # If there is no worker/thread, nothing to do.
+        if not self._recorder_worker or not self._recorder_thread:
             return
 
-        # ─── 1) Disconnect signals so no new data is queued ─────────────────────────────────────────
+        # 1) Disconnect signals so no new data is queued
         try:
             self._serial_thread.data_ready.disconnect(
                 self._recorder_worker.append_pressure
@@ -931,12 +929,27 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # ─── 2) Tell the worker to stop (will flush & close files, then emit ‘finished’) ────────────
+        # 2) When the worker actually finishes, clean up our Python references.
+        def _cleanup_recorder():
+            # At this point, worker has finished and thread has quit.
+            # We can delete both and clear our Python handles:
+            self._recorder_thread = None
+            self._recorder_worker = None
+            # If you need to update button states right away:
+            self._refresh_recording_button_states()
+
+        # Connect the worker’s finished → cleanup slot
+        self._recorder_worker.finished.connect(_cleanup_recorder)
+        # Also, when the thread actually quits, call deleteLater on both objects:
+        self._recorder_worker.finished.connect(self._recorder_worker.deleteLater)
+        self._recorder_thread.finished.connect(self._recorder_thread.deleteLater)
+
+        # 3) Tell the worker to stop (it will flush & close files, then emit ‘finished’)
         QMetaObject.invokeMethod(
             self._recorder_worker, "stop_recording", Qt.QueuedConnection
         )
 
-        # ─── 3) Update button states (enable/disable as needed) ────────────────────────────────────
+        # 4) Immediately update button states (the actual cleanup will happen in _cleanup_recorder)
         self._refresh_recording_button_states()
         print("[MainWindow] Stop recording requested.")
 
@@ -961,80 +974,105 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         log.info("MainWindow closeEvent triggered.")
 
-        threads_to_clean = []
-
-        # CameraThread (we stored it in self.camera_thread)
-        cam_thread = self.camera_thread
-        threads_to_clean.append(
-            ("SDKCameraThread", cam_thread, getattr(cam_thread, "stop", None))
-        )
-
-        # SerialThread
-        threads_to_clean.append(
-            (
-                "SerialThread",
-                self._serial_thread,
-                getattr(self._serial_thread, "stop", None),
-            )
-        )
-
-        # RecordingManager (in its QThread)
-        threads_to_clean.append(
-            (
-                "RecordingManager",
-                self._recorder_thread,
-                None,  # We handle stopping via signals/slots below
-            )
-        )
-
-        for name, thread_instance, stop_method in threads_to_clean:
-            if thread_instance:
-                if (
-                    hasattr(thread_instance, "isRunning")
-                    and thread_instance.isRunning()
-                ):
-                    log.info(f"Stopping {name}...")
+        # 1) If RecordingManager is still running, request stop_recording() and wait.
+        if self._recorder_worker and self._recorder_thread:
+            if self._recorder_thread.isRunning():
+                log.info("Stopping RecordingManager...")
+                # Ask the worker to stop via queued call
+                QMetaObject.invokeMethod(
+                    self._recorder_worker, "stop_recording", Qt.QueuedConnection
+                )
+                # Wait up to 3 seconds for it to finish
+                if not self._recorder_thread.wait(3000):
+                    log.warning(
+                        "RecordingManager thread did not stop gracefully; forcing terminate."
+                    )
                     try:
-                        if stop_method:
-                            stop_method()
-                        else:
-                            log.warning(
-                                f"No stop method for {name}. Attempting terminate."
-                            )
-                        timeout = 3000 if name == "RecordingWorker" else 1500
-                        if hasattr(
-                            thread_instance, "wait"
-                        ) and not thread_instance.wait(timeout):
-                            log.warning(
-                                f"{name} did not stop gracefully; forcing terminate."
-                            )
-                            if hasattr(thread_instance, "terminate"):
-                                thread_instance.terminate()
-                                thread_instance.wait(500)
-                    except Exception as e:
-                        log.error(f"Exception stopping {name}: {e}")
-                if hasattr(thread_instance, "deleteLater"):
-                    thread_instance.deleteLater()
-        # If a recording thread is still alive, make sure we send stop_recording()
-        if (
-            self._recorder_worker
-            and self._recorder_thread
-            and self._recorder_thread.isRunning()
-        ):
-            QMetaObject.invokeMethod(
-                self._recorder_worker, "stop_recording", Qt.QueuedConnection
-            )
+                        self._recorder_thread.terminate()
+                    except Exception:
+                        pass
+                    self._recorder_thread.wait(500)
 
+        # Now that the thread is done, delete both worker and thread objects if they exist
+        if self._recorder_worker:
+            try:
+                self._recorder_worker.deleteLater()
+            except Exception:
+                pass
+            self._recorder_worker = None
+
+        if self._recorder_thread:
+            try:
+                self._recorder_thread.deleteLater()
+            except Exception:
+                pass
+            self._recorder_thread = None
+
+        # 2) Stop the serial thread (if it exists)
+        if self._serial_thread:
+            try:
+                if self._serial_thread.isRunning():
+                    log.info("Stopping SerialThread...")
+                    self._serial_thread.stop()  # assume your SerialThread has a stop() method
+                    if not self._serial_thread.wait(1500):
+                        log.warning(
+                            "SerialThread did not stop gracefully; forcing terminate."
+                        )
+                        try:
+                            self._serial_thread.terminate()
+                        except Exception:
+                            pass
+                            self._serial_thread.wait(500)
+            except RuntimeError:
+                # The QThread object might already be deleted; ignore
+                pass
+            finally:
+                try:
+                    self._serial_thread.deleteLater()
+                except Exception:
+                    pass
+                self._serial_thread = None
+
+        # 3) Stop the camera thread (if it exists)
+        cam_thread = self.camera_thread
+        if cam_thread:
+            try:
+                if cam_thread.isRunning():
+                    log.info("Stopping SDKCameraThread...")
+                    cam_thread.stop()  # assume your SDKCameraThread has a stop() method
+                    if not cam_thread.wait(1500):
+                        log.warning(
+                            "SDKCameraThread did not stop gracefully; forcing terminate."
+                        )
+                        try:
+                            cam_thread.terminate()
+                        except Exception:
+                            pass
+                        cam_thread.wait(500)
+            except RuntimeError:
+                # The QThread object might already be deleted; ignore
+                pass
+            finally:
+                try:
+                    cam_thread.deleteLater()
+                except Exception:
+                    pass
+                self.camera_thread = None
+
+        # 4) Clear UI elements that might hold references
         try:
             self.device_combo.clear()
         except Exception:
             pass
 
+        # 5) Exit the IC4 library (if it’s still loaded)
         try:
             ic4.Library.exit()
             log.info("DEBUG: IC4 library exited cleanly.")
         except Exception:
             pass
+
+        # 6) Process any remaining events, then call the base implementation
         QApplication.processEvents()
         log.info("All threads cleaned up. Proceeding with close.")
         super().closeEvent(event)
