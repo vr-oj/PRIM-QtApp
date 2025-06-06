@@ -133,6 +133,12 @@ class MainWindow(QMainWindow):
         self._recorder_worker.finished.connect(self._recorder_worker.deleteLater)
         self._recorder_thread.finished.connect(self._recorder_thread.deleteLater)
 
+        # ── New “session” counters ─────────────────────────────────────────────────
+        # These let us start a fresh Fill1 each time the app opens,
+        # and then bump Fill2, Fill3, … on each subsequent Start Recording click.
+        self._session_date = None
+        self._session_fill_count = 0
+
         self._init_paths_and_icons()
         self._build_console_log_dock()
         self._build_central_widget_layout()
@@ -851,58 +857,51 @@ class MainWindow(QMainWindow):
     def _on_start_recording(self):
         """
         Called when the user clicks ‘Start Recording’.
-        Instead of asking the user, we create a new folder under:
-            PRIM_RESULTS_DIR/YYYY-MM-DD/RunN
-        where N increments automatically. Then we start the RecordingManager.
+        We now use a per-session counter so that each press makes a new FillN folder.
+        If the date rolls over (or the app was just opened), we reset to Fill1.
         """
-        # ─── 1) Compute today’s date subfolder ────────────────────────────────────
+        # 1) Compute today’s date string:
         today = QDateTime.currentDateTime().toString("yyyy-MM-dd")
+
+        # 2) If the date has changed (or first run this session), reset fill counter:
+        if today != self._session_date:
+            self._session_date = today
+            self._session_fill_count = 0
+
+        # 3) Bump the counter, build the “FillN” folder name:
+        self._session_fill_count += 1
+        fill_folder_name = f"Fill{self._session_fill_count}"
+
+        # 4) Make sure the date subfolder exists under PRIM_RESULTS_DIR:
         date_dir = os.path.join(PRIM_RESULTS_DIR, today)
         os.makedirs(date_dir, exist_ok=True)
 
-        # ─── 2) Find next available “RunN” folder name ────────────────────────────
-        existing = [
-            d
-            for d in os.listdir(date_dir)
-            if os.path.isdir(os.path.join(date_dir, d)) and d.lower().startswith("fill")
-        ]
-        run_numbers = []
-        for d in existing:
-            try:
-                # assume folder is named “Run3”, “Run12”, etc.
-                run_numbers.append(int(d[3:]))
-            except Exception:
-                pass
-
-        next_fill = max(run_numbers, default=0) + 1
-        outdir = os.path.join(date_dir, f"Fill{next_fill}")
+        # 5) Set up the full output path:
+        outdir = os.path.join(date_dir, fill_folder_name)
         os.makedirs(outdir, exist_ok=True)
 
-        # ─── 3) Create a QThread and a RecordingManager, then move the worker into that thread ─────────
+        # 6) Create the recording thread + worker exactly as before:
         self._recorder_thread = QThread(self)
         self._recorder_worker = RecordingManager(output_dir=outdir)
         self._recorder_worker.moveToThread(self._recorder_thread)
 
-        # ─── 4) When the thread starts, call start_recording() on the worker ─────────────────────────
-        # Because the worker lives in that new thread, start_recording() will run inside it.
+        # 7) Wire up thread start → worker.start_recording()
         self._recorder_thread.started.connect(self._recorder_worker.start_recording)
-
-        # ─── 5) When the worker emits ‘finished’, quit the thread + clean up both worker & thread ────
+        #    and worker.finished → thread.quit() + worker.deleteLater()
         self._recorder_worker.finished.connect(self._recorder_thread.quit)
         self._recorder_worker.finished.connect(self._recorder_worker.deleteLater)
         self._recorder_thread.finished.connect(self._recorder_thread.deleteLater)
 
-        # ─── 6) Hook up camera & serial signals to the worker’s slots ────────────────────────────────
-        #    (Now that the worker exists, we can forward incoming data to it.)
+        # 8) Hook camera + serial into the worker:
         self._serial_thread.data_ready.connect(self._recorder_worker.append_pressure)
         self.camera_thread.frame_ready.connect(self._recorder_worker.append_frame)
 
-        # ─── 7) Start the recording thread ───────────────────────────────────────────────────────────
+        # 9) Kick off the recording thread:
         self._recorder_thread.start()
 
-        # ─── 8) Update button states (enable/disable as needed) ────────────────────────────────────
+        # 10) Update UI buttons (disable “Start” / enable “Stop”):
         self._refresh_recording_button_states()
-        print("[MainWindow] Recording started.")
+        print(f"[MainWindow] Recording started in {fill_folder_name}.")
 
     @pyqtSlot()
     def _on_stop_recording(self):
