@@ -118,6 +118,21 @@ class MainWindow(QMainWindow):
         self.lbl_cam_frame = None
         self.lbl_cam_resolution = None
 
+        # ─── CREATE THE RECORDER THREAD + WORKER ─────────────────────────────────
+        # 1) Instantiate the thread object:
+        self._recorder_thread = QThread(self)
+
+        dummy_output_dir = ""  # replace with a default or override later
+        self._recorder_worker = RecordingManager(dummy_output_dir)
+
+        # 3) Move the worker into the new thread:
+        self._recorder_worker.moveToThread(self._recorder_thread)
+
+        # 4) Connect the worker’s finished signal → thread.quit() and cleanup:
+        self._recorder_worker.finished.connect(self._recorder_thread.quit)
+        self._recorder_worker.finished.connect(self._recorder_worker.deleteLater)
+        self._recorder_thread.finished.connect(self._recorder_thread.deleteLater)
+
         self._init_paths_and_icons()
         self._build_console_log_dock()
         self._build_central_widget_layout()
@@ -840,16 +855,16 @@ class MainWindow(QMainWindow):
             PRIM_RESULTS_DIR/YYYY-MM-DD/RunN
         where N increments automatically. Then we start the RecordingManager.
         """
-        # 1) Compute today’s date subfolder:
+        # ─── 1) Compute today’s date subfolder ────────────────────────────────────
         today = QDateTime.currentDateTime().toString("yyyy-MM-dd")
         date_dir = os.path.join(PRIM_RESULTS_DIR, today)
         os.makedirs(date_dir, exist_ok=True)
 
-        # 2) Find next available “RunN” folder name
+        # ─── 2) Find next available “RunN” folder name ────────────────────────────
         existing = [
             d
             for d in os.listdir(date_dir)
-            if os.path.isdir(os.path.join(date_dir, d)) and d.lower().startswith("run")
+            if os.path.isdir(os.path.join(date_dir, d)) and d.lower().startswith("fill")
         ]
         run_numbers = []
         for d in existing:
@@ -858,30 +873,34 @@ class MainWindow(QMainWindow):
                 run_numbers.append(int(d[3:]))
             except Exception:
                 pass
-        next_run = max(run_numbers, default=0) + 1
-        outdir = os.path.join(date_dir, f"Run{next_run}")
+
+        next_fill = max(run_numbers, default=0) + 1
+        outdir = os.path.join(date_dir, f"Fill{next_fill}")
         os.makedirs(outdir, exist_ok=True)
 
-        # 3) Create a QThread and a RecordingManager, then move the worker into that thread
+        # ─── 3) Create a QThread and a RecordingManager, then move the worker into that thread ─────────
         self._recorder_thread = QThread(self)
         self._recorder_worker = RecordingManager(output_dir=outdir)
         self._recorder_worker.moveToThread(self._recorder_thread)
 
-        # 4) When the thread starts, call start_recording() on the worker
+        # ─── 4) When the thread starts, call start_recording() on the worker ─────────────────────────
+        # Because the worker lives in that new thread, start_recording() will run inside it.
         self._recorder_thread.started.connect(self._recorder_worker.start_recording)
-        # 5) When the worker emits ‘finished’, quit the thread and delete the worker
+
+        # ─── 5) When the worker emits ‘finished’, quit the thread + clean up both worker & thread ────
         self._recorder_worker.finished.connect(self._recorder_thread.quit)
         self._recorder_worker.finished.connect(self._recorder_worker.deleteLater)
         self._recorder_thread.finished.connect(self._recorder_thread.deleteLater)
 
-        # 6) Hook up camera & serial signals to the worker’s slots
+        # ─── 6) Hook up camera & serial signals to the worker’s slots ────────────────────────────────
+        #    (Now that the worker exists, we can forward incoming data to it.)
         self._serial_thread.data_ready.connect(self._recorder_worker.append_pressure)
         self.camera_thread.frame_ready.connect(self._recorder_worker.append_frame)
 
-        # 7) Start the recording thread
+        # ─── 7) Start the recording thread ───────────────────────────────────────────────────────────
         self._recorder_thread.start()
 
-        # 8) Update button states
+        # ─── 8) Update button states (enable/disable as needed) ────────────────────────────────────
         self._refresh_recording_button_states()
         print("[MainWindow] Recording started.")
 
@@ -891,16 +910,20 @@ class MainWindow(QMainWindow):
         Called when the user clicks ‘Stop Recording’.
         Disconnects signals and tells the worker to stop.
         """
-        if not self._recorder_worker or not self._recorder_thread:
+        # If there’s no active worker/thread, do nothing.
+        if not getattr(self, "_recorder_worker", None) or not getattr(
+            self, "_recorder_thread", None
+        ):
             return
 
-        # 1) Disconnect signals so no new data is queued
+        # ─── 1) Disconnect signals so no new data is queued ─────────────────────────────────────────
         try:
             self._serial_thread.data_ready.disconnect(
                 self._recorder_worker.append_pressure
             )
         except Exception:
             pass
+
         try:
             self.camera_thread.frame_ready.disconnect(
                 self._recorder_worker.append_frame
@@ -908,12 +931,12 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # 2) Tell the worker to stop (it will flush & close files, then emit ‘finished’)
+        # ─── 2) Tell the worker to stop (will flush & close files, then emit ‘finished’) ────────────
         QMetaObject.invokeMethod(
             self._recorder_worker, "stop_recording", Qt.QueuedConnection
         )
 
-        # 3) Update button states
+        # ─── 3) Update button states (enable/disable as needed) ────────────────────────────────────
         self._refresh_recording_button_states()
         print("[MainWindow] Stop recording requested.")
 
