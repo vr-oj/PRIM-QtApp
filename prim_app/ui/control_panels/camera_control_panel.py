@@ -161,7 +161,7 @@ class CameraControlPanel(QWidget):
             return
         try:
             node = self.grabber.device_property_map.find_float("ExposureTime")
-            node.set_value(float(new_val))
+            node.value = float(new_val)  # ✅ CORRECT WAY TO SET
         except Exception as e:
             log.error(
                 f"CameraControlPanel: failed to set ExposureTime = {new_val}: {e}"
@@ -173,7 +173,7 @@ class CameraControlPanel(QWidget):
             return
         try:
             node = self.grabber.device_property_map.find_float("Gain")
-            node.set_value(float(new_val))
+            node.value = float(new_val)  # ✅ CORRECT
         except Exception as e:
             log.error(f"CameraControlPanel: failed to set Gain = {new_val}: {e}")
 
