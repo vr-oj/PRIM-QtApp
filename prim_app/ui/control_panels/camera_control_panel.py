@@ -203,7 +203,7 @@ class CameraControlPanel(QWidget):
             return
         try:
             node = self.grabber.device_property_map.find_float("AcquisitionFrameRate")
-            node.set_value(float(new_val))
+            node.value = float(new_val)  # ✅ FIXED
         except Exception as e:
             log.error(
                 f"CameraControlPanel: failed to set AcquisitionFrameRate = {new_val}: {e}"
