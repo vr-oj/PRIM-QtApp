@@ -19,7 +19,7 @@
 
 - **Synchronized Recording**  
   - Hardware‑triggered camera acquisition: Arduino pulses `CamTrig` pin for each sample.  
-  - RecordingThread captures exactly one camera frame per Arduino trigger, pulls the corresponding serial line (`frame_idx, elapsed_time_s, pressure`) and writes:  
+  - RecordingManager captures exactly one camera frame per Arduino trigger, pulls the corresponding serial line (`frame_idx, elapsed_time_s, pressure`) and writes:  
     - **experiment_data.csv** (`frame_index, elapsed_time_s, pressure_value`)  
     - **experiment_video.tiff** (multi‑page TIFF where each page’s ImageDescription tag contains `FrameIndex=…;Time_s=…;Pressure=…`)  
   - Output folder structure:  
@@ -111,12 +111,12 @@
 5. **Start Recording**  
    - In the menu bar, go to **Acquisition → Start Recording** (or press **Ctrl+R**).  
    - A new folder (`PRIM_ROOT/YYYY-MM-DD/FillN/`) will be created automatically.  
-   - RecordingThread launches in the background: Camera frames and serial data are synced and saved.  
+   - RecordingManager launches in the background: Camera frames and serial data are synced and saved.  
    - The status bar shows “Recording to ‘…’ …”.
 
 6. **Stop Recording**  
    - Click **Acquisition → Stop Recording** (or press **Ctrl+T**).  
-   - RecordingThread finalizes `experiment_data.csv` and `experiment_video.tiff`.  
+   - RecordingManager finalizes `experiment_data.csv` and `experiment_video.tiff`.  
    - Status bar reads “Recording stopped and saved.”
 
 7. **Review Output**  
@@ -142,10 +142,10 @@ PRIMAcquisition/
 ├─ prim_app/
 │  ├─ main_window.py
 │  ├─ prim_app.py
+│  ├─ recording_manager.py    ← Recording logic lives here
 │  ├─ threads/
 │  │  ├─ serial_thread.py
 │  │  ├─ sdk_camera_thread.py
-│  │  ├─ recording_thread.py    ← Recording logic lives here
 │  │  └─ …
 │  ├─ ui/
 │  │  ├─ canvas/
@@ -166,7 +166,7 @@ PRIMAcquisition/
 ```
 
 - **`main_window.py`** contains most of the UI setup, thread management, and menu actions.  
-- **`threads/recording_thread.py`** implements the `RecordingThread` that handles synchronized CSV+TIFF writing.  
+- **`recording_manager.py`** implements the `RecordingManager` that handles synchronized CSV+TIFF writing.  
 - **`path_helpers.py`** provides `get_next_fill_folder()` that creates date/FillN folders under `PRIM_ROOT`.
 
 ---
