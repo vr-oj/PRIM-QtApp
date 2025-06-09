@@ -1,5 +1,3 @@
-# camera_control_panel.py
-
 import logging
 import math
 
@@ -11,8 +9,9 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QCheckBox,
     QComboBox,
-    QHBoxLayout,
 )
+
+from imagingcontrol4 import PropId, IC4Exception
 
 log = logging.getLogger(__name__)
 
@@ -23,12 +22,10 @@ class CameraControlPanel(QWidget):
         self.grabber = None
         self.is_recording = False
 
-        # ───– Build the Qt widgets (all disabled by default) –────────────────
         self.layout = QFormLayout(self)
         self.layout.setContentsMargins(4, 4, 4, 4)
         self.layout.setSpacing(6)
 
-        # 1) Exposure Time (float)
         self.exposure_label = QLabel("Exposure (µs):")
         self.exposure_spin = QDoubleSpinBox()
         self.exposure_spin.setDecimals(1)
@@ -39,7 +36,6 @@ class CameraControlPanel(QWidget):
         self.exposure_spin.valueChanged.connect(self._on_exposure_changed)
         self.layout.addRow(self.exposure_label, self.exposure_spin)
 
-        # 2) Gain (float)
         self.gain_label = QLabel("Gain:")
         self.gain_spin = QDoubleSpinBox()
         self.gain_spin.setDecimals(2)
@@ -49,19 +45,16 @@ class CameraControlPanel(QWidget):
         self.gain_spin.valueChanged.connect(self._on_gain_changed)
         self.layout.addRow(self.gain_label, self.gain_spin)
 
-        # 3) Auto-Exposure checkbox
         self.ae_checkbox = QCheckBox("Auto Exposure")
         self.ae_checkbox.setEnabled(False)
         self.ae_checkbox.stateChanged.connect(self._on_auto_exposure_toggled)
         self.layout.addRow(self.ae_checkbox)
 
-        # 4) Auto-Gain checkbox
         self.ag_checkbox = QCheckBox("Auto Gain")
         self.ag_checkbox.setEnabled(False)
         self.ag_checkbox.stateChanged.connect(self._on_auto_gain_toggled)
         self.layout.addRow(self.ag_checkbox)
 
-        # 5) Frame Rate (float)
         self.framerate_label = QLabel("Frame Rate (fps):")
         self.framerate_spin = QDoubleSpinBox()
         self.framerate_spin.setDecimals(1)
@@ -71,7 +64,6 @@ class CameraControlPanel(QWidget):
         self.framerate_spin.valueChanged.connect(self._on_framerate_changed)
         self.layout.addRow(self.framerate_label, self.framerate_spin)
 
-        # 6) Pixel Format dropdown (enum)
         self.pf_label = QLabel("Pixel Format:")
         self.pf_combo = QComboBox()
         self.pf_combo.setEnabled(False)
@@ -82,120 +74,73 @@ class CameraControlPanel(QWidget):
         self.is_recording = recording
         log.debug(f"CameraControlPanel: is_recording set to {self.is_recording}")
 
-    # ------------------------------------------------------------------
-    def _set_spinbox_limits(self, spinbox: QDoubleSpinBox, node) -> None:
-        """Helper to configure spin box limits from a property node."""
-        def _get_float(attr_names):
-            for name in attr_names:
-                if hasattr(node, name):
-                    try:
-                        return float(getattr(node, name))
-                    except Exception:
-                        pass
-            return None
+    def _setup_spinbox_from_prop(self, prop_id, spinbox):
+        try:
+            prop = self.grabber.device_property_map.find_float(prop_id)
+            if not prop:
+                return
 
-        min_val = _get_float(["min", "minimum", "Min", "Minimum", "min_value", "minimum_value"])
-        max_val = _get_float(["max", "maximum", "Max", "Maximum", "max_value", "maximum_value"])
-        step = _get_float([
-            "step",
-            "increment",
-            "inc",
-            "single_step",
-            "step_size",
-            "increment_value",
-        ])
+            min_val, max_val = prop.get_range()
+            cur_val = prop.get_value()
 
-        if min_val is not None and max_val is not None:
+            try:
+                step = prop.get_inc()
+            except IC4Exception:
+                step = (max_val - min_val) / 100
+
             spinbox.setRange(min_val, max_val)
-        elif min_val is not None:
-            spinbox.setMinimum(min_val)
-        elif max_val is not None:
-            spinbox.setMaximum(max_val)
-
-        if step is not None and step > 0:
             spinbox.setSingleStep(step)
-            # Increase decimals for small step sizes to improve precision
+
             if step < 1.0:
-                decimals = max(spinbox.decimals(), int(-math.floor(math.log10(step))) + 1)
+                decimals = max(
+                    spinbox.decimals(), int(-math.floor(math.log10(step))) + 1
+                )
                 spinbox.setDecimals(min(decimals, 6))
 
+            spinbox.setValue(cur_val)
+            spinbox.setEnabled(True)
+        except Exception as e:
+            log.warning(f"CameraControlPanel: Failed to setup {prop_id}: {e}")
+
     def _on_grabber_ready(self):
-        """Populate controls from grabber properties once it is ready."""
         if not self.grabber or not getattr(self.grabber, "is_device_open", False):
             log.error(
                 "CameraControlPanel: _on_grabber_ready() called but grabber is not open."
             )
             return
 
-        prop_map = self.grabber.device_property_map
+        # Dynamically configure these float properties
+        self._setup_spinbox_from_prop(PropId.EXPOSURE_TIME, self.exposure_spin)
+        self._setup_spinbox_from_prop(PropId.GAIN, self.gain_spin)
 
-        # ExposureTime
         try:
-            exp_node = prop_map.find_float("ExposureTime")
-            if exp_node:
-                self._set_spinbox_limits(self.exposure_spin, exp_node)
-                self.exposure_spin.setValue(float(exp_node.value))
-                self.exposure_spin.setEnabled(True)
-            else:
-                log.warning(
-                    "CameraControlPanel: ExposureTime node not found; spin box remains disabled"
-                )
-        except Exception as e:
-            log.warning(f"CameraControlPanel: Failed to init ExposureTime: {e}")
-
-        # Gain
-        try:
-            gain_node = prop_map.find_float("Gain")
-            if gain_node:
-                self._set_spinbox_limits(self.gain_spin, gain_node)
-                self.gain_spin.setValue(float(gain_node.value))
-                self.gain_spin.setEnabled(True)
-            else:
-                log.warning(
-                    "CameraControlPanel: Gain node not found; spin box remains disabled"
-                )
-        except Exception as e:
-            log.warning(f"CameraControlPanel: Failed to init Gain: {e}")
-
-        # ExposureAuto
-        try:
-            ae_node = prop_map.find_enumeration("ExposureAuto")
+            ae_node = self.grabber.device_property_map.find_enumeration("ExposureAuto")
             if ae_node:
                 self.ae_checkbox.setChecked(ae_node.value == "Continuous")
                 self.ae_checkbox.setEnabled(True)
-            else:
-                log.warning("CameraControlPanel: ExposureAuto node not found")
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to init ExposureAuto: {e}")
 
-        # GainAuto
         try:
-            ag_node = prop_map.find_enumeration("GainAuto")
+            ag_node = self.grabber.device_property_map.find_enumeration("GainAuto")
             if ag_node:
                 self.ag_checkbox.setChecked(ag_node.value == "Continuous")
                 self.ag_checkbox.setEnabled(True)
-            else:
-                log.warning("CameraControlPanel: GainAuto node not found")
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to init GainAuto: {e}")
 
-        # AcquisitionFrameRate
         try:
-            fr_node = prop_map.find_float("AcquisitionFrameRate")
+            fr_node = self.grabber.device_property_map.find_float(
+                "AcquisitionFrameRate"
+            )
             if fr_node:
-                self._set_spinbox_limits(self.framerate_spin, fr_node)
                 self.framerate_spin.setValue(float(fr_node.value))
                 self.framerate_spin.setEnabled(True)
-            else:
-                log.warning(
-                    "CameraControlPanel: AcquisitionFrameRate node not found; spin box remains disabled"
-                )
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to init AcquisitionFrameRate: {e}")
 
-        # PixelFormat
         try:
-            pf_node = prop_map.find_enumeration("PixelFormat")
+            pf_node = self.grabber.device_property_map.find_enumeration("PixelFormat")
             if pf_node:
                 self.pf_combo.clear()
                 for entry in pf_node.entries:
@@ -206,8 +151,6 @@ class CameraControlPanel(QWidget):
                     if idx >= 0:
                         self.pf_combo.setCurrentIndex(idx)
                 self.pf_combo.setEnabled(True)
-            else:
-                log.warning("CameraControlPanel: PixelFormat node not found")
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to init PixelFormat: {e}")
 
@@ -216,20 +159,22 @@ class CameraControlPanel(QWidget):
             log.warning("Blocked Exposure change during recording")
             return
         try:
-            exp_node = self.grabber.device_property_map.find_float("ExposureTime")
-            if exp_node:
-                exp_node.value = float(new_val)
+            node = self.grabber.device_property_map.find_float("ExposureTime")
+            if node:
+                node.value = float(new_val)
         except Exception as e:
-            log.error(f"CameraControlPanel: failed to set ExposureTime = {new_val}: {e}")
+            log.error(
+                f"CameraControlPanel: failed to set ExposureTime = {new_val}: {e}"
+            )
 
     def _on_gain_changed(self, new_val):
         if self.is_recording:
             log.warning("Blocked Gain change during recording")
             return
         try:
-            gain_node = self.grabber.device_property_map.find_float("Gain")
-            if gain_node:
-                gain_node.value = float(new_val)
+            node = self.grabber.device_property_map.find_float("Gain")
+            if node:
+                node.value = float(new_val)
         except Exception as e:
             log.error(f"CameraControlPanel: failed to set Gain = {new_val}: {e}")
 
@@ -238,9 +183,9 @@ class CameraControlPanel(QWidget):
             log.warning("Blocked Auto Exposure toggle during recording")
             return
         try:
-            ae_node = self.grabber.device_property_map.find_enumeration("ExposureAuto")
-            if ae_node:
-                ae_node.value = "Continuous" if state == Qt.Checked else "Off"
+            node = self.grabber.device_property_map.find_enumeration("ExposureAuto")
+            if node:
+                node.value = "Continuous" if state == Qt.Checked else "Off"
         except Exception as e:
             log.error(f"CameraControlPanel: failed to set ExposureAuto: {e}")
 
@@ -249,9 +194,9 @@ class CameraControlPanel(QWidget):
             log.warning("Blocked Auto Gain toggle during recording")
             return
         try:
-            ag_node = self.grabber.device_property_map.find_enumeration("GainAuto")
-            if ag_node:
-                ag_node.value = "Continuous" if state == Qt.Checked else "Off"
+            node = self.grabber.device_property_map.find_enumeration("GainAuto")
+            if node:
+                node.value = "Continuous" if state == Qt.Checked else "Off"
         except Exception as e:
             log.error(f"CameraControlPanel: failed to set GainAuto: {e}")
 
@@ -260,23 +205,25 @@ class CameraControlPanel(QWidget):
             log.warning("Blocked Frame Rate change during recording")
             return
         try:
-            fr_node = self.grabber.device_property_map.find_float("AcquisitionFrameRate")
-            if fr_node:
-                fr_node.value = float(new_val)
+            node = self.grabber.device_property_map.find_float("AcquisitionFrameRate")
+            if node:
+                node.value = float(new_val)
         except Exception as e:
-            log.error(f"CameraControlPanel: failed to set AcquisitionFrameRate = {new_val}: {e}")
+            log.error(
+                f"CameraControlPanel: failed to set AcquisitionFrameRate = {new_val}: {e}"
+            )
 
     def _on_pf_changed(self, index):
         if self.is_recording:
             log.warning("Blocked Pixel Format change during recording")
             return
         try:
-            pf_node = self.grabber.device_property_map.find_enumeration("PixelFormat")
-            if pf_node:
+            node = self.grabber.device_property_map.find_enumeration("PixelFormat")
+            if node:
                 new_pf = self.pf_combo.currentText()
                 if new_pf:
-                    pf_node.value = new_pf
-                else:
-                    log.error("PixelFormat was empty; skipping property write")
+                    node.value = new_pf
         except Exception as e:
-            log.error(f"CameraControlPanel: failed to set PixelFormat = {self.pf_combo.currentText()}: {e}")
+            log.error(
+                f"CameraControlPanel: failed to set PixelFormat = {self.pf_combo.currentText()}: {e}"
+            )
