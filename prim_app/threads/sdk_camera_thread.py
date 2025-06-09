@@ -125,6 +125,23 @@ class SDKCameraThread(QThread):
             except Exception as e:
                 log.warning(f"SDKCameraThread: Could not disable TriggerMode: {e}")
 
+            # ─── Set Frame Rate (AcquisitionFrameRate) = 10.0 FPS ────────────────
+            try:
+                fps_node = self.grabber.device_property_map.find_float(
+                    "AcquisitionFrameRate"
+                )
+                if fps_node and not fps_node.is_readonly and fps_node.is_available:
+                    fps_node.value = 10.0
+                    log.info(
+                        f"SDKCameraThread: Set AcquisitionFrameRate = {fps_node.value}"
+                    )
+                else:
+                    log.warning(
+                        "SDKCameraThread: FPS control not available or readonly."
+                    )
+            except Exception as e:
+                log.warning(f"SDKCameraThread: Could not set AcquisitionFrameRate: {e}")
+
             # ─── Signal “grabber_ready” so UI can enable controls ────────────────
             self.grabber_ready.emit()
 
@@ -180,7 +197,6 @@ class SDKCameraThread(QThread):
                 import imagingcontrol4.library as ic4lib
 
                 ic4lib.Library._core = None  # Prevent __del__ exceptions after exit
-
             except Exception:
                 pass
 
