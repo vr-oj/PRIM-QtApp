@@ -78,17 +78,20 @@ class SDKCameraThread(QThread):
             # ─── Set Default Camera Properties BEFORE Streaming ───────────────
             props = self.grabber.device_property_map
             try:
-                props.set("FrameRate", DEFAULT_FPS)
+                fps_prop = props.get("FrameRate")
+                fps_prop.set_value(DEFAULT_FPS)
                 log.info(f"Set FrameRate to {DEFAULT_FPS}")
             except Exception as e:
                 log.warning(f"Could not set FrameRate: {e}")
             try:
-                props.set("ExposureTime", 10000)  # Default to 10ms
+                exp_prop = props.get("ExposureTime")
+                exp_prop.set_value(10000)  # Default to 10ms
                 log.info("Set ExposureTime to 10000 µs")
             except Exception as e:
                 log.warning(f"Could not set ExposureTime: {e}")
             try:
-                props.set("Gain", 5.0)
+                gain_prop = props.get("Gain")
+                gain_prop.set_value(5.0)
                 log.info("Set Gain to 5.0")
             except Exception as e:
                 log.warning(f"Could not set Gain: {e}")
