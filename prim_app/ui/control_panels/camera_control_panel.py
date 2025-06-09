@@ -81,6 +81,101 @@ class CameraControlPanel(QWidget):
         self.is_recording = recording
         log.debug(f"CameraControlPanel: is_recording set to {self.is_recording}")
 
+    def _on_grabber_ready(self):
+        """Populate controls from grabber properties once it is ready."""
+        if not self.grabber or not getattr(self.grabber, "is_device_open", False):
+            log.error(
+                "CameraControlPanel: _on_grabber_ready() called but grabber is not open."
+            )
+            return
+
+        prop_map = self.grabber.device_property_map
+
+        # ExposureTime
+        try:
+            exp_node = prop_map.find_float("ExposureTime")
+            if exp_node:
+                try:
+                    self.exposure_spin.setRange(float(exp_node.min), float(exp_node.max))
+                except Exception:
+                    pass
+                self.exposure_spin.setValue(float(exp_node.value))
+                self.exposure_spin.setEnabled(True)
+            else:
+                log.warning("CameraControlPanel: ExposureTime node not found")
+        except Exception as e:
+            log.warning(f"CameraControlPanel: Failed to init ExposureTime: {e}")
+
+        # Gain
+        try:
+            gain_node = prop_map.find_float("Gain")
+            if gain_node:
+                try:
+                    self.gain_spin.setRange(float(gain_node.min), float(gain_node.max))
+                except Exception:
+                    pass
+                self.gain_spin.setValue(float(gain_node.value))
+                self.gain_spin.setEnabled(True)
+            else:
+                log.warning("CameraControlPanel: Gain node not found")
+        except Exception as e:
+            log.warning(f"CameraControlPanel: Failed to init Gain: {e}")
+
+        # ExposureAuto
+        try:
+            ae_node = prop_map.find_enumeration("ExposureAuto")
+            if ae_node:
+                self.ae_checkbox.setChecked(ae_node.value == "Continuous")
+                self.ae_checkbox.setEnabled(True)
+            else:
+                log.warning("CameraControlPanel: ExposureAuto node not found")
+        except Exception as e:
+            log.warning(f"CameraControlPanel: Failed to init ExposureAuto: {e}")
+
+        # GainAuto
+        try:
+            ag_node = prop_map.find_enumeration("GainAuto")
+            if ag_node:
+                self.ag_checkbox.setChecked(ag_node.value == "Continuous")
+                self.ag_checkbox.setEnabled(True)
+            else:
+                log.warning("CameraControlPanel: GainAuto node not found")
+        except Exception as e:
+            log.warning(f"CameraControlPanel: Failed to init GainAuto: {e}")
+
+        # AcquisitionFrameRate
+        try:
+            fr_node = prop_map.find_float("AcquisitionFrameRate")
+            if fr_node:
+                try:
+                    self.framerate_spin.setRange(float(fr_node.min), float(fr_node.max))
+                except Exception:
+                    pass
+                self.framerate_spin.setValue(float(fr_node.value))
+                self.framerate_spin.setEnabled(True)
+            else:
+                log.warning("CameraControlPanel: AcquisitionFrameRate node not found")
+        except Exception as e:
+            log.warning(f"CameraControlPanel: Failed to init AcquisitionFrameRate: {e}")
+
+        # PixelFormat
+        try:
+            pf_node = prop_map.find_enumeration("PixelFormat")
+            if pf_node:
+                self.pf_combo.clear()
+                for entry in pf_node.entries:
+                    self.pf_combo.addItem(entry.name)
+                current = pf_node.value
+                if current:
+                    idx = self.pf_combo.findText(current)
+                    if idx >= 0:
+                        self.pf_combo.setCurrentIndex(idx)
+                self.pf_combo.setEnabled(True)
+            else:
+                log.warning("CameraControlPanel: PixelFormat node not found")
+        except Exception as e:
+            log.warning(f"CameraControlPanel: Failed to init PixelFormat: {e}")
+
     def _on_exposure_changed(self, new_val):
         if self.is_recording:
             log.warning("Blocked Exposure change during recording")
