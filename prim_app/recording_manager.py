@@ -97,9 +97,7 @@ class RecordingManager(QObject):
                 self.csv_file = open(self._csv_path, "w", newline="")
                 self.csv_writer = csv.writer(self.csv_file)
                 self.csv_writer.writerow(["frame_index", "device_time", "pressure"])
-                self.csv_writer.writerow([frameIdx, t_device, pressure])
-                self._last_deviceTime = t_device
-                self._last_pressure = pressure
+                # removed initial data write since it is duplicated by the code down below
             except Exception as e:
                 log.error("Failed to open CSV: %s", e)
                 self.is_recording = False
@@ -129,6 +127,9 @@ class RecordingManager(QObject):
         if self.csv_writer:
             try:
                 self.csv_writer.writerow([frameIdx, t_device, pressure])
+                # moved last variables from start_recording to here so that they get updated properly
+                self._last_deviceTime = t_device
+                self._last_pressure = pressure
             except Exception as e:
                 log.error(
                     "Error writing CSV row (%s, %s, %s): %s",
