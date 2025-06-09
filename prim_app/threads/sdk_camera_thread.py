@@ -148,7 +148,7 @@ class SDKCameraThread(QThread):
             # ─── Build QueueSink requesting Mono8 (fallback to native PF if needed)─
             try:
                 self._sink = ic4.QueueSink(
-                    self, [ic4.PixelFormat.Mono8], max_output_buffers=1
+                    self, [ic4.PixelFormat.Mono8], max_output_buffers=8
                 )
             except:
                 native_pf = self._resolution[2] if self._resolution else None
