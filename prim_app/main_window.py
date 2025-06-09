@@ -101,9 +101,6 @@ class MainWindow(QMainWindow):
         self.camera_tabs = None
         self.camera_thread = None  # SDKCameraThread instance
 
-        # This is the actual thread that will do grabbing
-        self.camera_thread = None
-
         # Plot controls
         self.plot_control_panel = None
 
