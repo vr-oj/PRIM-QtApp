@@ -9,6 +9,8 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QCheckBox,
     QComboBox,
+    QSlider,
+    QHBoxLayout,
 )
 
 from imagingcontrol4 import IC4Exception
@@ -21,6 +23,8 @@ class CameraControlPanel(QWidget):
         super().__init__(parent)
         self.grabber = None
         self.is_recording = False
+        self._exp_scale = 1
+        self._gain_scale = 1
 
         self.layout = QFormLayout(self)
         self.layout.setContentsMargins(4, 4, 4, 4)
@@ -32,14 +36,38 @@ class CameraControlPanel(QWidget):
         self.exposure_spin.setSuffix(" µs")
         self.exposure_spin.setEnabled(False)
         self.exposure_spin.valueChanged.connect(self._on_exposure_changed)
-        self.layout.addRow(self.exposure_label, self.exposure_spin)
+
+        self.exposure_slider = QSlider(Qt.Horizontal)
+        self.exposure_slider.setEnabled(False)
+        self.exposure_slider.valueChanged.connect(
+            lambda v: self.exposure_spin.setValue(v / self._exp_scale)
+        )
+
+        exp_row = QWidget()
+        exp_layout = QHBoxLayout(exp_row)
+        exp_layout.setContentsMargins(0, 0, 0, 0)
+        exp_layout.addWidget(self.exposure_slider)
+        exp_layout.addWidget(self.exposure_spin)
+        self.layout.addRow(self.exposure_label, exp_row)
 
         self.gain_label = QLabel("Gain:")
         self.gain_spin = QDoubleSpinBox()
         self.gain_spin.setDecimals(2)
         self.gain_spin.setEnabled(False)
         self.gain_spin.valueChanged.connect(self._on_gain_changed)
-        self.layout.addRow(self.gain_label, self.gain_spin)
+
+        self.gain_slider = QSlider(Qt.Horizontal)
+        self.gain_slider.setEnabled(False)
+        self.gain_slider.valueChanged.connect(
+            lambda v: self.gain_spin.setValue(v / self._gain_scale)
+        )
+
+        gain_row = QWidget()
+        gain_layout = QHBoxLayout(gain_row)
+        gain_layout.setContentsMargins(0, 0, 0, 0)
+        gain_layout.addWidget(self.gain_slider)
+        gain_layout.addWidget(self.gain_spin)
+        self.layout.addRow(self.gain_label, gain_row)
 
         self.ae_checkbox = QCheckBox("Auto Exposure")
         self.ae_checkbox.setEnabled(False)
@@ -68,7 +96,7 @@ class CameraControlPanel(QWidget):
         self.is_recording = recording
         log.debug(f"CameraControlPanel: is_recording set to {self.is_recording}")
 
-    def _setup_float_control(self, prop_id, spinbox, decimals=2):
+    def _setup_float_control(self, prop_id, spinbox, decimals=2, slider=None):
         log.info(f"CameraControlPanel: Looking for property {prop_id}")
 
         try:
@@ -99,12 +127,25 @@ class CameraControlPanel(QWidget):
             spinbox.setValue(cur_val)
             spinbox.setEnabled(True)
 
+            scale = 1
+            if slider is not None:
+                digits = spinbox.decimals()
+                scale = 10 ** digits
+                slider.setRange(int(min_val * scale), int(max_val * scale))
+                slider.setSingleStep(max(1, int(step * scale)))
+                slider.setValue(int(cur_val * scale))
+                slider.setEnabled(True)
+
             log.debug(
                 f"{prop_id}: min={min_val}, max={max_val}, step={step}, value={cur_val}, unit={prop.unit}"
             )
 
+            return scale
+
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to setup {prop_id}: {e}")
+
+        return 1
 
     def _on_grabber_ready(self):
         log.info("CameraControlPanel: _on_grabber_ready() called")
@@ -115,8 +156,12 @@ class CameraControlPanel(QWidget):
             )
             return
 
-        self._setup_float_control("ExposureTime", self.exposure_spin, decimals=1)
-        self._setup_float_control("Gain", self.gain_spin, decimals=2)
+        self._exp_scale = self._setup_float_control(
+            "ExposureTime", self.exposure_spin, decimals=1, slider=self.exposure_slider
+        )
+        self._gain_scale = self._setup_float_control(
+            "Gain", self.gain_spin, decimals=2, slider=self.gain_slider
+        )
 
         try:
             ae_node = self.grabber.device_property_map.find_enumeration("ExposureAuto")
@@ -162,6 +207,9 @@ class CameraControlPanel(QWidget):
         try:
             node = self.grabber.device_property_map.find_float("ExposureTime")
             node.value = float(new_val)  # ✅ CORRECT WAY TO SET
+            self.exposure_slider.blockSignals(True)
+            self.exposure_slider.setValue(int(float(new_val) * self._exp_scale))
+            self.exposure_slider.blockSignals(False)
         except Exception as e:
             log.error(
                 f"CameraControlPanel: failed to set ExposureTime = {new_val}: {e}"
@@ -174,6 +222,9 @@ class CameraControlPanel(QWidget):
         try:
             node = self.grabber.device_property_map.find_float("Gain")
             node.value = float(new_val)  # ✅ CORRECT
+            self.gain_slider.blockSignals(True)
+            self.gain_slider.setValue(int(float(new_val) * self._gain_scale))
+            self.gain_slider.blockSignals(False)
         except Exception as e:
             log.error(f"CameraControlPanel: failed to set Gain = {new_val}: {e}")
 
