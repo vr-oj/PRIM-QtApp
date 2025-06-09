@@ -100,8 +100,8 @@ class CameraControlPanel(QWidget):
             )
             return
 
-        self._setup_spinbox_from_prop("ExposureTime", self.exposure_spin)
-        self._setup_spinbox_from_prop("Gain", self.gain_spin)
+        self._setup_float_control("ExposureTime", self.exposure_spin, decimals=1)
+        self._setup_float_control("Gain", self.gain_spin, decimals=2)
 
         try:
             ae_node = self.grabber.device_property_map.find_enumeration("ExposureAuto")
