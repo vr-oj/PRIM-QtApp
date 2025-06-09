@@ -72,28 +72,17 @@ class CameraControlPanel(QWidget):
         try:
             prop = self.grabber.device_property_map.find_float(prop_id)
             if not prop:
-                log.warning(
-                    f"CameraControlPanel: {prop_id} not found in device_property_map."
-                )
                 return
 
-            min_val = prop.range_min
-            max_val = prop.range_max
-            step = prop.inc if prop.inc > 0 else (max_val - min_val) / 100
-            cur_val = float(prop.get_value())
+            min_val = prop.min
+            max_val = prop.max
+            step = prop.inc
+            cur_val = prop.value
 
             spinbox.setRange(min_val, max_val)
             spinbox.setSingleStep(step)
-
-            if step < 1.0:
-                decimals = max(
-                    spinbox.decimals(), int(-math.floor(math.log10(step))) + 1
-                )
-                spinbox.setDecimals(min(decimals, 6))
-
             spinbox.setValue(cur_val)
             spinbox.setEnabled(True)
-
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to setup {prop_id}: {e}")
 
