@@ -177,6 +177,10 @@ class SDKCameraThread(QThread):
             try:
                 ic4.Library.exit()
                 log.info("SDKCameraThread: Library.exit() called.")
+                import imagingcontrol4.library as ic4lib
+
+                ic4lib.Library._core = None  # Prevent __del__ exceptions after exit
+
             except Exception:
                 pass
 
