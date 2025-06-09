@@ -42,7 +42,6 @@ from PyQt5.QtCore import (
     pyqtSlot,
     QTimer,
     QVariant,
-    QDateTime,
     QSize,
     QThread,
     QMetaObject,
@@ -68,6 +67,7 @@ from utils.config import (
     PLOT_DEFAULT_Y_MIN,
     PLOT_DEFAULT_Y_MAX,
 )
+from utils.path_helpers import get_next_fill_folder
 from ui.canvas.qtcamera_widget import QtCameraWidget
 from ui.control_panels.camera_control_panel import CameraControlPanel
 from ui.control_panels.top_control_panel import TopControlPanel
@@ -133,11 +133,6 @@ class MainWindow(QMainWindow):
         self._recorder_worker.finished.connect(self._recorder_worker.deleteLater)
         self._recorder_thread.finished.connect(self._recorder_thread.deleteLater)
 
-        # ── New “session” counters ─────────────────────────────────────────────────
-        # These let us start a fresh Fill1 each time the app opens,
-        # and then bump Fill2, Fill3, … on each subsequent Start Recording click.
-        self._session_date = None
-        self._session_fill_count = 0
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
@@ -856,31 +851,15 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_start_recording(self):
         """
-        Called when the user clicks ‘Start Recording’.
-        We now use a per-session counter so that each press makes a new FillN folder.
-        If the date rolls over (or the app was just opened), we reset to Fill1.
+        Called when the user clicks ‘Start Recording’. Creates the next
+        PRIM_ROOT/YYYY-MM-DD/FillN folder and starts a RecordingManager
+        writing there.
         """
-        # 1) Compute today’s date string:
-        today = QDateTime.currentDateTime().toString("yyyy-MM-dd")
+        outdir = get_next_fill_folder()
 
-        # 2) If the date has changed (or first run this session), reset fill counter:
-        if today != self._session_date:
-            self._session_date = today
-            self._session_fill_count = 0
+        fill_folder_name = os.path.basename(outdir)
 
-        # 3) Bump the counter, build the “FillN” folder name:
-        self._session_fill_count += 1
-        fill_folder_name = f"Fill{self._session_fill_count}"
-
-        # 4) Make sure the date subfolder exists under PRIM_RESULTS_DIR:
-        date_dir = os.path.join(PRIM_RESULTS_DIR, today)
-        os.makedirs(date_dir, exist_ok=True)
-
-        # 5) Set up the full output path:
-        outdir = os.path.join(date_dir, fill_folder_name)
-        os.makedirs(outdir, exist_ok=True)
-
-        # 6) Create the recording thread + worker exactly as before:
+        # Create the recording thread + worker exactly as before:
         self._recorder_thread = QThread(self)
         self._recorder_worker = RecordingManager(output_dir=outdir)
         self._recorder_worker.moveToThread(self._recorder_thread)
