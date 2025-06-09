@@ -21,7 +21,7 @@ def main():
     grabber.device_open(device_info)  # ← FIXED HERE
 
     print("\n📜 Device Property Names:")
-    pm = grabber.device_property_map()
+    pm = grabber.device_property_map
     names = pm.list_names()
     pprint(names)
 
