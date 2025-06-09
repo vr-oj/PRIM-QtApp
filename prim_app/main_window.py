@@ -878,6 +878,13 @@ class MainWindow(QMainWindow):
         # 9) Kick off the recording thread:
         self._recorder_thread.start()
 
+        # Notify CameraControlPanel that recording has started
+        if self.camera_control_panel:
+            try:
+                self.camera_control_panel.set_recording_state(True)
+            except Exception:
+                log.exception("Failed to set camera recording state to True")
+
         # 10) Update UI buttons (disable “Start” / enable “Stop”):
         self._refresh_recording_button_states()
         log.info(f"Recording started in {fill_folder_name}.")
@@ -926,6 +933,13 @@ class MainWindow(QMainWindow):
         QMetaObject.invokeMethod(
             self._recorder_worker, "stop_recording", Qt.QueuedConnection
         )
+
+        # Notify CameraControlPanel that recording has stopped
+        if self.camera_control_panel:
+            try:
+                self.camera_control_panel.set_recording_state(False)
+            except Exception:
+                log.exception("Failed to set camera recording state to False")
 
         # 4) Immediately update button states (the actual cleanup will happen in _cleanup_recorder)
         self._refresh_recording_button_states()
