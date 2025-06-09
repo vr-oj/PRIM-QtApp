@@ -42,7 +42,7 @@ frame_count = 50
 start_time = time.time()
 
 for _ in range(frame_count):
-    buf = sink.pop_output_buffer(1000)  # ← NO keyword argument!
+    buf = sink.pop_output_buffer()  # ← NO keyword argument!
     # optionally: arr = buf.numpy_wrap()
     buf.queue_buffer()
 
