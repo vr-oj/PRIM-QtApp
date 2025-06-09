@@ -364,8 +364,8 @@ class MainWindow(QMainWindow):
         if not dev_info:
             return
 
+        grab = ic4.Grabber()
         try:
-            grab = ic4.Grabber()
             grab.device_open(dev_info)
 
             # Force Continuous acquisition if possible
@@ -394,10 +394,13 @@ class MainWindow(QMainWindow):
                         # skip any PF that fails
                         pass
 
-            grab.device_close()
-
         except Exception as e:
             log.error(f"Failed to get formats for {dev_info}: {e}")
+        finally:
+            try:
+                grab.device_close()
+            except Exception:
+                pass
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
