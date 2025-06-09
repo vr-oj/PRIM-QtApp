@@ -304,7 +304,7 @@ class CameraControlPanel(QWidget):
     def _on_exposure_changed(self, value):
         if self.grabber:
             try:
-                prop = self.grabber.device_property_map.get("ExposureTime")
+                prop = self.grabber.device_property_map.find_float("ExposureTime")
                 prop.set_value(int(value))
                 log.info(f"ExposureTime set to {value} µs")
             except Exception as e:
@@ -313,7 +313,7 @@ class CameraControlPanel(QWidget):
     def _on_gain_changed(self, value):
         if self.grabber:
             try:
-                prop = self.grabber.device_property_map.get("Gain")
+                prop = self.grabber.device_property_map.find_float("Gain")
                 prop.set_value(float(value))
                 log.info(f"Gain set to {value}")
             except Exception as e:
@@ -322,7 +322,7 @@ class CameraControlPanel(QWidget):
     def _on_framerate_changed(self, value):
         if self.grabber:
             try:
-                prop = self.grabber.device_property_map.get("FrameRate")
+                prop = self.grabber.device_property_map.find_float("FrameRate")
                 prop.set_value(float(value))
                 log.info(f"FrameRate set to {value} fps")
             except Exception as e:

@@ -216,11 +216,16 @@ def main_app_entry():
     log.info(f"Application event loop ended with exit code {exit_code}.")
 
     # ─── Clean up IC4 when the app is closing ─────────────────────────────
+    # Delay IC4 shutdown until all references are released
+    import gc
+
+    gc.collect()  # Force object cleanup before calling exit
+
     try:
         ic4.Library.exit()
         log.info("Global IC4 Library.exit() called.")
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"IC4 exit failed: {e}")
 
     sys.exit(exit_code)
 
