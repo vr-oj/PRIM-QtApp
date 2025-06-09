@@ -130,7 +130,7 @@ class CameraControlPanel(QWidget):
             scale = 1
             if slider is not None:
                 digits = spinbox.decimals()
-                scale = 10 ** digits
+                scale = 10**digits
                 slider.setRange(int(min_val * scale), int(max_val * scale))
                 slider.setSingleStep(max(1, int(step * scale)))
                 slider.setValue(int(cur_val * scale))
@@ -181,7 +181,9 @@ class CameraControlPanel(QWidget):
             fr_node = self.grabber.device_property_map.find_float(
                 "AcquisitionFrameRate"
             )
-            self.framerate_spin.setValue(fr_node.get_value())
+            self.framerate_spin.setRange(fr_node.minimum, fr_node.maximum)
+            self.framerate_spin.setSingleStep(fr_node.increment or 0.1)
+            self.framerate_spin.setValue(fr_node.value)  # ✅ CORRECT
             self.framerate_spin.setEnabled(True)
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to init AcquisitionFrameRate: {e}")
