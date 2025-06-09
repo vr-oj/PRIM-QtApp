@@ -901,7 +901,7 @@ class MainWindow(QMainWindow):
 
         # 10) Update UI buttons (disable “Start” / enable “Stop”):
         self._refresh_recording_button_states()
-        print(f"[MainWindow] Recording started in {fill_folder_name}.")
+        log.info(f"Recording started in {fill_folder_name}.")
 
     @pyqtSlot()
     def _on_stop_recording(self):
@@ -950,7 +950,7 @@ class MainWindow(QMainWindow):
 
         # 4) Immediately update button states (the actual cleanup will happen in _cleanup_recorder)
         self._refresh_recording_button_states()
-        print("[MainWindow] Stop recording requested.")
+        log.info("Stop recording requested.")
 
     def _refresh_recording_button_states(self):
         """
