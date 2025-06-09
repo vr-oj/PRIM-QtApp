@@ -77,12 +77,12 @@ class CameraControlPanel(QWidget):
                 log.warning(f"CameraControlPanel: Property {prop_id} not found.")
                 return
 
-            min_val = prop.get_range_min()
-            max_val = prop.get_range_max()
-            cur_val = prop.get_value()
+            min_val = prop.min
+            max_val = prop.max
+            cur_val = prop.value
 
             try:
-                step = prop.get_range_inc()
+                step = prop.inc
                 if step <= 0:
                     raise ValueError()
             except Exception:
@@ -98,7 +98,7 @@ class CameraControlPanel(QWidget):
             spinbox.setValue(cur_val)
             spinbox.setEnabled(True)
 
-            log.info(
+            log.debug(
                 f"{prop_id}: min={min_val}, max={max_val}, step={step}, value={cur_val}"
             )
 
