@@ -276,3 +276,27 @@ class CameraControlPanel(QWidget):
             log.error(
                 f"CameraControlPanel: failed to set PixelFormat = {self.pf_combo.currentText()}: {e}"
             )
+
+    def _on_exposure_changed(self, value):
+        if self.grabber:
+            try:
+                self.grabber.device_property_map.set("ExposureTime", int(value))
+                log.info(f"ExposureTime set to {value} µs")
+            except Exception as e:
+                log.warning(f"Failed to set ExposureTime: {e}")
+
+    def _on_gain_changed(self, value):
+        if self.grabber:
+            try:
+                self.grabber.device_property_map.set("Gain", float(value))
+                log.info(f"Gain set to {value}")
+            except Exception as e:
+                log.warning(f"Failed to set Gain: {e}")
+
+    def _on_framerate_changed(self, value):
+        if self.grabber:
+            try:
+                self.grabber.device_property_map.set("FrameRate", float(value))
+                log.info(f"FrameRate set to {value} fps")
+            except Exception as e:
+                log.warning(f"Failed to set FrameRate: {e}")

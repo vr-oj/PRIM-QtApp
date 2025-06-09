@@ -74,6 +74,25 @@ class SDKCameraThread(QThread):
             )
 
             # ─── Apply PixelFormat & resolution ────────────────────────────────
+
+            # ─── Set Default Camera Properties BEFORE Streaming ───────────────
+            props = self.grabber.device_property_map
+            try:
+                props.set("FrameRate", DEFAULT_FPS)
+                log.info(f"Set FrameRate to {DEFAULT_FPS}")
+            except Exception as e:
+                log.warning(f"Could not set FrameRate: {e}")
+            try:
+                props.set("ExposureTime", 10000)  # Default to 10ms
+                log.info("Set ExposureTime to 10000 µs")
+            except Exception as e:
+                log.warning(f"Could not set ExposureTime: {e}")
+            try:
+                props.set("Gain", 5.0)
+                log.info("Set Gain to 5.0")
+            except Exception as e:
+                log.warning(f"Could not set Gain: {e}")
+
             if self._resolution is not None:
                 w, h, pf_name = self._resolution
                 try:
@@ -107,9 +126,7 @@ class SDKCameraThread(QThread):
                         f"SDKCameraThread: Set AcquisitionFrameRate = {DEFAULT_FPS}"
                     )
             except Exception as e:
-                log.warning(
-                    f"SDKCameraThread: Could not set AcquisitionFrameRate: {e}"
-                )
+                log.warning(f"SDKCameraThread: Could not set AcquisitionFrameRate: {e}")
 
             try:
                 ae_node = self.grabber.device_property_map.find_enumeration(
@@ -122,9 +139,7 @@ class SDKCameraThread(QThread):
                 log.warning(f"SDKCameraThread: Could not set ExposureAuto: {e}")
 
             try:
-                ag_node = self.grabber.device_property_map.find_enumeration(
-                    "GainAuto"
-                )
+                ag_node = self.grabber.device_property_map.find_enumeration("GainAuto")
                 if ag_node:
                     ag_node.value = "Off"
                     log.info("SDKCameraThread: Set GainAuto = Off")
