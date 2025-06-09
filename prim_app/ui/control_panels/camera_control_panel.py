@@ -1,6 +1,7 @@
 # camera_control_panel.py
 
 import logging
+import math
 
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtWidgets import (
@@ -81,6 +82,43 @@ class CameraControlPanel(QWidget):
         self.is_recording = recording
         log.debug(f"CameraControlPanel: is_recording set to {self.is_recording}")
 
+    # ------------------------------------------------------------------
+    def _set_spinbox_limits(self, spinbox: QDoubleSpinBox, node) -> None:
+        """Helper to configure spin box limits from a property node."""
+        def _get_float(attr_names):
+            for name in attr_names:
+                if hasattr(node, name):
+                    try:
+                        return float(getattr(node, name))
+                    except Exception:
+                        pass
+            return None
+
+        min_val = _get_float(["min", "minimum", "Min", "Minimum", "min_value", "minimum_value"])
+        max_val = _get_float(["max", "maximum", "Max", "Maximum", "max_value", "maximum_value"])
+        step = _get_float([
+            "step",
+            "increment",
+            "inc",
+            "single_step",
+            "step_size",
+            "increment_value",
+        ])
+
+        if min_val is not None and max_val is not None:
+            spinbox.setRange(min_val, max_val)
+        elif min_val is not None:
+            spinbox.setMinimum(min_val)
+        elif max_val is not None:
+            spinbox.setMaximum(max_val)
+
+        if step is not None and step > 0:
+            spinbox.setSingleStep(step)
+            # Increase decimals for small step sizes to improve precision
+            if step < 1.0:
+                decimals = max(spinbox.decimals(), int(-math.floor(math.log10(step))) + 1)
+                spinbox.setDecimals(min(decimals, 6))
+
     def _on_grabber_ready(self):
         """Populate controls from grabber properties once it is ready."""
         if not self.grabber or not getattr(self.grabber, "is_device_open", False):
@@ -95,14 +133,13 @@ class CameraControlPanel(QWidget):
         try:
             exp_node = prop_map.find_float("ExposureTime")
             if exp_node:
-                try:
-                    self.exposure_spin.setRange(float(exp_node.min), float(exp_node.max))
-                except Exception:
-                    pass
+                self._set_spinbox_limits(self.exposure_spin, exp_node)
                 self.exposure_spin.setValue(float(exp_node.value))
                 self.exposure_spin.setEnabled(True)
             else:
-                log.warning("CameraControlPanel: ExposureTime node not found")
+                log.warning(
+                    "CameraControlPanel: ExposureTime node not found; spin box remains disabled"
+                )
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to init ExposureTime: {e}")
 
@@ -110,14 +147,13 @@ class CameraControlPanel(QWidget):
         try:
             gain_node = prop_map.find_float("Gain")
             if gain_node:
-                try:
-                    self.gain_spin.setRange(float(gain_node.min), float(gain_node.max))
-                except Exception:
-                    pass
+                self._set_spinbox_limits(self.gain_spin, gain_node)
                 self.gain_spin.setValue(float(gain_node.value))
                 self.gain_spin.setEnabled(True)
             else:
-                log.warning("CameraControlPanel: Gain node not found")
+                log.warning(
+                    "CameraControlPanel: Gain node not found; spin box remains disabled"
+                )
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to init Gain: {e}")
 
@@ -147,14 +183,13 @@ class CameraControlPanel(QWidget):
         try:
             fr_node = prop_map.find_float("AcquisitionFrameRate")
             if fr_node:
-                try:
-                    self.framerate_spin.setRange(float(fr_node.min), float(fr_node.max))
-                except Exception:
-                    pass
+                self._set_spinbox_limits(self.framerate_spin, fr_node)
                 self.framerate_spin.setValue(float(fr_node.value))
                 self.framerate_spin.setEnabled(True)
             else:
-                log.warning("CameraControlPanel: AcquisitionFrameRate node not found")
+                log.warning(
+                    "CameraControlPanel: AcquisitionFrameRate node not found; spin box remains disabled"
+                )
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to init AcquisitionFrameRate: {e}")
 
