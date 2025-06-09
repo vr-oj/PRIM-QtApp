@@ -15,7 +15,7 @@
 - **High‑Speed Camera Preview & Control**  
   - Integrates with The Imaging Source DMK cameras (e.g., DMK 33UP5000, DMK 33UX250) via IC Imaging Control 4 (IC4).  
   - Lists all connected USB3 Vision cameras and enumerates supported resolutions (width×height with PixelFormat).  
-  - Live preview in a QtCameraWidget, with camera control sliders (exposure, gain, brightness) in CameraControlPanel.
+  - Live preview in an OpenGL-backed QtCameraWidget, with camera control sliders (exposure, gain, brightness) in CameraControlPanel.
 
 - **Synchronized Recording**  
   - Hardware‑triggered camera acquisition: Arduino pulses `CamTrig` pin for each sample.  
@@ -31,7 +31,7 @@
 
 - **Simple UI Layout**  
   - **Top row**: Camera Info/Controls tabs, Arduino status/controls (TopControlPanel), Plot controls (PlotControlPanel).  
-  - **Bottom row**: Live camera viewfinder (QtCameraWidget) | Live pressure plot (PressurePlotWidget).  
+  - **Bottom row**: Live camera viewfinder (OpenGL QtCameraWidget) | Live pressure plot (PressurePlotWidget).
   - Menu actions for connecting to PRIM device, arming/stopping recording, exporting plot data/image.
 
 ---
