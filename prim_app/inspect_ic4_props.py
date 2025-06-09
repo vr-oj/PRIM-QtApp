@@ -1,29 +1,58 @@
-from imagingcontrol4 import Library, DeviceEnum
+# inspect_ic4_props.py
+import imagingcontrol4 as ic4
 
-# Initialize IC4
-Library.init()
-devices = DeviceEnum.devices()
-if not devices:
-    print("No IC4 cameras detected.")
-    exit(1)
 
-dev = devices[0]
-print(f"Opening camera: {dev.model_name}")
+def main():
+    print("Initializing IC4…")
+    ic4.Library.init()
 
-with dev.open() as cam:
-    props = cam.device_property_map
+    print("Enumerating devices…")
+    devices = ic4.DeviceEnum.devices()
+    if not devices:
+        print("No cameras found.")
+        return
 
-    for name in ["ExposureTime", "Gain", "Brightness"]:
+    dev = devices[0]
+    print(f"\nOpening camera: {dev.model_name}")
+
+    grabber = ic4.Grabber(dev)
+    grabber.open()
+
+    propmap = grabber.device_property_map
+
+    print("\n=== FLOAT PROPERTIES ===")
+    for name in propmap.float_names:
         try:
-            prop = props.find_float(name)
-            print(f"\n=== {name} ===")
-            print("dir(prop):", dir(prop))
-            print("vars(prop):", vars(prop))  # sometimes works on ctypes-based objects
-            print("range_min:", getattr(prop, "range_min", "N/A"))
-            print("range_max:", getattr(prop, "range_max", "N/A"))
-            print("inc:", getattr(prop, "inc", "N/A"))
-            print("value:", getattr(prop, "value", "N/A"))
+            prop = propmap.find_float(name)
+            print(
+                f"- {name}: min={prop.min}, max={prop.max}, value={prop.value}, step={prop.inc}"
+            )
         except Exception as e:
-            print(f"{name} lookup failed: {e}")
+            print(f"- {name}: ERROR → {e}")
 
-Library.exit()
+    print("\n=== INTEGER PROPERTIES ===")
+    for name in propmap.integer_names:
+        try:
+            prop = propmap.find_integer(name)
+            print(
+                f"- {name}: min={prop.min}, max={prop.max}, value={prop.value}, step={prop.inc}"
+            )
+        except Exception as e:
+            print(f"- {name}: ERROR → {e}")
+
+    print("\n=== ENUMERATION PROPERTIES ===")
+    for name in propmap.enumeration_names:
+        try:
+            prop = propmap.find_enumeration(name)
+            print(
+                f"- {name}: current={prop.value}, choices={[e.name for e in prop.entries]}"
+            )
+        except Exception as e:
+            print(f"- {name}: ERROR → {e}")
+
+    grabber.close()
+    ic4.Library.exit()
+
+
+if __name__ == "__main__":
+    main()
