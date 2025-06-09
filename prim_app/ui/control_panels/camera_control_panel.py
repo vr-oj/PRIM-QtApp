@@ -68,26 +68,34 @@ class CameraControlPanel(QWidget):
         self.is_recording = recording
         log.debug(f"CameraControlPanel: is_recording set to {self.is_recording}")
 
-    def _setup_float_control(self, name, spinbox, decimals=2):
+    def _setup_spinbox_from_prop(self, prop_id, spinbox):
         try:
-            prop = self.grabber.device_property_map.find_float(name)
-            min_val, max_val = prop.get_range()
-            try:
-                step = prop.get_inc()
-                if step <= 0:
-                    raise ValueError()
-            except Exception:
-                step = (max_val - min_val) / 100.0
+            prop = self.grabber.device_property_map.find_float(prop_id)
+            if not prop:
+                log.warning(
+                    f"CameraControlPanel: {prop_id} not found in device_property_map."
+                )
+                return
+
+            min_val = prop.range_min
+            max_val = prop.range_max
+            step = prop.inc if prop.inc > 0 else (max_val - min_val) / 100
+            cur_val = float(prop.get_value())
 
             spinbox.setRange(min_val, max_val)
             spinbox.setSingleStep(step)
+
             if step < 1.0:
-                decimals = max(decimals, int(-math.floor(math.log10(step))) + 1)
-            spinbox.setDecimals(min(decimals, 6))
-            spinbox.setValue(prop.get_value())
+                decimals = max(
+                    spinbox.decimals(), int(-math.floor(math.log10(step))) + 1
+                )
+                spinbox.setDecimals(min(decimals, 6))
+
+            spinbox.setValue(cur_val)
             spinbox.setEnabled(True)
+
         except Exception as e:
-            log.warning(f"CameraControlPanel: Failed to setup {name}: {e}")
+            log.warning(f"CameraControlPanel: Failed to setup {prop_id}: {e}")
 
     def _on_grabber_ready(self):
         if not self.grabber or not getattr(self.grabber, "is_device_open", False):
