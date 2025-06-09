@@ -34,7 +34,8 @@ class DummyListener:
 
 listener = DummyListener()
 sink = ic4.QueueSink(listener, [ic4.PixelFormat.Mono8], max_output_buffers=8)
-grabber.stream_setup(sink, ic4.StreamSetupOption.ACQUISITION_START)
+grabber.stream_setup(sink, setup_option=ic4.StreamSetupOption.ACQUISITION_START)
+
 
 # Measure frame rate
 frame_count = 50
