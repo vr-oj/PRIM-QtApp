@@ -68,21 +68,28 @@ class CameraControlPanel(QWidget):
         self.is_recording = recording
         log.debug(f"CameraControlPanel: is_recording set to {self.is_recording}")
 
-    def _setup_spinbox_from_prop(self, prop_id, spinbox):
+    def _setup_float_control(self, prop_id, spinbox, decimals=2):
         try:
             prop = self.grabber.device_property_map.find_float(prop_id)
             if not prop:
+                log.warning(f"CameraControlPanel: Property {prop_id} not found.")
                 return
 
-            min_val = prop.min
-            max_val = prop.max
-            step = prop.inc
-            cur_val = prop.value
+            min_val = prop.get_range_min()
+            max_val = prop.get_range_max()
+            cur_val = prop.get_value()
+
+            try:
+                step = prop.get_range_inc()
+            except Exception:
+                step = (max_val - min_val) / 100.0
 
             spinbox.setRange(min_val, max_val)
             spinbox.setSingleStep(step)
+            spinbox.setDecimals(decimals)
             spinbox.setValue(cur_val)
             spinbox.setEnabled(True)
+
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to setup {prop_id}: {e}")
 
