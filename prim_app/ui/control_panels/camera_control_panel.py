@@ -80,11 +80,14 @@ class CameraControlPanel(QWidget):
             if not prop:
                 return
 
-            min_val, max_val = prop.get_range()
+            min_val = prop.min
+            max_val = prop.max
+
             cur_val = prop.get_value()
 
             try:
-                step = prop.get_inc()
+                step = prop.inc
+
             except IC4Exception:
                 step = (max_val - min_val) / 100
 
