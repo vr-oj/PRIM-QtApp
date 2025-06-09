@@ -80,15 +80,15 @@ class CameraControlPanel(QWidget):
             if not prop:
                 return
 
-            min_val = prop.min
-            max_val = prop.max
-
-            cur_val = prop.get_value()
+            min_val = float(prop.min)
+            max_val = float(prop.max)
+            cur_val = float(prop.get_value())
 
             try:
-                step = prop.inc
-
-            except IC4Exception:
+                step = float(prop.inc)
+                if step <= 0:
+                    raise ValueError()
+            except Exception:
                 step = (max_val - min_val) / 100
 
             spinbox.setRange(min_val, max_val)
@@ -102,6 +102,7 @@ class CameraControlPanel(QWidget):
 
             spinbox.setValue(cur_val)
             spinbox.setEnabled(True)
+
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to setup {prop_id}: {e}")
 
