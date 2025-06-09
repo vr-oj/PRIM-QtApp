@@ -77,12 +77,12 @@ class CameraControlPanel(QWidget):
                 log.warning(f"CameraControlPanel: Property {prop_id} not found.")
                 return
 
-            min_val = prop.range_min
-            max_val = prop.range_max
+            min_val = prop.get_range_min()
+            max_val = prop.get_range_max()
             cur_val = prop.get_value()
 
             try:
-                step = prop.inc
+                step = prop.get_range_inc()
                 if step <= 0:
                     raise ValueError()
             except Exception:
@@ -98,7 +98,7 @@ class CameraControlPanel(QWidget):
             spinbox.setValue(cur_val)
             spinbox.setEnabled(True)
 
-            log.debug(
+            log.info(
                 f"{prop_id}: min={min_val}, max={max_val}, step={step}, value={cur_val}"
             )
 
@@ -116,13 +116,6 @@ class CameraControlPanel(QWidget):
 
         self._setup_float_control("ExposureTime", self.exposure_spin, decimals=1)
         self._setup_float_control("Gain", self.gain_spin, decimals=2)
-
-        log.info("Available float properties:")
-        for prop in self.grabber.device_property_map.floats:
-            try:
-                log.info(f" - {prop.get_id().name}")
-            except Exception as e:
-                log.warning(f" - failed to get property name: {e}")
 
         try:
             ae_node = self.grabber.device_property_map.find_enumeration("ExposureAuto")
