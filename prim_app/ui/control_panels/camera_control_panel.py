@@ -80,12 +80,11 @@ class CameraControlPanel(QWidget):
             if not prop:
                 return
 
-            min_val = float(prop.min)
-            max_val = float(prop.max)
+            min_val, max_val = prop.get_range()
             cur_val = float(prop.get_value())
 
             try:
-                step = float(prop.inc)
+                step = float(prop.get_inc())
                 if step <= 0:
                     raise ValueError()
             except Exception:
