@@ -124,13 +124,21 @@ class SDKCameraThread(QThread):
                 if exp_node and not exp_node.is_readonly and exp_node.is_available:
                     exp_node.value = 5000.0  # 5 ms
                     log.info(f"SDKCameraThread: Set ExposureTime = {exp_node.value}")
+                    # Read back the value to verify it was applied
+                    actual_exp = self.grabber.device_property_map.find_float("ExposureTime").value
+                    log.info(
+                        "SDKCameraThread: ExposureTime readback = %.2f",
+                        actual_exp,
+                    )
                 else:
                     log.warning(
                         "SDKCameraThread: Exposure control not available or readonly."
                     )
             except Exception as e:
                 log.warning(f"SDKCameraThread: Could not set ExposureTime: {e}")
-
+            # Allow the camera a short moment to apply ExposureTime before
+            # updating the frame rate
+            time.sleep(0.1)
             try:
                 fr_node = self.grabber.device_property_map.find_float(
                     "AcquisitionFrameRate"
@@ -139,6 +147,14 @@ class SDKCameraThread(QThread):
                     fr_node.value = 10.0
                     log.info(
                         f"SDKCameraThread: Set AcquisitionFrameRate = {fr_node.value}"
+                    )
+                    # Read back the value to verify it was applied
+                    actual_fps = (
+                        self.grabber.device_property_map.find_float("AcquisitionFrameRate").value
+                    )
+                    log.info(
+                        "SDKCameraThread: AcquisitionFrameRate readback = %.2f",
+                        actual_fps,
                     )
                 else:
                     log.warning(
