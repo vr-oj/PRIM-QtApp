@@ -103,7 +103,7 @@ class CameraControlPanel(QWidget):
             prop = self.grabber.device_property_map.find_float(prop_id)
             if not prop:
                 log.warning(f"CameraControlPanel: Property {prop_id} not found.")
-                return
+                return 1
 
             min_val = prop.minimum
             max_val = prop.maximum
