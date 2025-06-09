@@ -4,6 +4,8 @@ import logging
 import imagingcontrol4 as ic4
 import numpy as np
 
+from utils.config import DEFAULT_FPS
+
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 
@@ -93,6 +95,41 @@ class SDKCameraThread(QThread):
                         )
                 except Exception as e:
                     log.warning(f"SDKCameraThread: Could not set resolution/PF: {e}")
+
+            # ─── Apply default frame rate and disable Auto features ────────────
+            try:
+                fr_node = self.grabber.device_property_map.find_float(
+                    "AcquisitionFrameRate"
+                )
+                if fr_node:
+                    fr_node.value = float(DEFAULT_FPS)
+                    log.info(
+                        f"SDKCameraThread: Set AcquisitionFrameRate = {DEFAULT_FPS}"
+                    )
+            except Exception as e:
+                log.warning(
+                    f"SDKCameraThread: Could not set AcquisitionFrameRate: {e}"
+                )
+
+            try:
+                ae_node = self.grabber.device_property_map.find_enumeration(
+                    "ExposureAuto"
+                )
+                if ae_node:
+                    ae_node.value = "Off"
+                    log.info("SDKCameraThread: Set ExposureAuto = Off")
+            except Exception as e:
+                log.warning(f"SDKCameraThread: Could not set ExposureAuto: {e}")
+
+            try:
+                ag_node = self.grabber.device_property_map.find_enumeration(
+                    "GainAuto"
+                )
+                if ag_node:
+                    ag_node.value = "Off"
+                    log.info("SDKCameraThread: Set GainAuto = Off")
+            except Exception as e:
+                log.warning(f"SDKCameraThread: Could not set GainAuto: {e}")
 
             # ─── Force Continuous acquisition mode ───────────────────────────────
             try:
