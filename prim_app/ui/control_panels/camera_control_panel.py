@@ -69,6 +69,8 @@ class CameraControlPanel(QWidget):
         log.debug(f"CameraControlPanel: is_recording set to {self.is_recording}")
 
     def _setup_float_control(self, prop_id, spinbox, decimals=2):
+        log.info(f"CameraControlPanel: Looking for property {prop_id}")
+
         try:
             prop = self.grabber.device_property_map.find_float(prop_id)
             if not prop:
@@ -104,6 +106,8 @@ class CameraControlPanel(QWidget):
             log.warning(f"CameraControlPanel: Failed to setup {prop_id}: {e}")
 
     def _on_grabber_ready(self):
+        log.info("CameraControlPanel: _on_grabber_ready() called")
+
         if not self.grabber or not getattr(self.grabber, "is_device_open", False):
             log.error(
                 "CameraControlPanel: _on_grabber_ready() called but grabber is not open."
@@ -112,6 +116,13 @@ class CameraControlPanel(QWidget):
 
         self._setup_float_control("ExposureTime", self.exposure_spin, decimals=1)
         self._setup_float_control("Gain", self.gain_spin, decimals=2)
+
+        log.info("Available float properties:")
+        for prop in self.grabber.device_property_map.floats:
+            try:
+                log.info(f" - {prop.get_id().name}")
+            except Exception as e:
+                log.warning(f" - failed to get property name: {e}")
 
         try:
             ae_node = self.grabber.device_property_map.find_enumeration("ExposureAuto")
