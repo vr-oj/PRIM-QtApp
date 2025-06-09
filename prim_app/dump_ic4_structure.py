@@ -18,7 +18,7 @@ def main():
     print(f"✅ Using device: {device_info.model_name} (Serial: {device_info.serial})")
 
     grabber = ic4.Grabber()
-    grabber.open(device_info)
+    grabber.device_open(device_info)  # ← FIXED HERE
 
     print("\n📜 Device Property Names:")
     pm = grabber.device_property_map()
@@ -31,6 +31,8 @@ def main():
             print(f"\n🔧 Property: {name}")
             print(f"  Type: {type(prop)}")
             pprint(dir(prop))
+            if hasattr(prop, "value"):
+                print(f"  Current value: {prop.value}")
         except Exception as e:
             print(f"⚠️ Failed to query {name}: {e}")
 
