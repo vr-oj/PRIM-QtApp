@@ -125,15 +125,15 @@ class SDKCameraThread(QThread):
             except Exception as e:
                 log.warning(f"SDKCameraThread: Could not disable TriggerMode: {e}")
 
-            # ─── Set Frame Rate (AcquisitionFrameRate) = 10.0 FPS ────────────────
+                # ─── Set Frame Rate and ExposureTime ───────────────────────────────
             try:
-                fps_node = self.grabber.device_property_map.find_float(
+                fr_node = self.grabber.device_property_map.find_float(
                     "AcquisitionFrameRate"
                 )
-                if fps_node and not fps_node.is_readonly and fps_node.is_available:
-                    fps_node.value = 10.0
+                if fr_node and not fr_node.is_readonly and fr_node.is_available:
+                    fr_node.value = 10.0
                     log.info(
-                        f"SDKCameraThread: Set AcquisitionFrameRate = {fps_node.value}"
+                        f"SDKCameraThread: Set AcquisitionFrameRate = {fr_node.value}"
                     )
                 else:
                     log.warning(
@@ -141,6 +141,18 @@ class SDKCameraThread(QThread):
                     )
             except Exception as e:
                 log.warning(f"SDKCameraThread: Could not set AcquisitionFrameRate: {e}")
+
+            try:
+                exp_node = self.grabber.device_property_map.find_float("ExposureTime")
+                if exp_node and not exp_node.is_readonly and exp_node.is_available:
+                    exp_node.value = 5000.0  # 5 ms
+                    log.info(f"SDKCameraThread: Set ExposureTime = {exp_node.value}")
+                else:
+                    log.warning(
+                        "SDKCameraThread: Exposure control not available or readonly."
+                    )
+            except Exception as e:
+                log.warning(f"SDKCameraThread: Could not set ExposureTime: {e}")
 
             # ─── Signal “grabber_ready” so UI can enable controls ────────────────
             self.grabber_ready.emit()
