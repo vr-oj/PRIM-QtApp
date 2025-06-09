@@ -1,6 +1,7 @@
 # File: prim_app/threads/sdk_camera_thread.py
 
 import logging
+import time
 import imagingcontrol4 as ic4
 import numpy as np
 
@@ -8,6 +9,8 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 
 log = logging.getLogger(__name__)
+
+FPS_LOG_INTERVAL_S = 5.0  # seconds between FPS log messages
 
 
 class SDKCameraThread(QThread):
@@ -22,6 +25,8 @@ class SDKCameraThread(QThread):
         self._device_info = None
         self._resolution = None
         self._sink = None
+        self._frame_counter = 0
+        self._fps_start_time = None
 
     def set_device_info(self, dev_info):
         self._device_info = dev_info
@@ -167,6 +172,8 @@ class SDKCameraThread(QThread):
                 self._sink,
                 setup_option=StreamSetupOption.ACQUISITION_START,
             )
+            self._frame_counter = 0
+            self._fps_start_time = time.time()
             log.info(
                 "SDKCameraThread: stream_setup(ACQUISITION_START) succeeded. Entering frame loop…"
             )
@@ -198,6 +205,7 @@ class SDKCameraThread(QThread):
     def frames_queued(self, sink):
         try:
             buf = sink.pop_output_buffer()
+            self._frame_counter += 1
             arr = buf.numpy_wrap()
 
             if arr.dtype == np.uint8:
@@ -210,6 +218,14 @@ class SDKCameraThread(QThread):
             h, w = gray8.shape[:2]
             qimg = QImage(gray8.data, w, h, gray8.strides[0], QImage.Format_Grayscale8)
             self.frame_ready.emit(qimg, buf)
+
+            if self._fps_start_time is not None:
+                elapsed = time.time() - self._fps_start_time
+                if elapsed >= FPS_LOG_INTERVAL_S:
+                    fps = self._frame_counter / elapsed if elapsed > 0 else 0.0
+                    log.info("SDKCameraThread: Actual FPS = %.2f", fps)
+                    self._frame_counter = 0
+                    self._fps_start_time = time.time()
 
         except Exception as e:
             log.error(
