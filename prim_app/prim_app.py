@@ -130,6 +130,7 @@ def main_app_entry():
 
     # Create the QApplication
     app = QApplication(sys.argv)
+    app.aboutToQuit.connect(ic4.Library.exit)
     apply_dark_theme(app)
 
     # Log what OpenGL/QSurfaceFormat we actually got
@@ -214,18 +215,6 @@ def main_app_entry():
 
     exit_code = app.exec_()
     log.info(f"Application event loop ended with exit code {exit_code}.")
-
-    # ─── Clean up IC4 when the app is closing ─────────────────────────────
-    # Delay IC4 shutdown until all references are released
-    import gc
-
-    gc.collect()  # Force object cleanup before calling exit
-
-    try:
-        ic4.Library.exit()
-        log.info("Global IC4 Library.exit() called.")
-    except Exception as e:
-        log.warning(f"IC4 exit failed: {e}")
 
     sys.exit(exit_code)
 
