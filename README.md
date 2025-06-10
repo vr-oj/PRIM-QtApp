@@ -21,7 +21,7 @@
   - Hardware‑triggered camera acquisition: Arduino pulses `CamTrig` pin for each sample.  
   - RecordingManager captures exactly one camera frame per Arduino trigger, pulls the corresponding serial line (`frame_idx, elapsed_time_s, pressure`) and writes:
     - **experiment_data.csv** (`frame_index, elapsed_time_s, pressure_value`)
-    - **experiment_video.tif** (uncompressed grayscale TIFF; enable OME in the application to embed per‑frame metadata)
+    - **experiment_video.tif** (uncompressed grayscale TIFF)
 
   - Output folder structure:  
     ```
@@ -133,7 +133,7 @@
      …  
      ```  
 
-   - **experiment_video.tif**: Uncompressed grayscale TIFF. If OME is enabled, per‑frame timestamps and pressure values are stored in the `<Plane/>` elements.
+   - **experiment_video.tif**: Uncompressed grayscale TIFF.
 
    - Use ImageJ/Fiji or Python (`tifffile`) to inspect frames and metadata.
 
