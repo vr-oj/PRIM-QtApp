@@ -178,13 +178,10 @@ class CameraControlPanel(QWidget):
             log.warning(f"CameraControlPanel: Failed to init GainAuto: {e}")
 
         try:
-            fr_node = self.grabber.device_property_map.find_float(
-                "AcquisitionFrameRate"
+            # Use the generic helper so missing 'increment' does not disable the control
+            self._setup_float_control(
+                "AcquisitionFrameRate", self.framerate_spin, decimals=1
             )
-            self.framerate_spin.setRange(fr_node.minimum, fr_node.maximum)
-            self.framerate_spin.setSingleStep(fr_node.increment or 0.1)
-            self.framerate_spin.setValue(fr_node.value)  # ✅ CORRECT
-            self.framerate_spin.setEnabled(True)
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to init AcquisitionFrameRate: {e}")
 
