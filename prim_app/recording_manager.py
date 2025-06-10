@@ -13,6 +13,10 @@ from PyQt5.QtGui import QImage
 class RecordingManager(QObject):
     """Manage synchronized writing of pressure data and camera frames."""
 
+    # Emitted when :func:`start_recording` has finished its setup and the worker
+    # is ready to receive the first Arduino tick.  The main window can listen for
+    # this signal to safely start the hardware acquisition.
+    ready_for_acquisition = pyqtSignal()
     finished = pyqtSignal()
 
     def __init__(self, output_dir, parent=None):
@@ -53,6 +57,10 @@ class RecordingManager(QObject):
             f"[RecordingManager] Ready to record →\n  CSV will be: {self._csv_path}\n  TIFF will be: {self._tiff_path}"
         )
         print("[RecordingManager] Waiting for the first Arduino tick to open files...")
+        # Notify the GUI that the worker thread finished setup and the files
+        # paths have been prepared.  The application can now start the Arduino
+        # so the first sample will create the CSV/TIFF files.
+        self.ready_for_acquisition.emit()
 
     @pyqtSlot(int, float, float)
     def append_pressure(self, frameIdx, t_device, pressure):
