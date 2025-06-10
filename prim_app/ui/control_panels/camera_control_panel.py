@@ -209,7 +209,7 @@ class CameraControlPanel(QWidget):
         try:
             node = self.grabber.device_property_map.find_float("ExposureTime")
             node.value = float(new_val)  # ✅ CORRECT WAY TO SET
-            log.debug(f"FPS set to {node.value}")
+            log.debug(f"ExposureTime set to {node.value} µs")
             self.exposure_slider.blockSignals(True)
             self.exposure_slider.setValue(int(float(new_val) * self._exp_scale))
             self.exposure_slider.blockSignals(False)
