@@ -130,7 +130,6 @@ def main_app_entry():
 
     # Create the QApplication
     app = QApplication(sys.argv)
-    app.aboutToQuit.connect(ic4.Library.exit)
     apply_dark_theme(app)
 
     # Log what OpenGL/QSurfaceFormat we actually got
@@ -215,6 +214,11 @@ def main_app_entry():
 
     exit_code = app.exec_()
     log.info(f"Application event loop ended with exit code {exit_code}.")
+
+    try:
+        ic4.Library.exit()
+    except Exception:
+        pass
 
     sys.exit(exit_code)
 
