@@ -88,19 +88,19 @@ class SDKCameraThread(QThread):
             props = self.grabber.device_property_map
             try:
                 fps_prop = props.find_float("FrameRate")
-                fps_prop.set_value(DEFAULT_FPS)
+                fps_prop.value = float(DEFAULT_FPS)
                 log.info(f"Set FrameRate to {DEFAULT_FPS}")
             except Exception as e:
                 log.warning(f"Could not set FrameRate: {e}")
             try:
                 exp_prop = props.find_float("ExposureTime")
-                exp_prop.set_value(10000)  # Default to 10ms
+                exp_prop.value = 10000.0  # Default to 10ms
                 log.info("Set ExposureTime to 10000 µs")
             except Exception as e:
                 log.warning(f"Could not set ExposureTime: {e}")
             try:
                 gain_prop = props.find_float("Gain")
-                gain_prop.set_value(5.0)
+                gain_prop.value = 5.0
                 log.info("Set Gain to 5.0")
             except Exception as e:
                 log.warning(f"Could not set Gain: {e}")
