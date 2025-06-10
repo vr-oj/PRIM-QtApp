@@ -39,7 +39,7 @@ ABOUT_TEXT = f"""
 <p>This application displays a live camera feed and pressure data from the PRIM device,
 and allows recording of this data into a high‐resolution TIFF stack (with embedded metadata)
 and a synchronized CSV log.</p>
-<p>Experiment control (start/stop) is managed via the PRIM device’s physical controls.</p>
+<p>Experiment control (start/stop) can be triggered directly from this application.</p>
 """
 
 # ─── Logging ────────────────────────────────────────────────────────────────────

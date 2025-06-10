@@ -109,14 +109,16 @@
    - Switch to the **Controls** tab to adjust Exposure, Gain, Brightness, etc.  
    - Confirm live feed is smooth and properly exposed.
 
-5. **Start Recording**  
-   - In the menu bar, go to **Acquisition → Start Recording** (or press **Ctrl+R**).  
-   - A new folder (`PRIM_ROOT/YYYY-MM-DD/FillN/`) will be created automatically.  
-   - RecordingManager launches in the background: Camera frames and serial data are synced and saved.  
+5. **Start Recording**
+   - In the menu bar, go to **Acquisition → Start Recording** (or press **Ctrl+R**).
+   - A new folder (`PRIM_ROOT/YYYY-MM-DD/FillN/`) will be created automatically.
+   - The app sends the character `G` to the PRIM device to begin camera triggers and serial output.
+   - RecordingManager launches in the background: Camera frames and serial data are synced and saved.
    - The status bar shows “Recording to ‘…’ …”.
 
-6. **Stop Recording**  
-   - Click **Acquisition → Stop Recording** (or press **Ctrl+T**).  
+6. **Stop Recording**
+   - Click **Acquisition → Stop Recording** (or press **Ctrl+T**).
+   - The character `S` is sent to the PRIM device so it halts camera acquisition and data streaming.
    - RecordingManager finalizes `experiment_data.csv` and `experiment_video.ome.tif`.
    - Status bar reads “Recording stopped and saved.”
 
