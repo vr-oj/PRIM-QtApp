@@ -120,7 +120,7 @@ class MainWindow(QMainWindow):
         self._recorder_thread = QThread(self)
 
         dummy_output_dir = ""  # replace with a default or override later
-        self._recorder_worker = RecordingManager(dummy_output_dir, use_ome=False)
+        self._recorder_worker = RecordingManager(dummy_output_dir)
 
         # 3) Move the worker into the new thread:
         self._recorder_worker.moveToThread(self._recorder_thread)
@@ -878,7 +878,7 @@ class MainWindow(QMainWindow):
 
         # Create the recording thread + worker exactly as before:
         self._recorder_thread = QThread(self)
-        self._recorder_worker = RecordingManager(output_dir=outdir, use_ome=False)
+        self._recorder_worker = RecordingManager(output_dir=outdir)
         self._recorder_worker.moveToThread(self._recorder_thread)
 
         # 7) Wire up thread start → worker.start_recording()
