@@ -87,12 +87,6 @@ class SDKCameraThread(QThread):
             # ─── Set Default Camera Properties BEFORE Streaming ───────────────
             props = self.grabber.device_property_map
             try:
-                fps_prop = props.find_float("FrameRate")
-                fps_prop.value = float(DEFAULT_FPS)
-                log.info(f"Set FrameRate to {DEFAULT_FPS}")
-            except Exception as e:
-                log.warning(f"Could not set FrameRate: {e}")
-            try:
                 exp_prop = props.find_float("ExposureTime")
                 exp_prop.value = 10000.0  # Default to 10ms
                 log.info("Set ExposureTime to 10000 µs")
@@ -104,6 +98,17 @@ class SDKCameraThread(QThread):
                 log.info("Set Gain to 5.0")
             except Exception as e:
                 log.warning(f"Could not set Gain: {e}")
+            try:
+                fr_node = props.find_float("AcquisitionFrameRate")
+                if fr_node:
+                    fr_node.value = float(DEFAULT_FPS)
+                    log.info(
+                        f"SDKCameraThread: Set AcquisitionFrameRate = {DEFAULT_FPS}"
+                    )
+            except Exception as e:
+                log.warning(
+                    f"SDKCameraThread: Could not set AcquisitionFrameRate: {e}"
+                )
 
             if self._resolution is not None:
                 w, h, pf_name = self._resolution
@@ -127,18 +132,7 @@ class SDKCameraThread(QThread):
                 except Exception as e:
                     log.warning(f"SDKCameraThread: Could not set resolution/PF: {e}")
 
-            # ─── Apply default frame rate and disable Auto features ────────────
-            try:
-                fr_node = self.grabber.device_property_map.find_float(
-                    "AcquisitionFrameRate"
-                )
-                if fr_node:
-                    fr_node.value = float(DEFAULT_FPS)
-                    log.info(
-                        f"SDKCameraThread: Set AcquisitionFrameRate = {DEFAULT_FPS}"
-                    )
-            except Exception as e:
-                log.warning(f"SDKCameraThread: Could not set AcquisitionFrameRate: {e}")
+            # ─── Disable Auto features to keep manual settings stable ─────────
 
             try:
                 ae_node = self.grabber.device_property_map.find_enumeration(
