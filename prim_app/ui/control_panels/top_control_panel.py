@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QFormLayout,
     QLabel,
+    QPushButton,
 )
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 
@@ -20,6 +21,7 @@ class TopControlPanel(QWidget):
     """
 
     parameter_changed = pyqtSignal(str, object)
+    zero_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -44,6 +46,11 @@ class TopControlPanel(QWidget):
         self.pres_lbl.setStyleSheet("font-size:12pt;font-weight:bold;")
         status_layout.addRow("Current Pressure:", self.pres_lbl)
 
+        self.zero_btn = QPushButton("Zero PRIM?")
+        self.zero_btn.setEnabled(False)
+        self.zero_btn.clicked.connect(self.zero_requested.emit)
+        status_layout.addRow(self.zero_btn)
+
         layout.addWidget(status_box, 1)
 
     def update_connection_status(self, text: str, connected: bool):
@@ -58,6 +65,7 @@ class TopControlPanel(QWidget):
         else:
             color = "#D6C832"
         self.conn_lbl.setStyleSheet(f"font-weight:bold;color:{color};")
+        self.zero_btn.setEnabled(connected)
 
     def update_prim_data(self, idx: int, t_dev: float, p_dev: float):
         """

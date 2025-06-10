@@ -263,6 +263,7 @@ class MainWindow(QMainWindow):
 
         # TopControlPanel (center)
         self.top_ctrl = TopControlPanel(self)
+        self.top_ctrl.zero_requested.connect(self._on_zero_prim)
         top_row_lay.addWidget(self.top_ctrl, stretch=2)
 
         # PlotControlPanel (right)
@@ -649,6 +650,18 @@ class MainWindow(QMainWindow):
         ):
             self.pressure_plot_widget.clear_plot()
             self.statusBar().showMessage("Pressure plot data cleared.", 3000)
+
+    @pyqtSlot()
+    def _on_zero_prim(self):
+        """Send the zeroing command to the PRIM device."""
+        try:
+            if self._serial_thread and self._serial_thread.isRunning():
+                self._serial_thread.send_command("Z")
+                self.statusBar().showMessage("Zero command sent to PRIM", 2000)
+            else:
+                self.statusBar().showMessage("PRIM device not connected", 3000)
+        except Exception:
+            log.exception("Failed to send zero command to Arduino")
 
     def _set_initial_splitter_sizes(self):
         if self.bottom_split:
