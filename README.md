@@ -19,14 +19,14 @@
 
 - **Synchronized Recording**  
   - Hardware‑triggered camera acquisition: Arduino pulses `CamTrig` pin for each sample.  
-  - RecordingManager captures exactly one camera frame per Arduino trigger, pulls the corresponding serial line (`frame_idx, elapsed_time_s, pressure`) and writes:  
-    - **experiment_data.csv** (`frame_index, elapsed_time_s, pressure_value`)  
-    - **experiment_video.tiff** (multi‑page TIFF where each page’s ImageDescription tag contains `FrameIndex=…;Time_s=…;Pressure=…`)  
+  - RecordingManager captures exactly one camera frame per Arduino trigger, pulls the corresponding serial line (`frame_idx, elapsed_time_s, pressure`) and writes:
+    - **experiment_data.csv** (`frame_index, elapsed_time_s, pressure_value`)
+    - **experiment_video.ome.tif** (uncompressed grayscale OME‑TIFF with per‑frame timestamp and pressure metadata)
   - Output folder structure:  
     ```
     PRIM_ROOT/YYYY-MM-DD/FillN/
       ├ experiment_data.csv
-      └ experiment_video.tiff
+      └ experiment_video.ome.tif
     ```
 
 - **Simple UI Layout**  
@@ -116,7 +116,7 @@
 
 6. **Stop Recording**  
    - Click **Acquisition → Stop Recording** (or press **Ctrl+T**).  
-   - RecordingManager finalizes `experiment_data.csv` and `experiment_video.tiff`.  
+   - RecordingManager finalizes `experiment_data.csv` and `experiment_video.ome.tif`.
    - Status bar reads “Recording stopped and saved.”
 
 7. **Review Output**  
@@ -129,9 +129,8 @@
      3, 0.3000, 15.45
      …  
      ```  
-   - **experiment_video.tiff**: Multi‑page TIFF; each page’s ImageDescription tag contains:  
-     `FrameIndex=<n>;Time_s=<t>;Pressure=<p>`.  
-   - Use ImageJ/Fiji or Python (`tifffile`) to open and inspect frames with metadata.
+   - **experiment_video.ome.tif**: Uncompressed grayscale OME‑TIFF. Per‑frame timestamps and pressure values are stored in the `<Plane/>` elements.
+   - Use ImageJ/Fiji or Python (`tifffile`) to inspect frames and metadata.
 
 ---
 

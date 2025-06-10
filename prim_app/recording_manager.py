@@ -21,6 +21,17 @@ class RecordingManager(QObject):
     and writes those to a CSV and a multipage TIFF respectively. When stop_recording()
     is called, it flushes and closes both files and emits 'finished'.
 
+    Parameters
+    ----------
+    output_dir : str
+        Destination directory for CSV and TIFF files.
+    parent : QObject, optional
+        Parent QObject.
+    use_ome : bool, default True
+        Write the TIFF as OME-TIFF with per-frame plane metadata.
+    compression : str or None, default None
+        TIFF compression algorithm. ``None`` writes uncompressed frames.
+
     This version DROPS every camera frame until the first Arduino tick arrives,
     then starts writing lock‐step: one CSV row per pressure tick, one TIFF page
     per frame after that. No “extra” frames at the beginning or end.
@@ -29,9 +40,11 @@ class RecordingManager(QObject):
     # Emitted when the recording truly finishes closing files.
     finished = pyqtSignal()
 
-    def __init__(self, output_dir, parent=None):
+    def __init__(self, output_dir, parent=None, use_ome=True, compression=None):
         super().__init__(parent)
         self.output_dir = output_dir
+        self.use_ome = use_ome
+        self.compression = compression
 
         # Paths (we compute them in start_recording but only open on first pressure)
         self._csv_path = None
@@ -64,7 +77,9 @@ class RecordingManager(QObject):
 
         os.makedirs(self.output_dir, exist_ok=True)
         self._csv_path = os.path.join(self.output_dir, f"{base_name}_pressure.csv")
-        self._tiff_path = os.path.join(self.output_dir, f"{base_name}_video.tif")
+        self._tiff_path = os.path.join(
+            self.output_dir, f"{base_name}_video.ome.tif"
+        )
 
         # Reset flags & counters
         self.is_recording = True
@@ -105,7 +120,9 @@ class RecordingManager(QObject):
 
             # 2) Open the multipage TIFF writer (bigtiff=True for >4GB)
             try:
-                self.tif_writer = tifffile.TiffWriter(self._tiff_path, bigtiff=True)
+                self.tif_writer = tifffile.TiffWriter(
+                    self._tiff_path, bigtiff=True, ome=self.use_ome
+                )
             except Exception as e:
                 log.error("Failed to open TIFF: %s", e)
                 # Close CSV if TIFF fails
@@ -154,12 +171,19 @@ class RecordingManager(QObject):
         if self.tif_writer:
             try:
                 arr = self._qimage_to_numpy(qimage)
-                metadata = {
-                    "frameIdx": self._frame_counter,
-                    "deviceTime": self._last_deviceTime,
-                    "pressure": self._last_pressure,
+                plane_meta = {
+                    "TheT": self._frame_counter,
+                    "DeltaT": self._last_deviceTime,
+                    "Pressure": self._last_pressure,
                 }
-                self.tif_writer.write(arr, description=json.dumps(metadata))
+                ome_meta = {"axes": "TYX", "Plane": plane_meta}
+                write_kwargs = {
+                    "photometric": "minisblack",
+                    "metadata": ome_meta,
+                }
+                if self.compression:
+                    write_kwargs["compression"] = self.compression
+                self.tif_writer.write(arr, **write_kwargs)
                 self._frame_counter += 1
             except Exception as e:
                 failed_idx = max(0, self._frame_counter)
@@ -206,13 +230,12 @@ class RecordingManager(QObject):
 
     def _qimage_to_numpy(self, qimage):
         """
-        Convert a PyQt5 QImage → H×W×3 numpy.ndarray (uint8, RGB).
-        If there’s an alpha channel, drop it.
+        Convert a ``QImage`` to a grayscale ``numpy.ndarray`` with shape ``(H, W)``.
+        Any color channels are discarded.
         """
-        qimg = qimage.convertToFormat(qimage.Format_ARGB32)
+        qimg = qimage.convertToFormat(qimage.Format_Grayscale8)
         w, h = qimg.width(), qimg.height()
         ptr = qimg.bits()
         ptr.setsize(qimg.byteCount())
-        arr = np.frombuffer(ptr, np.uint8).reshape((h, w, 4))
-        arr_rgb = arr[:, :, [2, 1, 0]]  # Swap B<->R to get RGB
-        return arr_rgb
+        arr = np.frombuffer(ptr, np.uint8).reshape((h, w))
+        return arr
