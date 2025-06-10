@@ -33,9 +33,6 @@ class SerialThread(QThread):
         self._last_data_time = None  # Timestamp (time.time()) of last valid packet
         self._stop_requested = False
 
-        # Simulation helpers (if port is None)
-        self.fake_t_idx = 0
-        self.start_time = 0.0
 
         # For sending commands (not used here, but kept for future)
         self.command_queue = queue.Queue()
@@ -43,33 +40,32 @@ class SerialThread(QThread):
         self.wait_condition = QWaitCondition()
 
     def run(self):
-        """
-        Open the serial port (if provided). Then loop:
-          - If port is open, read lines, parse them, emit data_ready(...)
-          - Track last_data_time; once we've seen the first packet, if
-            no new data arrives for IDLE_TIMEOUT_S seconds → break → thread finishes.
-          - If port is None (simulation mode), emit a fake sine-wave at ~10 Hz.
-        On exit: close port if needed, emit “Disconnected,” and finish.
+        """Main loop for reading from the PRIM device.
+
+        If a serial ``port`` is provided, the thread opens it and emits
+        ``data_ready`` for each valid packet. Lack of new data for
+        ``IDLE_TIMEOUT_S`` seconds after the first packet triggers
+        shutdown.  When no ``port`` is given the thread immediately
+        reports an error and exits.
         """
         self.running = True
-        self.start_time = time.time()
         self._got_first_packet = False
         self._last_data_time = None
 
-        # 1) Attempt to open the real serial port if one was given
-        if self.port:
-            try:
-                self.ser = serial.Serial(self.port, self.baud, timeout=1)
-                log.info(f"Opened serial port {self.port} @ {self.baud} baud")
-                self.status_changed.emit(f"Connected to {self.port}")
-            except Exception as e:
-                log.warning(f"Failed to open serial port {self.port}: {e}")
-                self.error_occurred.emit(f"Error opening serial: {e}")
-                self.ser = None
-        else:
-            # Simulation mode: no real port; we’ll generate fake data
-            log.info("No serial port specified → running in simulation mode")
-            self.status_changed.emit("Running in simulation mode")
+        if not self.port:
+            self.error_occurred.emit("No serial port specified")
+            self.running = False
+            return
+
+        # 1) Attempt to open the real serial port
+        try:
+            self.ser = serial.Serial(self.port, self.baud, timeout=1)
+            log.info(f"Opened serial port {self.port} @ {self.baud} baud")
+            self.status_changed.emit(f"Connected to {self.port}")
+        except Exception as e:
+            log.warning(f"Failed to open serial port {self.port}: {e}")
+            self.error_occurred.emit(f"Error opening serial: {e}")
+            self.ser = None
 
         # 2) Main loop
         while self.running and not self._stop_requested:
@@ -163,17 +159,6 @@ class SerialThread(QThread):
                     log.exception(f"[SerialThread] Unexpected error in read loop: {e}")
                     self.msleep(100)
 
-            else:
-                # 2c) Simulation mode: emit a fake sine-wave at ~10 Hz
-                t_elapsed = time.time() - self.start_time
-                p_sim = (
-                    50
-                    + 40 * math.sin(t_elapsed * math.pi * 0.2)
-                    + 10 * math.sin(t_elapsed * math.pi * 0.7)
-                )
-                self.data_ready.emit(self.fake_t_idx, t_elapsed, p_sim)
-                self.fake_t_idx += 1
-                self.msleep(100)
 
         # 3) Clean up on exit
         if self.ser:
@@ -213,35 +198,3 @@ class SerialThread(QThread):
             log.warning("SerialThread did not stop gracefully → terminating.")
             self.terminate()
             self.wait(1000)
-
-
-# For standalone testing (if you run this module directly):
-if __name__ == "__main__":
-    from PyQt5.QtWidgets import QApplication
-    from PyQt5.QtCore import QTimer
-    import sys
-
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    )
-
-    class DummyApp:
-        def __init__(self):
-            self.thread = SerialThread(port=None)  # Simulation mode
-            self.thread.data_ready.connect(self.on_data)
-            self.thread.status_changed.connect(lambda s: log.info(f"Status: {s}"))
-            self.thread.error_occurred.connect(lambda e: log.error(f"Error: {e}"))
-            self.thread.start()
-
-        def on_data(self, idx, t, p):
-            log.info(f"Data: Idx={idx}, Time={t:.2f}, Pressure={p:.2f}")
-
-        def stop_thread(self):
-            self.thread.stop()
-
-    app = QApplication(sys.argv)
-    da = DummyApp()
-    # Run simulation for 5 seconds, then exit
-    QTimer.singleShot(5000, da.stop_thread)
-    sys.exit(app.exec_())

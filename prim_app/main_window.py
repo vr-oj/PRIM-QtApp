@@ -603,7 +603,6 @@ class MainWindow(QMainWindow):
         self.serial_port_combobox = QComboBox()
         self.serial_port_combobox.setToolTip("Select Serial Port")
         self.serial_port_combobox.setMinimumWidth(200)
-        self.serial_port_combobox.addItem("🔌 Simulated Data", QVariant())
         ports = list_serial_ports()
         if ports:
             for p_dev, p_desc in ports:
@@ -713,7 +712,7 @@ class MainWindow(QMainWindow):
     def _show_about_dialog(self):
         QMessageBox.information(self, f"About {APP_NAME}", ABOUT_TEXT)
 
-    # ─── Toggle Serial Connection / Simulated Data ────────────────────────────
+    # ─── Toggle Serial Connection ────────────────────────────────────────────
     def _toggle_serial_connection(self):
         """
         Toggle between Connect/Disconnect purely based on whether self._serial_thread
@@ -730,15 +729,11 @@ class MainWindow(QMainWindow):
             data = self.serial_port_combobox.currentData()
             port = data.value() if isinstance(data, QVariant) else data
 
-            if (
-                port is None
-                and self.serial_port_combobox.currentText() != "🔌 Simulated Data"
-            ):
-                # They selected something invalid (neither Simulated nor a real COM)
+            if port is None:
                 QMessageBox.warning(self, "Serial Connection", "Please select a port.")
                 return
 
-            log.info(f"Starting SerialThread on port: {port or 'Simulation'}")
+            log.info(f"Starting SerialThread on port: {port}")
             try:
                 # If there is any leftover object, force‐stop and delete it
                 if self._serial_thread:
@@ -791,7 +786,7 @@ class MainWindow(QMainWindow):
             self.connect_serial_action.setIcon(self.icon_connect)
             self.connect_serial_action.setText("Connect PRIM Device")
 
-            # Re‐enable port‐combo so they can pick another port (or Simulated)
+            # Re‐enable port-combo so they can pick another port
             self.serial_port_combobox.setEnabled(True)
 
             # Drop our reference so next click will “connect” again

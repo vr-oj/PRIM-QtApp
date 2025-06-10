@@ -94,9 +94,9 @@
    python prim_app.py
    ```
 
-2. **Connect PRIM Device (Arduino)**  
-   - In the main toolbar, choose your serial port from the drop‑down (e.g. COM3) or select “🔌 Simulated Data” for testing.  
-   - Click **Connect PRIM Device**.  
+2. **Connect PRIM Device (Arduino)**
+   - In the main toolbar, choose your serial port from the drop‑down (e.g. COM3).
+   - Click **Connect PRIM Device**.
    - TopControlPanel will display “PRIM Connected.” Live pressure data will start streaming when the Arduino is running.
 
 3. **Select Camera & Resolution**  
