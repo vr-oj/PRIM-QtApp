@@ -21,13 +21,13 @@
   - Hardware‑triggered camera acquisition: Arduino pulses `CamTrig` pin for each sample.  
   - RecordingManager captures exactly one camera frame per Arduino trigger, pulls the corresponding serial line (`frame_idx, elapsed_time_s, pressure`) and writes:
     - **experiment_data.csv** (`frame_index, elapsed_time_s, pressure_value`)
-    - **experiment_video.ome.tif** (uncompressed grayscale OME‑TIFF with per‑frame timestamp and pressure metadata)
+    - **experiment_video.tif** (uncompressed grayscale TIFF; enable OME in the application to embed per‑frame metadata)
 
   - Output folder structure:  
     ```
     PRIM_ROOT/YYYY-MM-DD/FillN/
       ├ experiment_data.csv
-      └ experiment_video.ome.tif
+      └ experiment_video.tif
     ```
 
 - **Simple UI Layout**  
@@ -119,7 +119,7 @@
 6. **Stop Recording**
    - Click **Acquisition → Stop Recording** (or press **Ctrl+T**).
    - The character `S` is sent to the PRIM device so it halts camera acquisition and data streaming.
-   - RecordingManager finalizes `experiment_data.csv` and `experiment_video.ome.tif`.
+   - RecordingManager finalizes `experiment_data.csv` and `experiment_video.tif`.
    - Status bar reads “Recording stopped and saved.”
 
 7. **Review Output**  
@@ -133,7 +133,7 @@
      …  
      ```  
 
-   - **experiment_video.ome.tif**: Uncompressed grayscale OME‑TIFF. Per‑frame timestamps and pressure values are stored in the `<Plane/>` elements.
+   - **experiment_video.tif**: Uncompressed grayscale TIFF. If OME is enabled, per‑frame timestamps and pressure values are stored in the `<Plane/>` elements.
 
    - Use ImageJ/Fiji or Python (`tifffile`) to inspect frames and metadata.
 

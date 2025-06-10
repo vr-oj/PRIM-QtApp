@@ -3,7 +3,6 @@
 import os
 import time
 import csv
-import json
 import numpy as np
 import tifffile
 from PyQt5.QtCore import QObject, pyqtSlot, pyqtSignal
@@ -27,8 +26,8 @@ class RecordingManager(QObject):
         Destination directory for CSV and TIFF files.
     parent : QObject, optional
         Parent QObject.
-    use_ome : bool, default True
-        Write the TIFF as OME-TIFF with per-frame plane metadata.
+    use_ome : bool, default False
+        Write the TIFF as OME-TIFF with per-frame plane metadata when ``True``.
     compression : str or None, default None
         TIFF compression algorithm. ``None`` writes uncompressed frames.
 
@@ -40,7 +39,7 @@ class RecordingManager(QObject):
     # Emitted when the recording truly finishes closing files.
     finished = pyqtSignal()
 
-    def __init__(self, output_dir, parent=None, use_ome=True, compression=None):
+    def __init__(self, output_dir, parent=None, use_ome=False, compression=None):
         super().__init__(parent)
         self.output_dir = output_dir
         self.use_ome = use_ome
@@ -78,9 +77,11 @@ class RecordingManager(QObject):
 
         os.makedirs(self.output_dir, exist_ok=True)
         self._csv_path = os.path.join(self.output_dir, f"{base_name}_pressure.csv")
-        self._tiff_path = os.path.join(
-            self.output_dir, f"{base_name}_video.ome.tif"
-        )
+        if self.use_ome:
+            video_name = f"{base_name}_video.ome.tif"
+        else:
+            video_name = f"{base_name}_video.tif"
+        self._tiff_path = os.path.join(self.output_dir, video_name)
 
         # Reset flags & counters
         self.is_recording = True
@@ -172,16 +173,15 @@ class RecordingManager(QObject):
         if self.tif_writer:
             try:
                 arr = self._qimage_to_numpy(qimage)
-                plane_meta = {
-                    "TheT": self._frame_counter,
-                    "DeltaT": self._last_deviceTime,
-                    "Pressure": self._last_pressure,
-                }
-                ome_meta = {"axes": "TYX", "Plane": plane_meta}
-                write_kwargs = {
-                    "photometric": "minisblack",
-                    "metadata": ome_meta,
-                }
+                write_kwargs = {"photometric": "minisblack"}
+                if self.use_ome:
+                    plane_meta = {
+                        "TheT": self._frame_counter,
+                        "DeltaT": self._last_deviceTime,
+                        "Pressure": self._last_pressure,
+                    }
+                    ome_meta = {"axes": "TYX", "Plane": plane_meta}
+                    write_kwargs["metadata"] = ome_meta
                 if self.compression:
                     write_kwargs["compression"] = self.compression
                 self.tif_writer.write(arr, **write_kwargs)
