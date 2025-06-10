@@ -135,7 +135,15 @@
 
    - **experiment_video.tif**: Uncompressed grayscale TIFF.
 
-   - Use ImageJ/Fiji or Python (`tifffile`) to inspect frames and metadata.
+  - Use ImageJ/Fiji or Python (`tifffile`) to inspect frames and metadata.
+
+## Packaging
+
+Build a standalone executable with PyInstaller:
+
+```bash
+pyinstaller prim_app.spec
+```
 
 ---
 
