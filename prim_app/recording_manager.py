@@ -53,7 +53,6 @@ class RecordingManager(QObject):
         # File handles & writers (initialized on first tick)
         self.csv_file = None
         self.csv_writer = None
-        self.tif_writer = None
 
         # Recording flags
         self.is_recording = False
@@ -99,13 +98,13 @@ class RecordingManager(QObject):
     def append_pressure(self, frameIdx, t_device, pressure):
         """
         Slot connected to SerialThread.data_ready(frameIdx, t_device, pressure).
-        On the very first call, opens CSV + TIFF and sets _got_first_sample=True.
+        On the very first call, opens the CSV and sets ``_got_first_sample=True``.
         Then writes each pressure row as it arrives.
         """
         if not self.is_recording:
             return
 
-        # If this is the first pressure sample, open CSV and TIFF now
+        # If this is the first pressure sample, open the CSV now
         if not self._got_first_sample:
             self._got_first_sample = True
 
@@ -117,21 +116,6 @@ class RecordingManager(QObject):
                 # removed initial data write since it is duplicated by the code down below
             except Exception as e:
                 log.error("Failed to open CSV: %s", e)
-                self.is_recording = False
-                return
-
-            # 2) Open the multipage TIFF writer (bigtiff=True for >4GB)
-            try:
-                self.tif_writer = tifffile.TiffWriter(
-                    self._tiff_path, bigtiff=True, ome=self.use_ome
-                )
-            except Exception as e:
-                log.error("Failed to open TIFF: %s", e)
-                # Close CSV if TIFF fails
-                if self.csv_file:
-                    self.csv_file.close()
-                    self.csv_file = None
-                    self.csv_writer = None
                 self.is_recording = False
                 return
 
@@ -169,52 +153,46 @@ class RecordingManager(QObject):
             # We have not seen a pressure tick yet → drop this frame entirely.
             return
 
-        # Once first tick has arrived, tif_writer must be open
-        if self.tif_writer:
-            try:
-                arr = self._qimage_to_numpy(qimage)
-                write_kwargs = {"photometric": "minisblack"}
-                if self.use_ome:
-                    plane_meta = {
-                        "TheT": self._frame_counter,
-                        "DeltaT": self._last_deviceTime,
-                        "Pressure": self._last_pressure,
-                    }
-                    ome_meta = {"axes": "TYX", "Plane": plane_meta}
-                    write_kwargs["metadata"] = ome_meta
-                if self.compression:
-                    write_kwargs["compression"] = self.compression
-                self.tif_writer.write(arr, **write_kwargs)
+        try:
+            arr = self._qimage_to_numpy(qimage).copy()
+            write_kwargs = {
+                "photometric": "minisblack",
+                "append": self._frame_counter > 0,
+                "bigtiff": True,
+            }
+            if self.use_ome:
+                plane_meta = {
+                    "TheT": self._frame_counter,
+                    "DeltaT": self._last_deviceTime,
+                    "Pressure": self._last_pressure,
+                }
+                ome_meta = {"axes": "TYX", "Plane": plane_meta}
+                write_kwargs["metadata"] = ome_meta
+            if self.compression:
+                write_kwargs["compression"] = self.compression
+            tifffile.imwrite(self._tiff_path, arr, **write_kwargs)
 
-                self._frame_counter += 1
-            except Exception as e:
-                failed_idx = max(0, self._frame_counter)
-                log.error(
-                    "Error writing TIFF page for frame %s: %s",
-                    failed_idx,
-                    e,
-                )
+            self._frame_counter += 1
+        except Exception as e:
+            failed_idx = max(0, self._frame_counter)
+            log.error(
+                "Error writing TIFF page for frame %s: %s",
+                failed_idx,
+                e,
+            )
 
     @pyqtSlot()
     def stop_recording(self):
         """
         Slot to be called from the main/UI thread when user clicks “Stop Recording”.
-        Closes TIFF + CSV (if open), resets state, and emits finished.
+        Closes the CSV file (if open), resets state, and emits finished.
         """
         if not self.is_recording:
             return
 
         self.is_recording = False
 
-        # 1) Close TIFF writer (if it opened)
-        try:
-            if self.tif_writer:
-                self.tif_writer.close()
-                self.tif_writer = None
-        except Exception as e:
-            log.error("Error closing TIFF: %s", e)
-
-        # 2) Close CSV file (if it opened)
+        # Close CSV file (if it opened)
         try:
             if self.csv_file:
                 self.csv_file.close()
