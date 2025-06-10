@@ -878,6 +878,13 @@ class MainWindow(QMainWindow):
         # 9) Kick off the recording thread:
         self._recorder_thread.start()
 
+        # Tell the Arduino to begin acquisition
+        try:
+            if self._serial_thread:
+                self._serial_thread.send_command("G")
+        except Exception:
+            log.exception("Failed to send start command to Arduino")
+
         # Notify CameraControlPanel that recording has started
         if self.camera_control_panel:
             try:
@@ -898,6 +905,13 @@ class MainWindow(QMainWindow):
         # If there is no worker/thread, nothing to do.
         if not self._recorder_worker or not self._recorder_thread:
             return
+
+        # Send stop command to the Arduino before disconnecting
+        try:
+            if self._serial_thread:
+                self._serial_thread.send_command("S")
+        except Exception:
+            log.exception("Failed to send stop command to Arduino")
 
         # 1) Disconnect signals so no new data is queued
         try:
