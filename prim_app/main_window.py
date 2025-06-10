@@ -888,19 +888,18 @@ class MainWindow(QMainWindow):
         self._recorder_worker.finished.connect(self._recorder_worker.deleteLater)
         self._recorder_thread.finished.connect(self._recorder_thread.deleteLater)
 
+        # When the worker reports that it is ready for acquisition, send the
+        # start command to the Arduino.
+        self._recorder_worker.ready_for_acquisition.connect(
+            self._on_recorder_ready
+        )
+
         # 8) Hook camera + serial into the worker:
         self._serial_thread.data_ready.connect(self._recorder_worker.append_pressure)
         self.camera_thread.frame_ready.connect(self._recorder_worker.append_frame)
 
         # 9) Kick off the recording thread:
         self._recorder_thread.start()
-
-        # Tell the Arduino to begin acquisition
-        try:
-            if self._serial_thread:
-                self._serial_thread.send_command("G")
-        except Exception:
-            log.exception("Failed to send start command to Arduino")
 
         # Notify CameraControlPanel that recording has started
         if self.camera_control_panel:
@@ -912,6 +911,15 @@ class MainWindow(QMainWindow):
         # 10) Update UI buttons (disable “Start” / enable “Stop”):
         self._refresh_recording_button_states()
         log.info(f"Recording started in {fill_folder_name}.")
+
+    @pyqtSlot()
+    def _on_recorder_ready(self):
+        """Send the start command to the Arduino when recording setup is done."""
+        try:
+            if self._serial_thread:
+                self._serial_thread.send_command("G")
+        except Exception:
+            log.exception("Failed to send start command to Arduino")
 
     @pyqtSlot()
     def _on_stop_recording(self):
