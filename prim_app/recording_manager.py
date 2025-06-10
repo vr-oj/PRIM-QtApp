@@ -146,8 +146,23 @@ class RecordingManager(QObject):
         self.finished.emit()
 
     def _qimage_to_numpy(self, qimage):
-        """Convert a QImage to an RGB ``numpy.ndarray``."""
-        qimg = qimage.convertToFormat(qimage.Format_ARGB32)
+        """Convert a ``QImage`` to a ``numpy.ndarray``.
+
+        If the image is already 8‑bit grayscale, the raw bytes are read
+        directly into a ``(H, W)`` ``uint8`` array.  Otherwise the image is
+        converted to ARGB32 and the returned array has shape ``(H, W, 3)`` in
+        RGB order.
+        """
+
+        fmt = qimage.format()
+        if fmt in (QImage.Format_Grayscale8, QImage.Format_Indexed8):
+            w, h = qimage.width(), qimage.height()
+            ptr = qimage.bits()
+            ptr.setsize(qimage.byteCount())
+            arr = np.frombuffer(ptr, np.uint8).reshape((h, w))
+            return arr
+
+        qimg = qimage.convertToFormat(QImage.Format_ARGB32)
         w, h = qimg.width(), qimg.height()
         ptr = qimg.bits()
         ptr.setsize(qimg.byteCount())
