@@ -232,15 +232,8 @@ class SDKCameraThread(QThread):
             self.error.emit(msg, code_str)
 
         finally:
-            try:
-                ic4.Library.exit()
-                log.info("SDKCameraThread: Library.exit() called.")
-                import imagingcontrol4.library as ic4lib
-
-                ic4lib.Library._core = None  # Prevent __del__ exceptions after exit
-
-            except Exception:
-                pass
+            # All cleanup is handled by MainWindow once threads have stopped.
+            pass
 
     def frames_queued(self, sink):
         """

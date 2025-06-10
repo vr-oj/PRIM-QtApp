@@ -1057,14 +1057,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # 5) Exit the IC4 library (if it’s still loaded)
-        try:
-            ic4.Library.exit()
-            log.info("DEBUG: IC4 library exited cleanly.")
-        except Exception:
-            pass
-
-        # 6) Process any remaining events, then call the base implementation
+        # 5) Process any remaining events, then call the base implementation
         QApplication.processEvents()
         log.info("All threads cleaned up. Proceeding with close.")
         super().closeEvent(event)
