@@ -46,6 +46,7 @@ class RecordingManager(QObject):
         self.use_ome = use_ome
         self.compression = compression
 
+
         # Paths (we compute them in start_recording but only open on first pressure)
         self._csv_path = None
         self._tiff_path = None
@@ -184,6 +185,7 @@ class RecordingManager(QObject):
                 if self.compression:
                     write_kwargs["compression"] = self.compression
                 self.tif_writer.write(arr, **write_kwargs)
+
                 self._frame_counter += 1
             except Exception as e:
                 failed_idx = max(0, self._frame_counter)

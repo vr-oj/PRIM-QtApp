@@ -22,6 +22,7 @@
   - RecordingManager captures exactly one camera frame per Arduino trigger, pulls the corresponding serial line (`frame_idx, elapsed_time_s, pressure`) and writes:
     - **experiment_data.csv** (`frame_index, elapsed_time_s, pressure_value`)
     - **experiment_video.ome.tif** (uncompressed grayscale OME‑TIFF with per‑frame timestamp and pressure metadata)
+
   - Output folder structure:  
     ```
     PRIM_ROOT/YYYY-MM-DD/FillN/
@@ -129,7 +130,9 @@
      3, 0.3000, 15.45
      …  
      ```  
+
    - **experiment_video.ome.tif**: Uncompressed grayscale OME‑TIFF. Per‑frame timestamps and pressure values are stored in the `<Plane/>` elements.
+
    - Use ImageJ/Fiji or Python (`tifffile`) to inspect frames and metadata.
 
 ---
