@@ -29,9 +29,10 @@ class RecordingManager(QObject):
     # Emitted when the recording truly finishes closing files.
     finished = pyqtSignal()
 
-    def __init__(self, output_dir, parent=None):
+    def __init__(self, output_dir, parent=None, use_ome=True):
         super().__init__(parent)
         self.output_dir = output_dir
+        self.use_ome = use_ome
 
         # Paths (we compute them in start_recording but only open on first pressure)
         self._csv_path = None
@@ -64,7 +65,9 @@ class RecordingManager(QObject):
 
         os.makedirs(self.output_dir, exist_ok=True)
         self._csv_path = os.path.join(self.output_dir, f"{base_name}_pressure.csv")
-        self._tiff_path = os.path.join(self.output_dir, f"{base_name}_video.tif")
+        self._tiff_path = os.path.join(
+            self.output_dir, f"{base_name}_video.ome.tif"
+        )
 
         # Reset flags & counters
         self.is_recording = True
@@ -105,7 +108,9 @@ class RecordingManager(QObject):
 
             # 2) Open the multipage TIFF writer (bigtiff=True for >4GB)
             try:
-                self.tif_writer = tifffile.TiffWriter(self._tiff_path, bigtiff=True)
+                self.tif_writer = tifffile.TiffWriter(
+                    self._tiff_path, bigtiff=True, ome=self.use_ome
+                )
             except Exception as e:
                 log.error("Failed to open TIFF: %s", e)
                 # Close CSV if TIFF fails
@@ -154,12 +159,17 @@ class RecordingManager(QObject):
         if self.tif_writer:
             try:
                 arr = self._qimage_to_numpy(qimage)
-                metadata = {
-                    "frameIdx": self._frame_counter,
-                    "deviceTime": self._last_deviceTime,
-                    "pressure": self._last_pressure,
+                plane_meta = {
+                    "TheT": self._frame_counter,
+                    "DeltaT": self._last_deviceTime,
+                    "Pressure": self._last_pressure,
                 }
-                self.tif_writer.write(arr, description=json.dumps(metadata))
+                ome_meta = {"axes": "TYXS", "Plane": plane_meta}
+                self.tif_writer.write(
+                    arr,
+                    photometric="rgb",
+                    metadata=ome_meta,
+                )
                 self._frame_counter += 1
             except Exception as e:
                 failed_idx = max(0, self._frame_counter)
