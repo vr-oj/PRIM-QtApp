@@ -653,13 +653,22 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _on_zero_prim(self):
-        """Send the zeroing command to the PRIM device."""
+        """Send the zeroing command to the PRIM device and clear the plot."""
         try:
+            # Clear the live pressure plot regardless of connection state
+            if self.pressure_plot_widget and hasattr(
+                self.pressure_plot_widget, "clear_plot"
+            ):
+                self.pressure_plot_widget.clear_plot()
+
             if self._serial_thread and self._serial_thread.isRunning():
+                # Send the zero command when the PRIM device is connected
                 self._serial_thread.send_command("Z")
-                self.statusBar().showMessage("Zero command sent to PRIM", 2000)
+                msg = "Zero command sent to PRIM and plot cleared."
             else:
-                self.statusBar().showMessage("PRIM device not connected", 3000)
+                msg = "PRIM device not connected; plot cleared."
+
+            self.statusBar().showMessage(msg, 3000)
         except Exception:
             log.exception("Failed to send zero command to Arduino")
 
