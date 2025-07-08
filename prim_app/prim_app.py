@@ -124,17 +124,18 @@ def main_app_entry():
     if hasattr(Qt, "AA_UseHighDpiPixmaps"):
         QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
-    # ─── Initialize IC4 globally so MainWindow can enumerate devices ─────────
+    # ─── Try to initialize IC4 globally; fallback to OpenCV if unavailable ───
     try:
         ic4 = importlib.import_module("imagingcontrol4")
         ic4.Library.init(
             api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
         )
+        ic4_available = True
         log.info("Global IC4 Library.init() succeeded.")
     except Exception as e:
         ic4 = None
-        log.error(f"Could not initialize IC4 in main thread: {e}")
-        # The app can still run using OpenCV cameras only.
+        ic4_available = False
+        log.warning(f"IC4 SDK not available: {e}; using OpenCV backend")
 
     # Create the QApplication
     app = QApplication(sys.argv)
