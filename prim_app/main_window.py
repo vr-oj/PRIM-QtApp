@@ -415,8 +415,8 @@ class MainWindow(QMainWindow):
                 self.lbl_cam_connection.setText("Connecting…")
             else:
                 self.camera_thread = OpenCVCameraThread(index=self.opencv_index, parent=self)
-                self.camera_thread.frame_ready.connect(lambda img: self.camera_widget._on_frame_ready(img, None))
-                self.camera_thread.frame_ready.connect(lambda img: self._update_camera_info(img, None))
+                self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
+                self.camera_thread.frame_ready.connect(self._update_camera_info)
                 self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
                 self.lbl_cam_connection.setText("Connected")
 
