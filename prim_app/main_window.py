@@ -56,12 +56,12 @@ from utils.app_settings import (
     SETTING_LAST_CAMERA_INDEX,
     SETTING_RESULTS_DIR,
 )
+import utils.config as config
 from utils.config import (
     DEFAULT_FPS,
     DEFAULT_FRAME_SIZE,
     APP_NAME,
     APP_VERSION,
-    PRIM_RESULTS_DIR,
     set_results_dir,
     DEFAULT_VIDEO_EXTENSION,
     DEFAULT_VIDEO_CODEC,
@@ -698,7 +698,10 @@ class MainWindow(QMainWindow):
     # ─── Menu Actions & Dialog Slots ──────────────────────────────────────────
     def _export_plot_data_as_csv(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Plot Data as CSV", PRIM_RESULTS_DIR, "CSV Files (*.csv)"
+            self,
+            "Export Plot Data as CSV",
+            config.PRIM_RESULTS_DIR,
+            "CSV Files (*.csv)",
         )
         if path:
             try:
@@ -717,13 +720,14 @@ class MainWindow(QMainWindow):
 
     def _choose_results_dir(self):
         new_dir = QFileDialog.getExistingDirectory(
-            self, "Select Results Folder", PRIM_RESULTS_DIR
+            self, "Select Results Folder", config.PRIM_RESULTS_DIR
         )
         if new_dir:
-            set_results_dir(new_dir)
-            save_app_setting(SETTING_RESULTS_DIR, new_dir)
+            results_dir = os.path.join(new_dir, "PRIMAcquisition Results")
+            set_results_dir(results_dir)
+            save_app_setting(SETTING_RESULTS_DIR, results_dir)
             self.statusBar().showMessage(
-                f"Results folder set to {new_dir}", 5000
+                f"Results folder set to {results_dir}", 5000
             )
 
     def _show_about_dialog(self):
