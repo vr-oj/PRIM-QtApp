@@ -14,7 +14,8 @@
 
 - **High‑Speed Camera Preview & Control**
   - Integrates with The Imaging Source DMK cameras (e.g., DMK 33UP5000, DMK 33UX250) via IC Imaging Control 4 (IC4).
-  - Fallback support for generic webcams using OpenCV when no IC4 device is available.
+  - Optional support for Andor SDK3 cameras and µManager-controlled systems.
+  - Fallback support for generic webcams using OpenCV when no specialized device is available.
   - Lists all connected USB3 Vision cameras and enumerates supported resolutions (width×height with PixelFormat) when using IC4.
   - Live preview in an OpenGL-backed QtCameraWidget, with camera control sliders (exposure, gain, brightness) in CameraControlPanel when advanced SDK features are available.
 
@@ -51,12 +52,14 @@
   - Arduino (or compatible) running PRIM firmware (PRIM_v3_01.ino).  
   - Pressure transducer wired to an ADS ADC (e.g., ADS1115), connected to Arduino.
 
-- **Python Packages**:  
-  - PyQt5  
+- **Python Packages**:
+  - PyQt5
   - imagingcontrol4 (IC4 Python wrapper for camera) — optional for DMK cameras
-  - pyserial  
-  - numpy  
-  - tifffile  
+  - andor3 (for Andor SDK3 cameras)
+  - pycromanager (for µManager integration)
+  - pyserial
+  - numpy
+  - tifffile
 
 ---
 
@@ -204,9 +207,11 @@ PRIMAcquisition/
 
 ## Troubleshooting
 
-1. **Camera Not Listed**  
-   - Ensure the GenTL Producer for your DMK camera is installed.  
-   - Verify that `import imagingcontrol4` in Python works without errors if using the IC4 backend.
+1. **Camera Not Listed**
+    - Ensure the GenTL Producer for your DMK camera is installed.
+    - Verify that `import imagingcontrol4` in Python works without errors if using the IC4 backend.
+    - For Andor cameras, confirm the `andor3` package is installed and the SDK drivers are loaded.
+    - For µManager setups, ensure the `pycromanager` bridge can connect to the running µManager instance.
 
 2. **No Serial Data**  
    - Check Arduino COM port in Device Manager (Windows) or `/dev/tty.*` (macOS).  
