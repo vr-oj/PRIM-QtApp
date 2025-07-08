@@ -89,11 +89,39 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        self.ic4 = None
+        self.ic4_available = False
+        self.ic4_device = None
+        self.opencv_index = config.DEFAULT_CAMERA_INDEX
         try:
             self.ic4 = importlib.import_module("imagingcontrol4")
+            devices = []
+            try:
+                devices = self.ic4.DeviceEnum.devices()
+            except Exception as e:
+                log.error(f"Failed to enumerate IC4 devices: {e}")
+            if devices:
+                self.ic4_device = devices[0]
+                self.ic4_available = True
+                log.info(
+                    f"IC4 device detected: {self.ic4_device.model_name} (S/N {self.ic4_device.serial})"
+                )
+            else:
+                log.info("IC4 SDK loaded but no devices found. Falling back to OpenCV camera")
+                self.ic4 = None
         except ImportError as e:
-            log.error(f"IC4 SDK not found: {e}")
+            log.info(f"IC4 SDK not available: {e}")
             self.ic4 = None
+
+        if not self.ic4_available:
+            from utils.utils import list_opencv_cameras
+
+            cams = list_opencv_cameras()
+            if cams:
+                self.opencv_index = cams[0]
+                log.info(f"OpenCV camera index {self.opencv_index} will be used")
+            else:
+                log.warning("No OpenCV cameras detected on startup")
 
         # ─── State Variables ─────────────────────────────────────────────────────
         self._serial_thread = None
@@ -338,96 +366,37 @@ class MainWindow(QMainWindow):
 
     # ─── Camera Device & Resolution Enumeration ─────────────────────────────
     def _populate_device_list(self):
-        try:
-            if self.ic4:
-                device_list = self.ic4.DeviceEnum.devices()
-            else:
-                device_list = []
-        except Exception as e:
-            log.error(f"Failed to enumerate IC4 devices: {e}")
-            device_list = []
-
-        if not device_list:
-            log.info("DEBUG: DeviceEnum.devices() returned ZERO devices.")
-        else:
-            for idx, dev in enumerate(device_list):
-                log.info(
-                    f"DEBUG: Device {idx} = {dev.model_name!r} (S/N {dev.serial!r})"
-                )
-
-        from utils.utils import list_opencv_cameras
-
-        opencv_cams = list_opencv_cameras()
-
+        """Populate device/resolution combos based on available backend."""
         self.device_combo.clear()
-        self.device_combo.addItem("Select Device...", None)
+        self.resolution_combo.clear()
 
-        for dev in device_list:
-            display_str = f"IC4: {dev.model_name} (S/N: {dev.serial})"
-            self.device_combo.addItem(display_str, ("ic4", dev))
+        if self.ic4_available and self.ic4_device:
+            display = (
+                f"IC4: {self.ic4_device.model_name} (S/N: {self.ic4_device.serial})"
+            )
+            self.device_combo.addItem(display, ("ic4", self.ic4_device))
+        else:
+            self.device_combo.addItem(
+                f"OpenCV Camera {self.opencv_index}", ("opencv", self.opencv_index)
+            )
 
-        for idx in opencv_cams:
-            self.device_combo.addItem(f"OpenCV Camera {idx}", ("opencv", idx))
+        w, h = config.DEFAULT_FRAME_SIZE
+        self.resolution_combo.addItem("Default", (w, h, None))
 
     @pyqtSlot(int)
     def _on_device_selected(self, index):
-        """
-        Called whenever the user picks a different camera in the “Device” combo.
-        Open it briefly, enumerate PixelFormat × (W,H), then close.
-        """
+        """Update current device info (no enumeration needed)."""
         dev_info = self.device_combo.itemData(index)
         self.resolution_combo.clear()
-        self.resolution_combo.addItem("Select Resolution…", None)
+        w, h = config.DEFAULT_FRAME_SIZE
+        self.resolution_combo.addItem("Default", (w, h, None))
 
         if not dev_info:
             return
 
         backend, data = dev_info
-
-        if backend == "opencv":
-            # OpenCV cameras usually provide one default stream; no enumeration
-            self.resolution_combo.addItem("Default", (640, 480, None))
-            return
-
-        if not self.ic4:
-            return
-        grab = self.ic4.Grabber()
-        try:
-            grab.device_open(data)
-
-            # Force Continuous acquisition if possible
-            acq_node = grab.device_property_map.find_enumeration("AcquisitionMode")
-            if acq_node:
-                names = [e.name for e in acq_node.entries]
-                if "Continuous" in names:
-                    acq_node.value = "Continuous"
-                else:
-                    acq_node.value = names[0]
-
-            pf_node = grab.device_property_map.find_enumeration("PixelFormat")
-            if pf_node:
-                for entry in pf_node.entries:
-                    pf_name = entry.name
-                    try:
-                        pf_node.value = pf_name
-                        w_prop = grab.device_property_map.find_integer("Width")
-                        h_prop = grab.device_property_map.find_integer("Height")
-                        if w_prop and h_prop:
-                            w = w_prop.value
-                            h = h_prop.value
-                            display_str = f"{w}×{h} ({pf_name})"
-                            self.resolution_combo.addItem(display_str, (w, h, pf_name))
-                    except Exception:
-                        # skip any PF that fails
-                        pass
-
-        except Exception as e:
-            log.error(f"Failed to get formats for {data}: {e}")
-        finally:
-            try:
-                grab.device_close()
-            except Exception:
-                pass
+        if backend == "ic4":
+            self.ic4_device = data
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
@@ -436,36 +405,21 @@ class MainWindow(QMainWindow):
         """
         if self.camera_thread is None or not self.camera_thread.isRunning():
             # ─── Start camera ─────────────────────────────────────────────────
-            dev_info = self.device_combo.currentData()
-            if dev_info is None:
-                QMessageBox.warning(self, "Camera", "Please select a device first.")
-                return
-
-            resdata = self.resolution_combo.currentData()
-            if not resdata:
-                QMessageBox.warning(self, "Camera", "Please select a resolution first.")
-                return
-
-            backend, data = dev_info
-            w, h, pf_name = resdata
-
-            if backend == "opencv":
-                self.camera_thread = OpenCVCameraThread(index=data, parent=self)
-                self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
-                self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
-            else:
+            if self.ic4_available and self.ic4_device:
                 self.camera_thread = SDKCameraThread(parent=self)
-                self.camera_thread.set_device_info(data)
-                self.camera_thread.set_resolution((w, h, pf_name))
+                self.camera_thread.set_device_info(self.ic4_device)
                 self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
                 self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
+                self.camera_thread.frame_ready.connect(self._update_camera_info)
                 self.camera_thread.error.connect(self._on_camera_error)
-
-            # Show connection status
-            if backend == "opencv":
-                self.lbl_cam_connection.setText("Connected")
-            else:
                 self.lbl_cam_connection.setText("Connecting…")
+            else:
+                self.camera_thread = OpenCVCameraThread(index=self.opencv_index, parent=self)
+                self.camera_thread.frame_ready.connect(lambda img: self.camera_widget._on_frame_ready(img, None))
+                self.camera_thread.frame_ready.connect(lambda img: self._update_camera_info(img, None))
+                self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
+                self.lbl_cam_connection.setText("Connected")
+
             self.lbl_cam_frame.setText("0")
             self.lbl_cam_resolution.setText("N/A")
 
