@@ -7,7 +7,7 @@ import logging
 import csv
 import json
 from datetime import datetime
-import imagingcontrol4 as ic4
+import importlib
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -88,6 +88,12 @@ log = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        try:
+            self.ic4 = importlib.import_module("imagingcontrol4")
+        except ImportError as e:
+            log.error(f"IC4 SDK not found: {e}")
+            self.ic4 = None
 
         # ─── State Variables ─────────────────────────────────────────────────────
         self._serial_thread = None
@@ -333,7 +339,10 @@ class MainWindow(QMainWindow):
     # ─── Camera Device & Resolution Enumeration ─────────────────────────────
     def _populate_device_list(self):
         try:
-            device_list = ic4.DeviceEnum.devices()
+            if self.ic4:
+                device_list = self.ic4.DeviceEnum.devices()
+            else:
+                device_list = []
         except Exception as e:
             log.error(f"Failed to enumerate IC4 devices: {e}")
             device_list = []
@@ -380,7 +389,9 @@ class MainWindow(QMainWindow):
             self.resolution_combo.addItem("Default", (640, 480, None))
             return
 
-        grab = ic4.Grabber()
+        if not self.ic4:
+            return
+        grab = self.ic4.Grabber()
         try:
             grab.device_open(data)
 

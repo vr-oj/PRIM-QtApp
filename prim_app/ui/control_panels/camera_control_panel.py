@@ -13,7 +13,6 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
 )
 
-from imagingcontrol4 import IC4Exception
 
 log = logging.getLogger(__name__)
 

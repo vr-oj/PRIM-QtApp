@@ -5,7 +5,7 @@ import os
 import re
 import traceback
 import logging
-import imagingcontrol4 as ic4
+import importlib
 
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication
@@ -126,14 +126,15 @@ def main_app_entry():
 
     # ─── Initialize IC4 globally so MainWindow can enumerate devices ─────────
     try:
+        ic4 = importlib.import_module("imagingcontrol4")
         ic4.Library.init(
             api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
         )
         log.info("Global IC4 Library.init() succeeded.")
     except Exception as e:
+        ic4 = None
         log.error(f"Could not initialize IC4 in main thread: {e}")
-        # You might still allow the UI to start (with an empty device list),
-        # or choose to exit right here with sys.exit(1).
+        # The app can still run using OpenCV cameras only.
 
     # Create the QApplication
     app = QApplication(sys.argv)
@@ -228,7 +229,8 @@ def main_app_entry():
     log.info(f"Application event loop ended with exit code {exit_code}.")
 
     try:
-        ic4.Library.exit()
+        if ic4:
+            ic4.Library.exit()
     except Exception:
         pass
 

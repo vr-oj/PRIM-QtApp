@@ -1,7 +1,7 @@
 # File: prim_app/threads/sdk_camera_thread.py
 
 import logging
-import imagingcontrol4 as ic4
+import importlib
 import numpy as np
 
 from utils.config import DEFAULT_FPS
@@ -32,9 +32,16 @@ class SDKCameraThread(QThread):
         super().__init__(parent)
         self.grabber = None
         self._stop_requested = False
+        try:
+            self.ic4 = importlib.import_module("imagingcontrol4")
+            self.available = True
+        except ImportError as e:
+            log.error(f"IC4 SDK not found: {e}")
+            self.ic4 = None
+            self.available = False
 
         # Will be set by MainWindow before start():
-        self._device_info = None  # an ic4.DeviceInfo instance
+        self._device_info = None  # an imagingcontrol4.DeviceInfo instance
         self._resolution = None  # tuple (width, height, pixel_format_name)
 
         # Keep a reference to the sink so we can stop it later
@@ -50,9 +57,11 @@ class SDKCameraThread(QThread):
     def run(self):
         try:
             # ─── Initialize IC4 (with “already called” catch) ─────────────────
+            if not self.available:
+                raise RuntimeError("IC4 SDK not available")
             try:
-                ic4.Library.init(
-                    api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
+                self.ic4.Library.init(
+                    api_log_level=self.ic4.LogLevel.INFO, log_targets=self.ic4.LogTarget.STDERR
                 )
                 log.info("SDKCameraThread: Library.init() succeeded.")
             except RuntimeError as e:
@@ -66,7 +75,7 @@ class SDKCameraThread(QThread):
                 raise RuntimeError("No DeviceInfo passed to SDKCameraThread.")
 
             # ─── Open the grabber ───────────────────────────────────────────────
-            self.grabber = ic4.Grabber()
+            self.grabber = self.ic4.Grabber()
             self.grabber.device_open(self._device_info)
             log.info(
                 f"SDKCameraThread: device_open() succeeded for "
@@ -188,15 +197,15 @@ class SDKCameraThread(QThread):
 
             # ─── Build QueueSink requesting Mono8 (fallback to native PF if needed)─
             try:
-                self._sink = ic4.QueueSink(
-                    self, [ic4.PixelFormat.Mono8], max_output_buffers=1
+                self._sink = self.ic4.QueueSink(
+                    self, [self.ic4.PixelFormat.Mono8], max_output_buffers=1
                 )
             except:
                 native_pf = self._resolution[2] if self._resolution else None
-                if native_pf and hasattr(ic4.PixelFormat, native_pf):
-                    self._sink = ic4.QueueSink(
+                if native_pf and hasattr(self.ic4.PixelFormat, native_pf):
+                    self._sink = self.ic4.QueueSink(
                         self,
-                        [getattr(ic4.PixelFormat, native_pf)],
+                        [getattr(self.ic4.PixelFormat, native_pf)],
                         max_output_buffers=1,
                     )
                 else:
@@ -205,7 +214,7 @@ class SDKCameraThread(QThread):
                     )
 
             # ─── Start streaming immediately ───────────────────────────────────────
-            from imagingcontrol4 import StreamSetupOption
+            StreamSetupOption = self.ic4.StreamSetupOption
 
             self.grabber.stream_setup(
                 self._sink,
