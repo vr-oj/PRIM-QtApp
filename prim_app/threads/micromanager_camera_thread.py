@@ -1,5 +1,4 @@
 import logging
-import importlib
 import numpy as np
 
 from PyQt5.QtCore import QThread, pyqtSignal
@@ -20,8 +19,8 @@ class MicroManagerCameraThread(QThread):
         self.bridge = None
         self.core = None
         try:
-            mm = importlib.import_module("pycromanager")
-            self.Bridge = mm.Bridge
+            from pycromanager import Bridge
+            self.Bridge = Bridge
             self.available = True
         except ImportError as e:
             log.error(f"pycromanager not found: {e}")
