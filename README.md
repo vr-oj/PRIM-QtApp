@@ -29,6 +29,10 @@
       ├ experiment_data.csv
       └ experiment_video.tif
     ```
+    The default `PRIM_ROOT` is `~/Documents/PRIMAcquisition Results`. You can
+    override this location by setting the environment variable
+    `PRIM_RESULTS_DIR` before launching the application, or choose a different
+    folder from **File → Set Results Folder…** in the menu bar.
 
 - **Simple UI Layout**  
   - **Top row**: Camera Info/Controls tabs, Arduino status/controls (TopControlPanel), Plot controls (PlotControlPanel).  
@@ -112,6 +116,8 @@
 5. **Start Recording**
    - In the menu bar, go to **Acquisition → Start Recording** (or press **Ctrl+R**).
    - A new folder (`PRIM_ROOT/YYYY-MM-DD/FillN/`) will be created automatically.
+     To record somewhere else, set `PRIM_RESULTS_DIR` before launching the app or
+     use **File → Set Results Folder…** to pick a new location.
    - The app sends the character `G` to the PRIM device to begin camera triggers and serial output.
    - RecordingManager launches in the background: Camera frames and serial data are synced and saved.
    - The status bar shows “Recording to ‘…’ …”.

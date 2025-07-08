@@ -54,6 +54,7 @@ from utils.app_settings import (
     save_app_setting,
     load_app_setting,
     SETTING_LAST_CAMERA_INDEX,
+    SETTING_RESULTS_DIR,
 )
 from utils.config import (
     DEFAULT_FPS,
@@ -61,6 +62,7 @@ from utils.config import (
     APP_NAME,
     APP_VERSION,
     PRIM_RESULTS_DIR,
+    set_results_dir,
     DEFAULT_VIDEO_EXTENSION,
     DEFAULT_VIDEO_CODEC,
     ABOUT_TEXT,
@@ -529,6 +531,10 @@ class MainWindow(QMainWindow):
         exp_img_act = QAction("Export Plot &Image…", self)
         exp_img_act.triggered.connect(self.pressure_plot_widget.export_as_image)
         fm.addAction(exp_img_act)
+        choose_dir_act = QAction(
+            "Set &Results Folder…", self, triggered=self._choose_results_dir
+        )
+        fm.addAction(choose_dir_act)
         fm.addSeparator()
         exit_act = QAction(
             "&Exit", self, shortcut=QKeySequence.Quit, triggered=self.close
@@ -708,6 +714,17 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(
                     self, "Export Error", f"Failed to export CSV:\n{e}"
                 )
+
+    def _choose_results_dir(self):
+        new_dir = QFileDialog.getExistingDirectory(
+            self, "Select Results Folder", PRIM_RESULTS_DIR
+        )
+        if new_dir:
+            set_results_dir(new_dir)
+            save_app_setting(SETTING_RESULTS_DIR, new_dir)
+            self.statusBar().showMessage(
+                f"Results folder set to {new_dir}", 5000
+            )
 
     def _show_about_dialog(self):
         QMessageBox.information(self, f"About {APP_NAME}", ABOUT_TEXT)

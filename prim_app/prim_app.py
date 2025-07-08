@@ -10,6 +10,7 @@ import imagingcontrol4 as ic4
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication
 from PyQt5.QtGui import QIcon, QSurfaceFormat, QPalette, QColor
+import utils.config as config
 from utils.config import APP_NAME, APP_VERSION as CONFIG_APP_VERSION
 
 import matplotlib
@@ -41,7 +42,11 @@ if not module_log.handlers:
 
 # === load_app_setting / save_app_setting stubs if missing ===
 try:
-    from utils.app_settings import load_app_setting, save_app_setting
+    from utils.app_settings import (
+        load_app_setting,
+        save_app_setting,
+        SETTING_RESULTS_DIR,
+    )
 
     APP_SETTINGS_AVAILABLE = True
 except ImportError:
@@ -52,6 +57,8 @@ except ImportError:
 
     def save_app_setting(key, value):
         pass
+
+    SETTING_RESULTS_DIR = None
 
     module_log.warning(
         "utils.app_settings not found. Persistent settings will not work."
@@ -131,6 +138,11 @@ def main_app_entry():
     # Create the QApplication
     app = QApplication(sys.argv)
     apply_dark_theme(app)
+
+    if APP_SETTINGS_AVAILABLE and SETTING_RESULTS_DIR is not None:
+        saved_dir = load_app_setting(SETTING_RESULTS_DIR, config.PRIM_RESULTS_DIR)
+        if saved_dir:
+            config.set_results_dir(saved_dir)
 
     # Log what OpenGL/QSurfaceFormat we actually got
     actual_fmt = QSurfaceFormat.defaultFormat()
