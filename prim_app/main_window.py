@@ -68,6 +68,7 @@ from utils.config import (
     ABOUT_TEXT,
     PLOT_DEFAULT_Y_MIN,
     PLOT_DEFAULT_Y_MAX,
+    DEFAULT_MM_CONFIG_FILE,
 )
 from utils.path_helpers import get_next_fill_folder
 from ui.canvas.qtcamera_widget import QtCameraWidget
@@ -132,6 +133,8 @@ class MainWindow(QMainWindow):
             log.info("pycromanager available for µManager")
         except ImportError as e:
             log.info(f"pycromanager not available: {e}")
+
+        self.mm_config_file = config.DEFAULT_MM_CONFIG_FILE
 
         if not (self.ic4_available or self.andor_available or self.mm_available):
             from utils.utils import list_opencv_cameras
@@ -302,6 +305,13 @@ class MainWindow(QMainWindow):
         self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
         info_layout.addRow("", self.btn_start_camera)
 
+        if self.mm_available:
+            self.mm_info_label = QLabel(
+                "Place your .cfg in 'configs' or choose Load µManager Config File."
+            )
+            self.mm_info_label.setWordWrap(True)
+            info_layout.addRow("", self.mm_info_label)
+
         self.camera_tabs.addTab(info_tab, "Info")
 
         # Controls Tab
@@ -452,7 +462,11 @@ class MainWindow(QMainWindow):
                 self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
                 self.lbl_cam_connection.setText("Connected")
             elif self.current_backend == "micromanager" and self.mm_available:
-                self.camera_thread = MicroManagerCameraThread(parent=self)
+                self.camera_thread = MicroManagerCameraThread(
+                    parent=self,
+                    config_file=self.mm_config_file,
+                    headless=True,
+                )
                 self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
                 self.camera_thread.frame_ready.connect(self._update_camera_info)
                 self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
@@ -558,6 +572,10 @@ class MainWindow(QMainWindow):
         exp_img_act = QAction("Export Plot &Image…", self)
         exp_img_act.triggered.connect(self.pressure_plot_widget.export_as_image)
         fm.addAction(exp_img_act)
+        mm_cfg_act = QAction(
+            "Load µManager Config &File…", self, triggered=self._choose_mm_config_file
+        )
+        fm.addAction(mm_cfg_act)
         choose_dir_act = QAction(
             "Set &Results Folder…", self, triggered=self._choose_results_dir
         )
@@ -755,6 +773,19 @@ class MainWindow(QMainWindow):
             save_app_setting(SETTING_RESULTS_DIR, results_dir)
             self.statusBar().showMessage(
                 f"Results folder set to {results_dir}", 5000
+            )
+
+    def _choose_mm_config_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load µManager Config File",
+            os.path.dirname(self.mm_config_file),
+            "Config Files (*.cfg)",
+        )
+        if path:
+            self.mm_config_file = path
+            self.statusBar().showMessage(
+                f"µManager config loaded from {path}", 5000
             )
 
     def _show_about_dialog(self):

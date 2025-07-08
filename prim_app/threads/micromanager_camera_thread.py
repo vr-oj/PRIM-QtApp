@@ -13,11 +13,12 @@ class MicroManagerCameraThread(QThread):
     frame_ready = pyqtSignal(QImage, object)
     error = pyqtSignal(str)
 
-    def __init__(self, parent=None, config_file=None):
+    def __init__(self, parent=None, config_file=None, headless=False):
         super().__init__(parent)
         self._stop_requested = False
         self.core = None
         self.config_file = config_file  # optional path to MM .cfg for headless mode
+        self.headless = headless
 
         try:
             from pycromanager import Core
@@ -34,11 +35,10 @@ class MicroManagerCameraThread(QThread):
             return
 
         try:
-            self.core = self.Core()
+            self.core = self.Core(headless=self.headless)
 
-            # Optional: support standalone mode by loading a config file
-            # if self.config_file:
-            #     self.core.load_system_configuration(self.config_file)
+            if self.config_file:
+                self.core.load_system_configuration(self.config_file)
 
             self.core.start_continuous_sequence_acquisition(0)
 

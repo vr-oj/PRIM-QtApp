@@ -15,6 +15,7 @@
 - **High‑Speed Camera Preview & Control**
   - Integrates with The Imaging Source DMK cameras (e.g., DMK 33UP5000, DMK 33UX250) via IC Imaging Control 4 (IC4).
   - Optional support for Andor SDK3 cameras and µManager-controlled systems.
+  - µManager can run headless by loading a configuration file (*.cfg).
   - Fallback support for generic webcams using OpenCV when no specialized device is available.
   - Lists all connected USB3 Vision cameras and enumerates supported resolutions (width×height with PixelFormat) when using IC4.
   - Live preview in an OpenGL-backed QtCameraWidget, with camera control sliders (exposure, gain, brightness) in CameraControlPanel when advanced SDK features are available.
@@ -143,9 +144,17 @@
      …  
      ```  
 
-   - **experiment_video.tif**: Uncompressed grayscale TIFF.
+  - **experiment_video.tif**: Uncompressed grayscale TIFF.
 
   - Use ImageJ/Fiji or Python (`tifffile`) to inspect frames and metadata.
+
+## µManager Headless Mode
+
+To run a µManager camera without the GUI, place your `.cfg` file in
+`prim_app/configs/MMConfig.cfg` or choose **File → Load µManager Config File…**
+from the menu. The configuration must include your camera and device settings.
+When provided, PRIMAcquisition launches the µManager Core in headless mode using
+that file.
 
 ## Packaging
 
