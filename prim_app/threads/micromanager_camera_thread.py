@@ -19,7 +19,7 @@ class MicroManagerCameraThread(QThread):
         self.bridge = None
         self.core = None
         try:
-            from pycromanager import Bridge
+            from pycromanager.bridge import Bridge
             self.Bridge = Bridge
             self.available = True
         except ImportError as e:
