@@ -79,6 +79,8 @@ from ui.canvas.pressure_plot_widget import PressurePlotWidget
 from threads.serial_thread import SerialThread
 from threads.sdk_camera_thread import SDKCameraThread
 from threads.opencv_camera_thread import OpenCVCameraThread
+from threads.andor_camera_thread import AndorCameraThread
+from threads.micromanager_camera_thread import MicroManagerCameraThread
 from recording_manager import RecordingManager
 from utils.utils import list_serial_ports
 
@@ -92,6 +94,8 @@ class MainWindow(QMainWindow):
         self.ic4 = None
         self.ic4_available = False
         self.ic4_device = None
+        self.andor_available = False
+        self.mm_available = False
         self.opencv_index = config.DEFAULT_CAMERA_INDEX
         try:
             self.ic4 = importlib.import_module("imagingcontrol4")
@@ -113,7 +117,23 @@ class MainWindow(QMainWindow):
             log.info(f"IC4 SDK not available: {e}")
             self.ic4 = None
 
-        if not self.ic4_available:
+        # ─── Detect Andor SDK3 availability ────────────────────────────────
+        try:
+            importlib.import_module("andor3")
+            self.andor_available = True
+            log.info("Andor SDK3 available")
+        except ImportError as e:
+            log.info(f"Andor SDK3 not available: {e}")
+
+        # ─── Detect µManager availability via pycromanager ────────────────
+        try:
+            importlib.import_module("pycromanager")
+            self.mm_available = True
+            log.info("pycromanager available for µManager")
+        except ImportError as e:
+            log.info(f"pycromanager not available: {e}")
+
+        if not (self.ic4_available or self.andor_available or self.mm_available):
             from utils.utils import list_opencv_cameras
 
             cams = list_opencv_cameras()
@@ -137,6 +157,7 @@ class MainWindow(QMainWindow):
         self.camera_control_panel = None
         self.camera_tabs = None
         self.camera_thread = None  # SDKCameraThread instance
+        self.current_backend = None
 
         # Plot controls
         self.plot_control_panel = None
@@ -375,10 +396,20 @@ class MainWindow(QMainWindow):
                 f"IC4: {self.ic4_device.model_name} (S/N: {self.ic4_device.serial})"
             )
             self.device_combo.addItem(display, ("ic4", self.ic4_device))
-        else:
+        if self.andor_available:
+            self.device_combo.addItem("Andor SDK3 Camera", ("andor", None))
+        if self.mm_available:
+            self.device_combo.addItem("µManager Camera", ("micromanager", None))
+        if not (self.ic4_available or self.andor_available or self.mm_available):
             self.device_combo.addItem(
                 f"OpenCV Camera {self.opencv_index}", ("opencv", self.opencv_index)
             )
+
+        # Set current backend to first item by default
+        if self.device_combo.count() > 0:
+            first_data = self.device_combo.itemData(0)
+            if first_data:
+                self.current_backend = first_data[0]
 
         w, h = config.DEFAULT_FRAME_SIZE
         self.resolution_combo.addItem("Default", (w, h, None))
@@ -395,6 +426,7 @@ class MainWindow(QMainWindow):
             return
 
         backend, data = dev_info
+        self.current_backend = backend
         if backend == "ic4":
             self.ic4_device = data
 
@@ -405,7 +437,7 @@ class MainWindow(QMainWindow):
         """
         if self.camera_thread is None or not self.camera_thread.isRunning():
             # ─── Start camera ─────────────────────────────────────────────────
-            if self.ic4_available and self.ic4_device:
+            if self.current_backend == "ic4" and self.ic4_available and self.ic4_device:
                 self.camera_thread = SDKCameraThread(parent=self)
                 self.camera_thread.set_device_info(self.ic4_device)
                 self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
@@ -413,6 +445,18 @@ class MainWindow(QMainWindow):
                 self.camera_thread.frame_ready.connect(self._update_camera_info)
                 self.camera_thread.error.connect(self._on_camera_error)
                 self.lbl_cam_connection.setText("Connecting…")
+            elif self.current_backend == "andor" and self.andor_available:
+                self.camera_thread = AndorCameraThread(parent=self)
+                self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
+                self.camera_thread.frame_ready.connect(self._update_camera_info)
+                self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
+                self.lbl_cam_connection.setText("Connected")
+            elif self.current_backend == "micromanager" and self.mm_available:
+                self.camera_thread = MicroManagerCameraThread(parent=self)
+                self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
+                self.camera_thread.frame_ready.connect(self._update_camera_info)
+                self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
+                self.lbl_cam_connection.setText("Connected")
             else:
                 self.camera_thread = OpenCVCameraThread(index=self.opencv_index, parent=self)
                 self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
