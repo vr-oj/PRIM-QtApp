@@ -78,6 +78,7 @@ from ui.canvas.pressure_plot_widget import PressurePlotWidget
 
 from threads.serial_thread import SerialThread
 from threads.sdk_camera_thread import SDKCameraThread
+from threads.opencv_camera_thread import OpenCVCameraThread
 from recording_manager import RecordingManager
 from utils.utils import list_serial_ports
 
@@ -345,11 +346,19 @@ class MainWindow(QMainWindow):
                     f"DEBUG: Device {idx} = {dev.model_name!r} (S/N {dev.serial!r})"
                 )
 
+        from utils.utils import list_opencv_cameras
+
+        opencv_cams = list_opencv_cameras()
+
         self.device_combo.clear()
         self.device_combo.addItem("Select Device...", None)
+
         for dev in device_list:
-            display_str = f"{dev.model_name}  (S/N: {dev.serial})"
-            self.device_combo.addItem(display_str, dev)
+            display_str = f"IC4: {dev.model_name} (S/N: {dev.serial})"
+            self.device_combo.addItem(display_str, ("ic4", dev))
+
+        for idx in opencv_cams:
+            self.device_combo.addItem(f"OpenCV Camera {idx}", ("opencv", idx))
 
     @pyqtSlot(int)
     def _on_device_selected(self, index):
@@ -364,9 +373,16 @@ class MainWindow(QMainWindow):
         if not dev_info:
             return
 
+        backend, data = dev_info
+
+        if backend == "opencv":
+            # OpenCV cameras usually provide one default stream; no enumeration
+            self.resolution_combo.addItem("Default", (640, 480, None))
+            return
+
         grab = ic4.Grabber()
         try:
-            grab.device_open(dev_info)
+            grab.device_open(data)
 
             # Force Continuous acquisition if possible
             acq_node = grab.device_property_map.find_enumeration("AcquisitionMode")
@@ -395,7 +411,7 @@ class MainWindow(QMainWindow):
                         pass
 
         except Exception as e:
-            log.error(f"Failed to get formats for {dev_info}: {e}")
+            log.error(f"Failed to get formats for {data}: {e}")
         finally:
             try:
                 grab.device_close()
@@ -419,24 +435,26 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Camera", "Please select a resolution first.")
                 return
 
+            backend, data = dev_info
             w, h, pf_name = resdata
 
-            # Instantiate the SDK camera thread
-            self.camera_thread = SDKCameraThread(parent=self)
-            self.camera_thread.set_device_info(dev_info)
-            self.camera_thread.set_resolution((w, h, pf_name))
+            if backend == "opencv":
+                self.camera_thread = OpenCVCameraThread(index=data, parent=self)
+                self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
+                self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
+            else:
+                self.camera_thread = SDKCameraThread(parent=self)
+                self.camera_thread.set_device_info(data)
+                self.camera_thread.set_resolution((w, h, pf_name))
+                self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
+                self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
+                self.camera_thread.error.connect(self._on_camera_error)
 
-            # 1) When the grabber is open & streaming, enable the sliders, etc.
-            self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
-
-            # 2) Each time a new frame is ready, update the QtCameraWidget
-            self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
-
-            # 3) On any camera error, pop up a dialog and tear everything down
-            self.camera_thread.error.connect(self._on_camera_error)
-
-            # Show “Connecting…” in the Info tab
-            self.lbl_cam_connection.setText("Connecting…")
+            # Show connection status
+            if backend == "opencv":
+                self.lbl_cam_connection.setText("Connected")
+            else:
+                self.lbl_cam_connection.setText("Connecting…")
             self.lbl_cam_frame.setText("0")
             self.lbl_cam_resolution.setText("N/A")
 

@@ -16,7 +16,7 @@ def timestamped_filename(prefix, ext):
     return f"{prefix}_{ts}.{ext}"
 
 
-def list_cameras(max_idx=5):  # OpenCV camera listing
+def list_opencv_cameras(max_idx=5):
     """Lists available OpenCV/DirectShow cameras."""
     cams = []
     for i in range(max_idx):

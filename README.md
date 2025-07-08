@@ -12,10 +12,11 @@
   - Displays live pressure vs. time trace in a PyQt5 plot widget.  
   - Numeric readouts (frame index, device time, pressure) in the TopControlPanel.
 
-- **High‑Speed Camera Preview & Control**  
-  - Integrates with The Imaging Source DMK cameras (e.g., DMK 33UP5000, DMK 33UX250) via IC Imaging Control 4 (IC4).  
-  - Lists all connected USB3 Vision cameras and enumerates supported resolutions (width×height with PixelFormat).  
-  - Live preview in an OpenGL-backed QtCameraWidget, with camera control sliders (exposure, gain, brightness) in CameraControlPanel.
+- **High‑Speed Camera Preview & Control**
+  - Integrates with The Imaging Source DMK cameras (e.g., DMK 33UP5000, DMK 33UX250) via IC Imaging Control 4 (IC4).
+  - Fallback support for generic webcams using OpenCV when no IC4 device is available.
+  - Lists all connected USB3 Vision cameras and enumerates supported resolutions (width×height with PixelFormat) when using IC4.
+  - Live preview in an OpenGL-backed QtCameraWidget, with camera control sliders (exposure, gain, brightness) in CameraControlPanel when advanced SDK features are available.
 
 - **Synchronized Recording**  
   - Hardware‑triggered camera acquisition: Arduino pulses `CamTrig` pin for each sample.  
@@ -165,6 +166,7 @@ PRIMAcquisition/
 │  │  ├─ serial_thread.py
 │  │  ├─ sdk_camera_thread.py
 │  │  └─ …
+│  ├─ cameras/           ← Camera abstraction backends (IC4, OpenCV)
 │  ├─ ui/
 │  │  ├─ canvas/
 │  │  │  ├─ qtcamera_widget.py
