@@ -54,3 +54,4 @@ def load_app_settings():
 # --- Constants for setting keys ---
 SETTING_LAST_CAMERA_INDEX = "last_camera_index"
 SETTING_LAST_PROFILE_NAME = "last_profile_name"
+SETTING_RESULTS_DIR = "results_dir"

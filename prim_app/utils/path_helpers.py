@@ -4,7 +4,7 @@ import os
 from datetime import date
 from pathlib import Path
 
-from utils.config import PRIM_ROOT
+import utils.config as config
 
 
 def get_next_fill_folder() -> str:
@@ -19,7 +19,7 @@ def get_next_fill_folder() -> str:
     """
     # 1) Today’s date folder: PRIM_ROOT/YYYY-MM-DD
     today = date.today().isoformat()  # e.g. "2025-06-03"
-    date_folder = os.path.join(PRIM_ROOT, today)
+    date_folder = os.path.join(config.PRIM_ROOT, today)
     Path(date_folder).mkdir(parents=True, exist_ok=True)
 
     # 2) Look for existing “Fill” subfolders (Fill1, Fill2, …)

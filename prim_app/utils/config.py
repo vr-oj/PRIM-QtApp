@@ -8,13 +8,21 @@ from PyQt5.QtCore import QStandardPaths, QDir
 # ─── User’s Documents folder ───────────────────────────────────────────────────
 DOCUMENTS_DIR = os.path.join(os.path.expanduser("~"), "Documents")
 
-# ─── “Root” for all PRIMAcquisition recordings ─────────────────────────────────
-PRIM_ROOT = os.path.join(DOCUMENTS_DIR, "PRIMAcquisition Results")
-Path(PRIM_ROOT).mkdir(parents=True, exist_ok=True)
-
-# ─── Legacy results folder (kept for compatibility, if needed) ─────────────────
-PRIM_RESULTS_DIR = os.path.join(DOCUMENTS_DIR, "PRIMAcquisition Results")
+# Allow users to override the default results directory by setting the
+# environment variable "PRIM_RESULTS_DIR" before launching the application.
+DEFAULT_RESULTS_DIR = os.path.join(DOCUMENTS_DIR, "PRIMAcquisition Results")
+PRIM_RESULTS_DIR = os.environ.get("PRIM_RESULTS_DIR", DEFAULT_RESULTS_DIR)
+PRIM_ROOT = PRIM_RESULTS_DIR  # alias kept for backwards compatibility
 Path(PRIM_RESULTS_DIR).mkdir(parents=True, exist_ok=True)
+
+
+def set_results_dir(path: str):
+    """Update ``PRIM_RESULTS_DIR`` and ensure the folder exists."""
+    global PRIM_RESULTS_DIR, PRIM_ROOT
+    PRIM_RESULTS_DIR = path
+    PRIM_ROOT = path
+    os.environ["PRIM_RESULTS_DIR"] = path
+    Path(path).mkdir(parents=True, exist_ok=True)
 
 # ─── Recording settings ─────────────────────────────────────────────────────────
 DEFAULT_VIDEO_EXTENSION = "tif"
@@ -25,6 +33,9 @@ DEFAULT_CAMERA_INDEX = 0  # Default device index
 
 # Frame size fallback (actual size will be queried from camera at runtime)
 DEFAULT_FRAME_SIZE = (640, 480)  # (width, height)
+
+# Minimum free disk space in gigabytes required before starting a recording
+MIN_FREE_SPACE_GB = 30
 
 # ─── Serial communication ────────────────────────────────────────────────────────
 DEFAULT_SERIAL_BAUD_RATE = 115200

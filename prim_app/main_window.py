@@ -54,13 +54,15 @@ from utils.app_settings import (
     save_app_setting,
     load_app_setting,
     SETTING_LAST_CAMERA_INDEX,
+    SETTING_RESULTS_DIR,
 )
+import utils.config as config
 from utils.config import (
     DEFAULT_FPS,
     DEFAULT_FRAME_SIZE,
     APP_NAME,
     APP_VERSION,
-    PRIM_RESULTS_DIR,
+    set_results_dir,
     DEFAULT_VIDEO_EXTENSION,
     DEFAULT_VIDEO_CODEC,
     ABOUT_TEXT,
@@ -529,6 +531,10 @@ class MainWindow(QMainWindow):
         exp_img_act = QAction("Export Plot &Image…", self)
         exp_img_act.triggered.connect(self.pressure_plot_widget.export_as_image)
         fm.addAction(exp_img_act)
+        choose_dir_act = QAction(
+            "Set &Results Folder…", self, triggered=self._choose_results_dir
+        )
+        fm.addAction(choose_dir_act)
         fm.addSeparator()
         exit_act = QAction(
             "&Exit", self, shortcut=QKeySequence.Quit, triggered=self.close
@@ -692,7 +698,10 @@ class MainWindow(QMainWindow):
     # ─── Menu Actions & Dialog Slots ──────────────────────────────────────────
     def _export_plot_data_as_csv(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Plot Data as CSV", PRIM_RESULTS_DIR, "CSV Files (*.csv)"
+            self,
+            "Export Plot Data as CSV",
+            config.PRIM_RESULTS_DIR,
+            "CSV Files (*.csv)",
         )
         if path:
             try:
@@ -708,6 +717,18 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(
                     self, "Export Error", f"Failed to export CSV:\n{e}"
                 )
+
+    def _choose_results_dir(self):
+        new_dir = QFileDialog.getExistingDirectory(
+            self, "Select Results Folder", config.PRIM_RESULTS_DIR
+        )
+        if new_dir:
+            results_dir = os.path.join(new_dir, "PRIMAcquisition Results")
+            set_results_dir(results_dir)
+            save_app_setting(SETTING_RESULTS_DIR, results_dir)
+            self.statusBar().showMessage(
+                f"Results folder set to {results_dir}", 5000
+            )
 
     def _show_about_dialog(self):
         QMessageBox.information(self, f"About {APP_NAME}", ABOUT_TEXT)
