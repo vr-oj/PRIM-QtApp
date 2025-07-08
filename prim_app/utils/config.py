@@ -26,6 +26,9 @@ DEFAULT_CAMERA_INDEX = 0  # Default device index
 # Frame size fallback (actual size will be queried from camera at runtime)
 DEFAULT_FRAME_SIZE = (640, 480)  # (width, height)
 
+# Minimum free disk space in gigabytes required before starting a recording
+MIN_FREE_SPACE_GB = 30
+
 # ─── Serial communication ────────────────────────────────────────────────────────
 DEFAULT_SERIAL_BAUD_RATE = 115200
 SERIAL_COMMAND_TERMINATOR = b"\n"  # Arduino uses Serial.println()

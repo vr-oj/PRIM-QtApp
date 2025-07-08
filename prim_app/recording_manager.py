@@ -4,11 +4,13 @@ import os
 import time
 import csv
 import json
+import shutil
 import numpy as np
 import tifffile
 from PyQt5.QtCore import QObject, pyqtSlot, pyqtSignal
 from PyQt5.QtGui import QImage
 
+from utils.config import MIN_FREE_SPACE_GB
 
 class RecordingManager(QObject):
     """Manage synchronized writing of pressure data and camera frames."""
@@ -47,6 +49,18 @@ class RecordingManager(QObject):
         base_name = f"recording_{timestamp}"
 
         os.makedirs(self.output_dir, exist_ok=True)
+        
+        # ─── Verify free disk space before recording ──────────────────────────
+        total, used, free = shutil.disk_usage(self.output_dir)
+        if free < MIN_FREE_SPACE_GB * 1024 ** 3:
+            gb_free = free / 1024 ** 3
+            print(
+                f"[RecordingManager] Insufficient disk space: "
+                f"{gb_free:.2f} GB available, {MIN_FREE_SPACE_GB} GB required."
+            )
+            self.ready_for_acquisition.emit()
+            return
+        
         self._csv_path = os.path.join(self.output_dir, f"{base_name}_pressure.csv")
         self._tiff_path = os.path.join(self.output_dir, f"{base_name}_video.tif")
 
