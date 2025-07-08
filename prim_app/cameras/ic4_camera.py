@@ -1,4 +1,4 @@
-import imagingcontrol4 as ic4
+import importlib
 import numpy as np
 
 from .base import CameraBase
@@ -7,14 +7,23 @@ from .base import CameraBase
 class IC4Camera(CameraBase):
     """Camera backend using The Imaging Source IC4 SDK."""
 
-    def __init__(self, device_info: ic4.DeviceInfo):
+    def __init__(self, device_info=None):
         self.device_info = device_info
         self.grabber = None
         self._sink = None
+        try:
+            self.ic4 = importlib.import_module("imagingcontrol4")
+            self.available = True
+        except ImportError as e:
+            print("IC Imaging Control SDK not found:", e)
+            self.ic4 = None
+            self.available = False
 
     def connect(self):
-        ic4.Library.init()
-        self.grabber = ic4.Grabber()
+        if not self.available:
+            raise RuntimeError("IC4 SDK not available")
+        self.ic4.Library.init()
+        self.grabber = self.ic4.Grabber()
         self.grabber.device_open(self.device_info)
 
     def disconnect(self):
@@ -28,9 +37,8 @@ class IC4Camera(CameraBase):
     def start_stream(self):
         if not self.grabber:
             raise RuntimeError("Grabber not open")
-        self._sink = ic4.QueueSink(self, [ic4.PixelFormat.Mono8], max_output_buffers=1)
-        from imagingcontrol4 import StreamSetupOption
-
+        self._sink = self.ic4.QueueSink(self, [self.ic4.PixelFormat.Mono8], max_output_buffers=1)
+        StreamSetupOption = self.ic4.StreamSetupOption
         self.grabber.stream_setup(self._sink, setup_option=StreamSetupOption.ACQUISITION_START)
 
     def stop_stream(self):

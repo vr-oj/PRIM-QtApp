@@ -53,7 +53,7 @@
 
 - **Python Packages**:  
   - PyQt5  
-  - imagingcontrol4 (IC4 Python wrapper for camera)  
+  - imagingcontrol4 (IC4 Python wrapper for camera) — optional for DMK cameras
   - pyserial  
   - numpy  
   - tifffile  
@@ -80,14 +80,14 @@
    pip install --upgrade pip
    pip install -r requirements.txt
    ```  
-   - If `requirements.txt` is not provided, install manually:  
+   - If `requirements.txt` is not provided, install manually (omit `imagingcontrol4` if you only use OpenCV cameras):
      ```bash
      pip install pyqt5 imagingcontrol4 pyserial numpy tifffile
      ```
 
 4. **Install IC Imaging Control 4 SDK**  
    - Download and install the TIS IC4 SDK for your camera. Ensure that the GenTL Producer is configured for your DMK camera.  
-   - On Windows, verify that `imagingcontrol4` Python module can import successfully.
+   - On Windows, verify that `imagingcontrol4` Python module can import successfully if you plan to use DMK cameras.
 
 ---
 
@@ -206,7 +206,7 @@ PRIMAcquisition/
 
 1. **Camera Not Listed**  
    - Ensure the GenTL Producer for your DMK camera is installed.  
-   - Verify that `import imagingcontrol4` in Python works without errors.
+   - Verify that `import imagingcontrol4` in Python works without errors if using the IC4 backend.
 
 2. **No Serial Data**  
    - Check Arduino COM port in Device Manager (Windows) or `/dev/tty.*` (macOS).  
