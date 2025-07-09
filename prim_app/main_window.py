@@ -1,13 +1,25 @@
 # prim_app/main_window.py
 
 import os
+import sys
 
 # ---------------------------------------------------------------------------
-# Configure MICROMANAGER_PATH before importing modules that may use
-# pycromanager.  pycromanager reads this environment variable at import time, so
-# it must be set early.  We load the path from AppSettings if available and set
-# the environment variable when it isn't already defined.
+# Configure ``MICROMANAGER_PATH`` before any pycromanager modules are imported.
+# ``pycromanager`` reads this variable at import time to know where µManager is
+# located.  We default to the bundled ``micromanager`` folder next to this file
+# (or the frozen executable) but allow overrides via AppSettings or an existing
+# environment variable.
 # ---------------------------------------------------------------------------
+
+# Absolute path to the packaged micromanager directory
+_default_mm_path = os.path.join(
+    os.path.dirname(sys.executable if getattr(sys, "frozen", False) else __file__),
+    "micromanager",
+)
+
+if "MICROMANAGER_PATH" not in os.environ:
+    os.environ["MICROMANAGER_PATH"] = _default_mm_path
+
 mm_path_early = None
 try:
     from utils.app_settings import load_app_setting, SETTING_MM_APP_PATH
@@ -15,10 +27,9 @@ try:
     mm_path_early = load_app_setting(SETTING_MM_APP_PATH)
 except Exception:
     mm_path_early = None
-if mm_path_early and "MICROMANAGER_PATH" not in os.environ and os.path.exists(mm_path_early):
+if mm_path_early and os.path.exists(mm_path_early):
     os.environ["MICROMANAGER_PATH"] = mm_path_early
 
-import sys
 import re
 import logging
 import csv
