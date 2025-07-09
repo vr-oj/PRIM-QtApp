@@ -18,16 +18,18 @@ from PyQt5.QtWidgets import (
 class WelcomeDialog(QDialog):
     """Single-sheet welcome dialog with a thin progress bar and step text."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, force_show: bool = False):
         super().__init__(parent)
 
         # Persistent settings
         self.settings = QSettings("YourCompany", "PRIMApp")
-        if not self.settings.value("PRIMApp/ShowWelcome", True, type=bool):
+        self._skip = False
+        if not force_show and not self.settings.value(
+            "PRIMApp/ShowWelcome", True, type=bool
+        ):
             self._skip = True
             self.close()
             return
-        self._skip = False
 
         # Step definitions: (title, description, icon_name)
         self.steps = [
