@@ -7,7 +7,7 @@ from PyQt5.QtGui import QImage
 log = logging.getLogger(__name__)
 
 class MicroManagerCameraThread(QThread):
-    """Acquire frames from µManager using pycromanager's Bridge."""
+    """Acquire frames from µManager using pycromanager in headless mode."""
 
     frame_ready = pyqtSignal(QImage, object)
     error = pyqtSignal(str)
@@ -35,9 +35,10 @@ class MicroManagerCameraThread(QThread):
 
             os.environ.setdefault("MICROMANAGER_PATH", mm_path)
 
-            from pycromanager import start_headless
+            from pycromanager import Bridge, start_headless
 
-            bridge = Bridge()
+            java_client = start_headless(mm_path, config_file=self.config_file)
+            bridge = Bridge(java_client=java_client)
             self.core = bridge.get_core()
 
             if self.config_file and os.path.exists(self.config_file):
@@ -45,7 +46,7 @@ class MicroManagerCameraThread(QThread):
 
             if self.core is None:
                 raise RuntimeError(
-                    "Failed to connect to µManager via Bridge. Check MICROMANAGER_PATH and config file."
+                    "Failed to start µManager headless. Check MICROMANAGER_PATH and config file."
                 )
 
             self.core.initialize_all_devices()
