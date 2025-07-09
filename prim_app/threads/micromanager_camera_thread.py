@@ -1,5 +1,4 @@
 import logging
-import os
 import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
@@ -7,54 +6,36 @@ from PyQt5.QtGui import QImage
 log = logging.getLogger(__name__)
 
 class MicroManagerCameraThread(QThread):
-    """Acquire frames from µManager using pycromanager headless mode."""
+    """Acquire frames from µManager using pymmcore-plus."""
 
     frame_ready = pyqtSignal(QImage, object)
     error = pyqtSignal(str)
 
-    def __init__(self, parent=None, config_file=None, mm_app_path=None):
+    def __init__(self, parent=None, config_file=None):
         super().__init__(parent)
         self._stop_requested = False
         self.core = None
         self.config_file = config_file
-        self.mm_app_path = mm_app_path
 
     def run(self):
         try:
-            from utils.config import DEFAULT_MM_APP_PATH
+            from pymmcore_plus import CMMCorePlus
 
-            mm_path = (
-                self.mm_app_path
-                or os.environ.get("MICROMANAGER_PATH")
-                or DEFAULT_MM_APP_PATH
-            )
-            if not mm_path or not os.path.exists(mm_path):
-                raise RuntimeError(
-                    "µManager path not configured or does not exist. Please set MICROMANAGER_PATH."
-                )
+            if not self.config_file:
+                raise RuntimeError("No config file provided for µManager.")
 
-            if "MICROMANAGER_PATH" not in os.environ:
-                os.environ["MICROMANAGER_PATH"] = mm_path
-
-            from pycromanager import start_headless
-
-            self.core = start_headless(mm_app_path=mm_path, config_file=self.config_file)
-
-            if self.core is None:
-                raise RuntimeError(
-                    "Failed to start µManager headless. Check MICROMANAGER_PATH and config file."
-                )
-
+            self.core = CMMCorePlus()
+            self.core.loadSystemConfiguration(self.config_file)
             self.core.initialize_all_devices()
-            self.core.wait_for_system()
+            self.core.waitForSystem()
 
-            self.core.start_continuous_sequence_acquisition(0)
+            self.core.startContinuousSequenceAcquisition(0)
 
             while not self._stop_requested:
-                if self.core.get_remaining_image_count() > 0:
-                    img = self.core.pop_next_image()
-                    h = self.core.get_image_height()
-                    w = self.core.get_image_width()
+                if self.core.getRemainingImageCount() > 0:
+                    img = self.core.popNextImage()
+                    h = self.core.getImageHeight()
+                    w = self.core.getImageWidth()
 
                     if img.ndim == 1:
                         arr = np.reshape(img, (h, w))
@@ -67,8 +48,8 @@ class MicroManagerCameraThread(QThread):
                 else:
                     self.msleep(1)
 
-            if self.core.is_sequence_running():
-                self.core.stop_sequence_acquisition()
+            if self.core.isSequenceRunning():
+                self.core.stopSequenceAcquisition()
 
         except Exception as e:
             log.error(f"MicroManagerCameraThread error: {e}")

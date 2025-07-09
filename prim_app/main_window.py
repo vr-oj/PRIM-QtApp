@@ -3,35 +3,8 @@
 import os
 import sys
 
-# ---------------------------------------------------------------------------
-# Configure ``MICROMANAGER_PATH`` before any pycromanager modules are imported.
-# ``pycromanager`` reads this variable at import time to know where µManager is
-# located.  We default to the bundled ``micromanager`` folder next to this file
-# (or the frozen executable) but allow overrides via AppSettings or an existing
-# environment variable.
-# ---------------------------------------------------------------------------
-
-# Absolute path to the packaged micromanager directory
-_default_mm_path = os.path.join(
-    os.path.dirname(sys.executable if getattr(sys, "frozen", False) else __file__),
-    "micromanager",
-)
-
-if "MICROMANAGER_PATH" not in os.environ:
-    os.environ["MICROMANAGER_PATH"] = _default_mm_path
-
-mm_path_early = None
-try:
-    from utils.app_settings import load_app_setting, SETTING_MM_APP_PATH
-
-    mm_path_early = load_app_setting(SETTING_MM_APP_PATH)
-except Exception:
-    mm_path_early = None
-if mm_path_early and os.path.exists(mm_path_early):
-    os.environ["MICROMANAGER_PATH"] = mm_path_early
-
-import re
 import logging
+import re
 import csv
 import json
 from datetime import datetime
@@ -83,7 +56,6 @@ from utils.app_settings import (
     load_app_setting,
     SETTING_LAST_CAMERA_INDEX,
     SETTING_RESULTS_DIR,
-    SETTING_MM_APP_PATH,
 )
 import utils.config as config
 from utils.config import (
@@ -156,20 +128,15 @@ class MainWindow(QMainWindow):
         except ImportError as e:
             log.info(f"Andor SDK3 not available: {e}")
 
-        # ─── Detect µManager availability via pycromanager ────────────────
+        # ─── Detect µManager availability via pymmcore-plus ───────────────
         try:
-            importlib.import_module("pycromanager")
+            importlib.import_module("pymmcore_plus")
             self.mm_available = True
-            log.info("pycromanager available for µManager")
+            log.info("pymmcore-plus available for µManager")
         except ImportError as e:
-            log.info(f"pycromanager not available: {e}")
+            log.info(f"pymmcore-plus not available: {e}")
 
         self.mm_config_file = config.DEFAULT_MM_CONFIG_FILE
-        self.mm_app_path = load_app_setting(
-            SETTING_MM_APP_PATH, config.DEFAULT_MM_APP_PATH
-        )
-        if self.mm_app_path and "MICROMANAGER_PATH" not in os.environ:
-            os.environ["MICROMANAGER_PATH"] = self.mm_app_path
 
         if (
             not os.path.exists(self.mm_config_file)
@@ -491,14 +458,6 @@ class MainWindow(QMainWindow):
         """
         Called when the user clicks “Start Camera” or “Stop Camera”.
         """
-        if (
-            "MICROMANAGER_PATH" not in os.environ
-            or not os.environ["MICROMANAGER_PATH"]
-        ):
-            mm_path = self.mm_app_path
-            if mm_path:
-                os.environ["MICROMANAGER_PATH"] = mm_path
-
         if self.camera_thread is None or not self.camera_thread.isRunning():
             # ─── Start camera ─────────────────────────────────────────────────
             if self.current_backend == "ic4" and self.ic4_available and self.ic4_device:
@@ -516,23 +475,8 @@ class MainWindow(QMainWindow):
                 self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
                 self.lbl_cam_connection.setText("Connected")
             elif self.current_backend == "micromanager" and self.mm_available:
-                if (
-                    "MICROMANAGER_PATH" not in os.environ
-                    or not os.environ["MICROMANAGER_PATH"]
-                ):
-                    mm_path = self.mm_app_path
-                    if mm_path and os.path.exists(mm_path):
-                        os.environ["MICROMANAGER_PATH"] = mm_path
-                        self.statusBar().showMessage(
-                            f"MICROMANAGER_PATH set to {mm_path}"
-                        )
-                    else:
-                        self.statusBar().showMessage(
-                            "µManager path not set or does not exist. Please check your settings."
-                        )
                 self.camera_thread = MicroManagerCameraThread(
-                    config_file=self.mm_config_file,
-                    mm_app_path=self.mm_app_path,
+                    config_file=self.mm_config_file
                 )
                 self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
                 self.camera_thread.frame_ready.connect(self._update_camera_info)
@@ -646,11 +590,6 @@ class MainWindow(QMainWindow):
             triggered=self._choose_mm_config_file,
         )
 
-        mm_path_act = QAction(
-            "Set µManager &Path…",
-            self,
-            triggered=self._choose_mm_app_path,
-        )
 
         choose_dir_act = QAction(
             "Set &Results Folder…", self, triggered=self._choose_results_dir
@@ -664,7 +603,6 @@ class MainWindow(QMainWindow):
 
         sm = mb.addMenu("&Setup")
         sm.addAction(mm_cfg_act)
-        sm.addAction(mm_path_act)
 
         am = mb.addMenu("&Acquisition")
         self.start_recording_action = QAction(
@@ -874,15 +812,6 @@ class MainWindow(QMainWindow):
                 f"µManager config loaded from {path}", 5000
             )
 
-    def _choose_mm_app_path(self):
-        path = QFileDialog.getExistingDirectory(
-            self, "Select µManager Install Folder", self.mm_app_path or ""
-        )
-        if path:
-            self.mm_app_path = path
-            os.environ["MICROMANAGER_PATH"] = path
-            save_app_setting(SETTING_MM_APP_PATH, path)
-            self.statusBar().showMessage(f"Set µManager path: {path}", 5000)
 
     def _show_about_dialog(self):
         QMessageBox.information(self, f"About {APP_NAME}", ABOUT_TEXT)
