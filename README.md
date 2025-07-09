@@ -244,9 +244,14 @@ PRIMAcquisition/
    - Make sure USB 3.0 port is used for the DMK camera.  
    - Lower resolution or frame rate if bandwidth is insufficient.
 
-4. **TIFF Cannot Open**  
-   - Ensure you have `tifffile` installed in Python.  
+4. **TIFF Cannot Open**
+   - Ensure you have `tifffile` installed in Python.
    - Open the TIFF in ImageJ or Python to diagnostics page metadata.
+
+5. **µManager Fails to Start**
+   - Replace the placeholder `prim_app/configs/MMConfig.cfg` with a valid
+     configuration exported from µManager or load one via **Setup → Load
+     µManager Config File…**.
 
 ---
 

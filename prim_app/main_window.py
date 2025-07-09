@@ -10,16 +10,12 @@ import os
 # ---------------------------------------------------------------------------
 mm_path_early = None
 try:
-    from utils.app_settings import AppSettings
+    from utils.app_settings import load_app_setting, SETTING_MM_APP_PATH
 
-    settings = AppSettings()
-    mm_path_early = settings.get("mm_app_path")
+    mm_path_early = load_app_setting(SETTING_MM_APP_PATH)
 except Exception:
-    pass
-
-if (
-    "MICROMANAGER_PATH" not in os.environ or not os.environ["MICROMANAGER_PATH"]
-) and mm_path_early and os.path.exists(mm_path_early):
+    mm_path_early = None
+if mm_path_early and "MICROMANAGER_PATH" not in os.environ and os.path.exists(mm_path_early):
     os.environ["MICROMANAGER_PATH"] = mm_path_early
 
 import sys
@@ -163,6 +159,17 @@ class MainWindow(QMainWindow):
         )
         if self.mm_app_path and "MICROMANAGER_PATH" not in os.environ:
             os.environ["MICROMANAGER_PATH"] = self.mm_app_path
+
+        if (
+            not os.path.exists(self.mm_config_file)
+            or "placeholder" in open(self.mm_config_file, "r").read(128).lower()
+        ):
+            QMessageBox.warning(
+                self,
+                "µManager Config Required",
+                "Default µManager config missing or invalid. "
+                "Please load a valid .cfg via Setup → Load µManager Config File…",
+            )
 
         if not (self.ic4_available or self.andor_available or self.mm_available):
             from utils.utils import list_opencv_cameras

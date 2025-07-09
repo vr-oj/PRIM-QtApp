@@ -21,7 +21,6 @@ class MicroManagerCameraThread(QThread):
 
     def run(self):
         try:
-            from pycromanager import start_headless
             from utils.config import DEFAULT_MM_APP_PATH
 
             mm_path = (
@@ -34,8 +33,9 @@ class MicroManagerCameraThread(QThread):
                     "µManager path not configured. Set MICROMANAGER_PATH env var"
                 )
 
-            if not os.environ.get("MICROMANAGER_PATH"):
-                os.environ["MICROMANAGER_PATH"] = mm_path
+            os.environ.setdefault("MICROMANAGER_PATH", mm_path)
+
+            from pycromanager import start_headless
 
             self.core = start_headless(
                 mm_app_path=mm_path,
