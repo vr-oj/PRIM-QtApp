@@ -1,4 +1,5 @@
 import logging
+import os
 import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
@@ -23,11 +24,18 @@ class MicroManagerCameraThread(QThread):
             from pycromanager import start_headless
             from utils.config import DEFAULT_MM_APP_PATH
 
-            mm_path = self.mm_app_path or DEFAULT_MM_APP_PATH
+            mm_path = (
+                self.mm_app_path
+                or os.environ.get("MICROMANAGER_PATH")
+                or DEFAULT_MM_APP_PATH
+            )
             if not mm_path:
                 raise RuntimeError(
                     "µManager path not configured. Set MICROMANAGER_PATH env var"
                 )
+
+            if not os.environ.get("MICROMANAGER_PATH"):
+                os.environ["MICROMANAGER_PATH"] = mm_path
 
             self.core = start_headless(
                 mm_app_path=mm_path,
