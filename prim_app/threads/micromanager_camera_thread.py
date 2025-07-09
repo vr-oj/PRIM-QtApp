@@ -23,12 +23,19 @@ class MicroManagerCameraThread(QThread):
 
         try:
             from pycromanager import Bridge
+        except ImportError:
+            try:
+                from pycromanager.core import Bridge  # type: ignore
+            except Exception as e:  # pragma: no cover - defensive
+                log.error(f"pycromanager not found or Bridge missing: {e}")
+                self.Bridge = None
+                self.available = False
+            else:
+                self.Bridge = Bridge
+                self.available = True
+        else:
             self.Bridge = Bridge
             self.available = True
-        except ImportError as e:
-            log.error(f"pycromanager not found: {e}")
-            self.Bridge = None
-            self.available = False
 
     def run(self):
         if not self.available:
@@ -81,5 +88,6 @@ class MicroManagerCameraThread(QThread):
                     pass
                 self.bridge = None
             self.core = None
+    def stop(self):
+        self._stop_requested = True
 
-    def stop(self):        self._stop_requested = True
