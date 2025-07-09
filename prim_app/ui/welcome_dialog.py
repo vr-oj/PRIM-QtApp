@@ -32,7 +32,7 @@ class WelcomeDialog(QDialog):
             ),
             (
                 "Configure Camera",
-                "Choose your camera or load a \u00b5Manager config (.rcp).",
+                "Choose your camera or load a \u00b5Manager config (.cfg).",
                 "settings.svg",
             ),
             (
@@ -54,7 +54,7 @@ class WelcomeDialog(QDialog):
         self.current = 0
 
         # Window setup
-        self.setWindowTitle("Welcome to PRIM Live Recorder")
+        self.setWindowTitle("Welcome to PRIMAcquisition")
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.setMinimumSize(480, 360)
         self.setStyleSheet(
