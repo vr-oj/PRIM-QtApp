@@ -462,11 +462,7 @@ class MainWindow(QMainWindow):
                 self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
                 self.lbl_cam_connection.setText("Connected")
             elif self.current_backend == "micromanager" and self.mm_available:
-                self.camera_thread = MicroManagerCameraThread(
-                    parent=self,
-                    config_file=self.mm_config_file,
-                    headless=True,
-                )
+                self.camera_thread = MicroManagerCameraThread(config_file=cfg_path)
                 self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
                 self.camera_thread.frame_ready.connect(self._update_camera_info)
                 self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
