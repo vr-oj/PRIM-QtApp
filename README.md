@@ -160,6 +160,16 @@ in headless mode using that file. Configure the µManager installation folder vi
 `MICROMANAGER_PATH` environment variable is present it will still be used as the
 default.
 
+## Setting MICROMANAGER_PATH
+
+`pycromanager` reads the `MICROMANAGER_PATH` environment variable at import
+time. If the variable is missing or invalid, `start_headless()` may return
+`None` with no clear error (pycromanager issue #338).  PRIMAcquisition now loads
+the path stored in `prim_settings.json` and sets `MICROMANAGER_PATH` before any
+pycromanager modules are imported.  To override the path manually, export
+`MICROMANAGER_PATH` before starting the application or use **File → Set
+µManager Path…** from the menu.
+
 ## Packaging
 
 Build a standalone executable with PyInstaller:
