@@ -35,7 +35,8 @@ class MicroManagerCameraThread(QThread):
 
             from pycromanager import start_headless
 
-            self.core = start_headless(config_file=self.config_file)
+            self.core = start_headless(mm_app_path=mm_path, config_file=self.config_file)
+
 
             if self.core is None:
                 raise RuntimeError("Failed to start µManager headless. Check MICROMANAGER_PATH and config file.")
