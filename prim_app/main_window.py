@@ -477,7 +477,6 @@ class MainWindow(QMainWindow):
                 self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
                 self.lbl_cam_connection.setText("Connected")
             elif self.current_backend == "micromanager" and self.mm_available:
-                import os
                 if (
                     "MICROMANAGER_PATH" not in os.environ
                     or not os.environ["MICROMANAGER_PATH"]
