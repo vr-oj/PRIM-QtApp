@@ -163,12 +163,12 @@ default.
 ## Setting MICROMANAGER_PATH
 
 `pycromanager` reads the `MICROMANAGER_PATH` environment variable at import
-time. If the variable is missing or invalid, `start_headless()` may return
-`None` with no clear error (pycromanager issue #338).  PRIMAcquisition now loads
-the path stored in `prim_settings.json` and sets `MICROMANAGER_PATH` before any
-pycromanager modules are imported.  To override the path manually, export
-`MICROMANAGER_PATH` before starting the application or use **File → Set
-µManager Path…** from the menu.
+time. If the variable is missing or invalid, the `Bridge` class will not be able
+to launch µManager automatically. PRIMAcquisition loads the path stored in
+`prim_settings.json` and sets `MICROMANAGER_PATH` before any pycromanager
+modules are imported. To override the path manually, export `MICROMANAGER_PATH`
+before starting the application or use **File → Set µManager Path…** from the
+menu.
 
 ## Packaging
 
