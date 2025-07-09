@@ -11,17 +11,27 @@ class MicroManagerCameraThread(QThread):
     frame_ready = pyqtSignal(QImage, object)
     error = pyqtSignal(str)
 
-    def __init__(self, parent=None, config_file=None):
+    def __init__(self, parent=None, config_file=None, mm_app_path=None):
         super().__init__(parent)
         self._stop_requested = False
         self.core = None
         self.config_file = config_file
+        self.mm_app_path = mm_app_path
 
     def run(self):
         try:
             from pycromanager import start_headless
+            from utils.config import DEFAULT_MM_APP_PATH
 
-            self.core = start_headless(config_file=self.config_file)
+            mm_path = self.mm_app_path or DEFAULT_MM_APP_PATH
+            if not mm_path:
+                raise RuntimeError(
+                    "µManager path not configured. Set MICROMANAGER_PATH env var"
+                )
+
+            self.core = start_headless(
+                mm_app_path=mm_path, config_file=self.config_file
+            )
 
             self.core.initialize_all_devices()
             self.core.wait_for_system()
