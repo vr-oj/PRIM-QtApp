@@ -22,4 +22,4 @@ serial==0.0.97
 six==1.17.0
 tifffile==2025.6.11
 andor3
-pycromanager
+pymmcore-plus
