@@ -28,26 +28,17 @@ class MicroManagerCameraThread(QThread):
                 or os.environ.get("MICROMANAGER_PATH")
                 or DEFAULT_MM_APP_PATH
             )
-            if not mm_path:
-                raise RuntimeError(
-                    "µManager path not configured. Set MICROMANAGER_PATH env var"
-                )
+            if not mm_path or not os.path.exists(mm_path):
+                raise RuntimeError("µManager path not configured or does not exist. Please set MICROMANAGER_PATH.")
 
-            os.environ.setdefault("MICROMANAGER_PATH", mm_path)
+            os.environ["MICROMANAGER_PATH"] = mm_path
 
-            from pycromanager import Bridge, start_headless
+            from pycromanager import start_headless
 
-            java_client = start_headless(mm_path, config_file=self.config_file)
-            bridge = Bridge(java_client=java_client)
-            self.core = bridge.get_core()
-
-            if self.config_file and os.path.exists(self.config_file):
-                self.core.loadSystemConfiguration(self.config_file)
+            self.core = start_headless(config_file=self.config_file)
 
             if self.core is None:
-                raise RuntimeError(
-                    "Failed to start µManager headless. Check MICROMANAGER_PATH and config file."
-                )
+                raise RuntimeError("Failed to start µManager headless. Check MICROMANAGER_PATH and config file.")
 
             self.core.initialize_all_devices()
             self.core.wait_for_system()
