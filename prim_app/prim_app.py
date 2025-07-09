@@ -218,6 +218,14 @@ def main_app_entry():
         log.info("No style.qss found. Using default 'Fusion' style.")
         app.setStyle(QStyleFactory.create("Fusion"))
 
+    # ─── Optional Welcome Dialog ─────────────────────────────────────────
+    from ui.welcome_dialog import WelcomeDialog
+    welcome = WelcomeDialog()
+    if not getattr(welcome, "_skip", False):
+        from PyQt5.QtWidgets import QDialog
+        if welcome.exec_() != QDialog.Accepted:
+            sys.exit(0)
+
     # ─── Import & Launch MainWindow ───────────────────────────────────────
     from main_window import MainWindow
 
