@@ -1,36 +1,21 @@
 # File: prim_app/ui/welcome_dialog.py
 
 import os
-from PyQt5.QtCore import Qt, QSettings, QPropertyAnimation
-from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import Qt, QSettings
+from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QStackedWidget, QCheckBox, QFrame
+    QPushButton, QProgressBar, QCheckBox
 )
 
 
 class WelcomeDialog(QDialog):
-    """Step-by-step welcome dialog with persistence via ``QSettings``."""
+    """Single-sheet welcome dialog with a thin progress bar and step text."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Welcome to PRIM Live Recorder")
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
-        self.setMinimumSize(500, 400)
-        self.setStyleSheet(
-            """
-            QDialog { background-color: #2b2b2b; }
-            QFrame#stepFrame { background: #3c3f41; border-radius: 8px; padding: 16px; }
-            QLabel#title { font-size: 18px; font-weight: bold; color: #ffffff; }
-            QLabel#desc { font-size: 14px; color: #d0d0d0; }
-            QPushButton { padding: 8px 16px; border-radius: 4px; background: #4a4a4a; color: #ffffff; }
-            QPushButton#next { background-color: #0078d7; }
-            QPushButton#back { background: none; color: #bbbbbb; }
-            QCheckBox { color: #cccccc; }
-            """
-        )
 
-        # QSettings for persistence
+        # Persistent settings
         self.settings = QSettings("YourCompany", "PRIMApp")
         if not self.settings.value("PRIMApp/ShowWelcome", True, type=bool):
             self._skip = True
@@ -38,37 +23,96 @@ class WelcomeDialog(QDialog):
             return
         self._skip = False
 
-        layout = QVBoxLayout(self)
-        self.stack = QStackedWidget()
-        layout.addWidget(self.stack)
-
-        steps = [
-            ("Connect PRIM Device", "Select your Arduino from the PRIM Device dropdown and click Connect.", "plug.svg"),
-            ("Configure Camera", "Choose your camera or load a µManager config (.rcp).", "settings.svg"),
-            ("Start Live Feed", "Click Start Camera and adjust Exposure/Gain sliders.", "image.svg"),
-            ("Record Session", "Click Start Recording. Video and pressure data will sync.", "record.svg"),
-            ("Finish & Reset", "Click Stop Recording, then Zero PRIM to reset baseline.", "reset_zoom.svg"),
+        # Step definitions: (title, description, icon_name)
+        self.steps = [
+            (
+                "Connect PRIM Device",
+                "Select your Arduino from the PRIM Device dropdown and click Connect.",
+                "plug.svg",
+            ),
+            (
+                "Configure Camera",
+                "Choose your camera or load a \u00b5Manager config (.rcp).",
+                "settings.svg",
+            ),
+            (
+                "Start Live Feed",
+                "Click Start Camera and adjust the Exposure & Gain sliders.",
+                "image.svg",
+            ),
+            (
+                "Record Session",
+                "Click Start Recording. Video and pressure data will sync automatically.",
+                "record.svg",
+            ),
+            (
+                "Finish & Reset",
+                "Click Stop Recording, then Zero PRIM to reset the pressure baseline.",
+                "reset_zoom.svg",
+            ),
         ]
-        for title, desc, icon_name in steps:
-            self.stack.addWidget(self._make_page(title, desc, icon_name))
+        self.current = 0
 
+        # Window setup
+        self.setWindowTitle("Welcome to PRIM Live Recorder")
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.setMinimumSize(480, 360)
+        self.setStyleSheet(
+            """
+            QDialog { background-color: #2b2b2b; }
+            QLabel { color: #ffffff; }
+            QPushButton { background: #444444; color: #ffffff; padding: 6px 12px; border-radius: 4px; }
+            QPushButton:disabled { background: #555555; color: #888888; }
+            QProgressBar { background: #444444; border: none; border-radius: 3px; height: 6px; }
+            QProgressBar::chunk { background: #0078d7; border-radius: 3px; }
+            QCheckBox { color: #cccccc; }
+            """
+        )
+
+        # Layout
+        layout = QVBoxLayout(self)
+
+        # Stepper bar
+        self.stepper = QProgressBar()
+        self.stepper.setRange(0, len(self.steps) - 1)
+        self.stepper.setTextVisible(False)
+        layout.addWidget(self.stepper)
+
+        # Icon
+        self.icon_lbl = QLabel(alignment=Qt.AlignCenter)
+        self.icon_lbl.setFixedHeight(80)
+        layout.addWidget(self.icon_lbl)
+
+        # Title
+        self.title_lbl = QLabel(alignment=Qt.AlignCenter)
+        title_font = QFont()
+        title_font.setPointSize(18)
+        title_font.setBold(True)
+        self.title_lbl.setFont(title_font)
+        layout.addWidget(self.title_lbl)
+
+        # Description
+        self.desc_lbl = QLabel(alignment=Qt.AlignCenter)
+        self.desc_lbl.setWordWrap(True)
+        layout.addWidget(self.desc_lbl)
+
+        # Navigation buttons
         btn_layout = QHBoxLayout()
         self.back_btn = QPushButton("Back")
-        self.back_btn.setObjectName("back")
         self.back_btn.clicked.connect(self._prev)
-        self.next_btn = QPushButton("Next")
-        self.next_btn.setObjectName("next")
-        self.next_btn.clicked.connect(self._next)
         btn_layout.addWidget(self.back_btn)
         btn_layout.addStretch()
+        self.next_btn = QPushButton("Next")
+        self.next_btn.clicked.connect(self._next)
         btn_layout.addWidget(self.next_btn)
         layout.addLayout(btn_layout)
 
-        self.checkbox = QCheckBox("Don't show this again")
+        # "Don't show again" toggle
+        self.checkbox = QCheckBox("Don't show again")
         self.checkbox.stateChanged.connect(self._toggle_show)
-        layout.addWidget(self.checkbox, alignment=Qt.AlignLeft)
+        layout.addWidget(self.checkbox, alignment=Qt.AlignCenter)
 
-        self._update_buttons()
+        self._update_step()
 
     # ------------------------------------------------------------------
     def _icon(self, name: str) -> QIcon:
@@ -76,62 +120,34 @@ class WelcomeDialog(QDialog):
         icon_path = os.path.join(base_dir, "icons", name)
         return QIcon(icon_path) if os.path.exists(icon_path) else QIcon()
 
-    def _make_page(self, title, desc, icon_name):
-        frame = QFrame()
-        frame.setObjectName("stepFrame")
-        v = QVBoxLayout(frame)
-        lbl_icon = QLabel()
+    def _update_step(self):
+        """Refresh UI elements based on current step."""
+        title, desc, icon_name = self.steps[self.current]
+        self.stepper.setValue(self.current)
         icon = self._icon(icon_name)
         if not icon.isNull():
-            lbl_icon.setPixmap(icon.pixmap(48, 48))
-        lbl_icon.setAlignment(Qt.AlignCenter)
-        lbl_title = QLabel(title)
-        lbl_title.setObjectName("title")
-        lbl_title.setAlignment(Qt.AlignCenter)
-        lbl_desc = QLabel(desc)
-        lbl_desc.setObjectName("desc")
-        lbl_desc.setWordWrap(True)
-        lbl_desc.setAlignment(Qt.AlignCenter)
-        v.addWidget(lbl_icon)
-        v.addSpacing(8)
-        v.addWidget(lbl_title)
-        v.addSpacing(4)
-        v.addWidget(lbl_desc)
-        v.addStretch()
-        return frame
+            self.icon_lbl.setPixmap(icon.pixmap(64, 64))
+        else:
+            self.icon_lbl.clear()
+        self.title_lbl.setText(title)
+        self.desc_lbl.setText(desc)
+        self.back_btn.setEnabled(self.current > 0)
+        self.next_btn.setText(
+            "Finish" if self.current == len(self.steps) - 1 else "Next"
+        )
 
     def _next(self):
-        idx = self.stack.currentIndex()
-        if idx < self.stack.count() - 1:
-            self._animate(idx, idx + 1)
-            self.stack.setCurrentIndex(idx + 1)
+        if self.current < len(self.steps) - 1:
+            self.current += 1
+            self._update_step()
         else:
             self.accept()
-        self._update_buttons()
 
     def _prev(self):
-        idx = self.stack.currentIndex()
-        if idx > 0:
-            self._animate(idx, idx - 1)
-            self.stack.setCurrentIndex(idx - 1)
-        self._update_buttons()
-
-    def _update_buttons(self):
-        idx = self.stack.currentIndex()
-        self.back_btn.setEnabled(idx > 0)
-        self.next_btn.setText("Finish" if idx == self.stack.count() - 1 else "Next")
+        if self.current > 0:
+            self.current -= 1
+            self._update_step()
 
     def _toggle_show(self, state):
+        # Checked = hide future dialogs
         self.settings.setValue("PRIMApp/ShowWelcome", state != Qt.Checked)
-
-    def _animate(self, from_idx, to_idx):
-        old = self.stack.widget(from_idx)
-        new = self.stack.widget(to_idx)
-        for w, start, end in ((old, 1.0, 0.0), (new, 0.0, 1.0)):
-            anim = QPropertyAnimation(w, b"windowOpacity", self)
-            anim.setDuration(200)
-            anim.setStartValue(start)
-            anim.setEndValue(end)
-            anim.start()
-
-
