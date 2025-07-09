@@ -477,8 +477,21 @@ class MainWindow(QMainWindow):
                 self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
                 self.lbl_cam_connection.setText("Connected")
             elif self.current_backend == "micromanager" and self.mm_available:
-                if self.mm_app_path and not os.environ.get("MICROMANAGER_PATH"):
-                    os.environ["MICROMANAGER_PATH"] = self.mm_app_path
+                import os
+                if (
+                    "MICROMANAGER_PATH" not in os.environ
+                    or not os.environ["MICROMANAGER_PATH"]
+                ):
+                    mm_path = self.mm_app_path
+                    if mm_path and os.path.exists(mm_path):
+                        os.environ["MICROMANAGER_PATH"] = mm_path
+                        self.statusBar().showMessage(
+                            f"MICROMANAGER_PATH set to {mm_path}"
+                        )
+                    else:
+                        self.statusBar().showMessage(
+                            "µManager path not set or does not exist. Please check your settings."
+                        )
                 self.camera_thread = MicroManagerCameraThread(
                     config_file=self.mm_config_file,
                     mm_app_path=self.mm_app_path,
