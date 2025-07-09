@@ -178,6 +178,10 @@ Build a standalone executable with PyInstaller:
 pyinstaller prim_app.spec
 ```
 
+The provided `prim_app.spec` bundles the `micromanager` directory and default
+configuration files found in `prim_app/configs` so the resulting executable
+runs without requiring a separate µManager install.
+
 ---
 
 ## Folder Structure
