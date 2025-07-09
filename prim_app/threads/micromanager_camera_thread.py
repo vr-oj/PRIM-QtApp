@@ -1,4 +1,6 @@
 import logging
+import os
+import sys
 import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
@@ -6,28 +8,43 @@ from PyQt5.QtGui import QImage
 log = logging.getLogger(__name__)
 
 class MicroManagerCameraThread(QThread):
-    """Acquire frames from µManager using pymmcore-plus."""
+    """Acquire frames from µManager using ``pycromanager.start_headless``."""
 
     frame_ready = pyqtSignal(QImage, object)
     error = pyqtSignal(str)
 
-    def __init__(self, parent=None, config_file=None):
+    def __init__(self, parent=None, mm_path=None, config_file=None):
         super().__init__(parent)
         self._stop_requested = False
         self.core = None
+        self.mm_path = mm_path
         self.config_file = config_file
 
     def run(self):
         try:
-            from pymmcore_plus import CMMCorePlus
-
             if not self.config_file:
                 raise RuntimeError("No config file provided for µManager.")
 
-            self.core = CMMCorePlus()
-            self.core.loadSystemConfiguration(self.config_file)
+            if self.mm_path is None:
+                if getattr(sys, "frozen", False):
+                    base = os.path.dirname(sys.executable)
+                else:
+                    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                self.mm_path = os.path.join(base, "micromanager")
+
+            os.environ["MICROMANAGER_PATH"] = self.mm_path
+
+            from pycromanager import start_headless
+
+            self.core = start_headless(
+                mm_app_path=self.mm_path, config_file=self.config_file
+            )
+
+            if self.core is None:
+                raise RuntimeError("Failed to start µManager headless.")
+
             self.core.initialize_all_devices()
-            self.core.waitForSystem()
+            self.core.wait_for_system()
 
             self.core.startContinuousSequenceAcquisition(0)
 
@@ -48,8 +65,8 @@ class MicroManagerCameraThread(QThread):
                 else:
                     self.msleep(1)
 
-            if self.core.isSequenceRunning():
-                self.core.stopSequenceAcquisition()
+            if self.core.is_sequence_running():
+                self.core.stop_sequence_acquisition()
 
         except Exception as e:
             log.error(f"MicroManagerCameraThread error: {e}")
