@@ -18,6 +18,7 @@ Path(PRIM_RESULTS_DIR).mkdir(parents=True, exist_ok=True)
 # ─── µManager configuration ───────────────────────────────────────────────────
 MM_CONFIGS_DIR = os.path.join(Path(__file__).resolve().parents[1], "configs")
 DEFAULT_MM_CONFIG_FILE = os.path.join(MM_CONFIGS_DIR, "MMConfig.cfg")
+DEFAULT_MM_APP_PATH = os.environ.get("MICROMANAGER_PATH")
 
 
 def set_results_dir(path: str):

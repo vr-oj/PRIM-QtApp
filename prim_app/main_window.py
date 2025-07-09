@@ -135,6 +135,7 @@ class MainWindow(QMainWindow):
             log.info(f"pycromanager not available: {e}")
 
         self.mm_config_file = config.DEFAULT_MM_CONFIG_FILE
+        self.mm_app_path = config.DEFAULT_MM_APP_PATH
 
         if not (self.ic4_available or self.andor_available or self.mm_available):
             from utils.utils import list_opencv_cameras
@@ -462,7 +463,10 @@ class MainWindow(QMainWindow):
                 self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
                 self.lbl_cam_connection.setText("Connected")
             elif self.current_backend == "micromanager" and self.mm_available:
-                self.camera_thread = MicroManagerCameraThread(config_file=self.mm_config_file)
+                self.camera_thread = MicroManagerCameraThread(
+                    config_file=self.mm_config_file,
+                    mm_app_path=self.mm_app_path,
+                )
                 self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
                 self.camera_thread.frame_ready.connect(self._update_camera_info)
                 self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
