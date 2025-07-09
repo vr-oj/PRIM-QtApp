@@ -55,6 +55,7 @@ from utils.app_settings import (
     load_app_setting,
     SETTING_LAST_CAMERA_INDEX,
     SETTING_RESULTS_DIR,
+    SETTING_MM_APP_PATH,
 )
 import utils.config as config
 from utils.config import (
@@ -135,7 +136,11 @@ class MainWindow(QMainWindow):
             log.info(f"pycromanager not available: {e}")
 
         self.mm_config_file = config.DEFAULT_MM_CONFIG_FILE
-        self.mm_app_path = config.DEFAULT_MM_APP_PATH
+        self.mm_app_path = load_app_setting(
+            SETTING_MM_APP_PATH, config.DEFAULT_MM_APP_PATH
+        )
+        if self.mm_app_path and "MICROMANAGER_PATH" not in os.environ:
+            os.environ["MICROMANAGER_PATH"] = self.mm_app_path
 
         if not (self.ic4_available or self.andor_available or self.mm_available):
             from utils.utils import list_opencv_cameras
@@ -576,6 +581,12 @@ class MainWindow(QMainWindow):
             "Load µManager Config &File…", self, triggered=self._choose_mm_config_file
         )
         fm.addAction(mm_cfg_act)
+        mm_path_act = QAction(
+            "Set µManager &Path…",
+            self,
+            triggered=self._choose_mm_app_path,
+        )
+        fm.addAction(mm_path_act)
         choose_dir_act = QAction(
             "Set &Results Folder…", self, triggered=self._choose_results_dir
         )
@@ -787,6 +798,16 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"µManager config loaded from {path}", 5000
             )
+
+    def _choose_mm_app_path(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "Select µManager Install Folder", self.mm_app_path or ""
+        )
+        if path:
+            self.mm_app_path = path
+            os.environ["MICROMANAGER_PATH"] = path
+            save_app_setting(SETTING_MM_APP_PATH, path)
+            self.statusBar().showMessage(f"Set µManager path: {path}", 5000)
 
     def _show_about_dialog(self):
         QMessageBox.information(self, f"About {APP_NAME}", ABOUT_TEXT)

@@ -55,3 +55,5 @@ def load_app_settings():
 SETTING_LAST_CAMERA_INDEX = "last_camera_index"
 SETTING_LAST_PROFILE_NAME = "last_profile_name"
 SETTING_RESULTS_DIR = "results_dir"
+# Persisted path to the user's µManager installation
+SETTING_MM_APP_PATH = "mm_app_path"

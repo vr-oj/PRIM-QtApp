@@ -154,9 +154,11 @@ To run a µManager camera without the GUI, place your `.cfg` file in
 `prim_app/configs/MMConfig.cfg` or choose **File → Load µManager Config File…**
 from the menu. The configuration must include your camera and device settings.
 When provided, PRIMAcquisition launches µManager via the `pycromanager` Bridge
-in headless mode using that file. The path to the µManager installation must be
-provided through the `MICROMANAGER_PATH` environment variable before launching
-the application.
+in headless mode using that file. Configure the µManager installation folder via
+**File → Set µManager Path…**. The selected path is stored in
+`prim_settings.json` so you only need to set it once. If the
+`MICROMANAGER_PATH` environment variable is present it will still be used as the
+default.
 
 ## Packaging
 
