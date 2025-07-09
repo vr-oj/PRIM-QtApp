@@ -125,11 +125,13 @@ class CameraControlPanel(QWidget):
                 continue
 
             lo, hi = float_node.minimum, float_node.maximum
-            step = (
-                float_node.increment
-                if getattr(float_node, "increment", 0) > 0
-                else (hi - lo) / 100.0
-            )
+
+            try:
+                incr = float_node.increment
+            except Exception:
+                incr = 0
+
+            step = incr if incr and incr > 0 else (hi - lo) / 100.0
             cur_val = float_node.value
 
             spin = QDoubleSpinBox()
