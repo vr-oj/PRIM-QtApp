@@ -38,12 +38,12 @@ class WelcomeDialog(QDialog):
             ),
             (
                 "Configure Camera",
-                "Choose your camera or load a \u00b5Manager config (.cfg).",
+                "Choose your camera if an SDK has been installed. If using \u00b5Manager, make sure to select the software path and include the config file (.cfg) on the Setup menu.",
                 "settings.svg",
             ),
             (
                 "Start Live Feed",
-                "Click Start Camera and adjust the Exposure & Gain sliders.",
+                "In the info panel click Start Camera and adjust the Exposure & Gain sliders in the Control panel.",
                 "image.svg",
             ),
             (
