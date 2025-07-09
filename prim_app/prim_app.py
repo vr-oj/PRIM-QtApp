@@ -230,9 +230,7 @@ def main_app_entry():
     from ui.welcome_dialog import WelcomeDialog
     welcome = WelcomeDialog(parent=main_win)
     if not getattr(welcome, "_skip", False):
-        from PyQt5.QtWidgets import QDialog
-        if welcome.exec_() != QDialog.Accepted:
-            sys.exit(0)
+        welcome.exec_()
 
     exit_code = app.exec_()
     log.info(f"Application event loop ended with exit code {exit_code}.")

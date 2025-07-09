@@ -85,6 +85,7 @@ from threads.andor_camera_thread import AndorCameraThread
 from threads.micromanager_camera_thread import MicroManagerCameraThread
 from recording_manager import RecordingManager
 from utils.utils import list_serial_ports
+from ui.welcome_dialog import WelcomeDialog
 
 log = logging.getLogger(__name__)
 
@@ -651,6 +652,12 @@ class MainWindow(QMainWindow):
             f"&About {APP_NAME}", self, triggered=self._show_about_dialog
         )
         hm.addAction(about_act)
+        welcome_act = QAction(
+            "&Welcome Screen",
+            self,
+            triggered=self._show_welcome_dialog,
+        )
+        hm.addAction(welcome_act)
         hm.addAction("About &Qt", QApplication.instance().aboutQt)
 
     def _build_main_toolbar(self):
@@ -818,6 +825,10 @@ class MainWindow(QMainWindow):
 
     def _show_about_dialog(self):
         QMessageBox.information(self, f"About {APP_NAME}", ABOUT_TEXT)
+
+    def _show_welcome_dialog(self):
+        dlg = WelcomeDialog(parent=self, force_show=True)
+        dlg.exec_()
 
     # ─── Toggle Serial Connection ────────────────────────────────────────────
     def _toggle_serial_connection(self):
