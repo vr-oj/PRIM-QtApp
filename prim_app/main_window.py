@@ -452,6 +452,14 @@ class MainWindow(QMainWindow):
         """
         Called when the user clicks “Start Camera” or “Stop Camera”.
         """
+        if (
+            "MICROMANAGER_PATH" not in os.environ
+            or not os.environ["MICROMANAGER_PATH"]
+        ):
+            mm_path = self.mm_app_path
+            if mm_path:
+                os.environ["MICROMANAGER_PATH"] = mm_path
+
         if self.camera_thread is None or not self.camera_thread.isRunning():
             # ─── Start camera ─────────────────────────────────────────────────
             if self.current_backend == "ic4" and self.ic4_available and self.ic4_device:
