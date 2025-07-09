@@ -153,8 +153,8 @@
 To run a µManager camera without the GUI, place your `.cfg` file in
 `prim_app/configs/MMConfig.cfg` or choose **File → Load µManager Config File…**
 from the menu. The configuration must include your camera and device settings.
-When provided, PRIMAcquisition launches the µManager Core in headless mode using
-that file.
+When provided, PRIMAcquisition launches µManager via the `pycromanager` Bridge
+in headless mode using that file.
 
 ## Packaging
 

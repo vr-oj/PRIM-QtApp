@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 
 
 class MicroManagerCameraThread(QThread):
-    """Acquire frames via a µManager instance using pycromanager Core."""
+    """Acquire frames from µManager using pycromanager."""
 
     frame_ready = pyqtSignal(QImage, object)
     error = pyqtSignal(str)
@@ -17,16 +17,17 @@ class MicroManagerCameraThread(QThread):
         super().__init__(parent)
         self._stop_requested = False
         self.core = None
+        self.bridge = None
         self.config_file = config_file  # optional path to MM .cfg for headless mode
         self.headless = headless
 
         try:
-            from pycromanager import Core
-            self.Core = Core
+            from pycromanager import Bridge
+            self.Bridge = Bridge
             self.available = True
         except ImportError as e:
             log.error(f"pycromanager not found: {e}")
-            self.Core = None
+            self.Bridge = None
             self.available = False
 
     def run(self):
@@ -35,10 +36,13 @@ class MicroManagerCameraThread(QThread):
             return
 
         try:
-            self.core = self.Core(headless=self.headless)
+            self.bridge = self.Bridge(
+                headless=self.headless, config_file=self.config_file
+            )
+            self.core = self.bridge.get_core()
 
-            if self.config_file:
-                self.core.load_system_configuration(self.config_file)
+            self.core.initialize_all_devices()
+            self.core.wait_for_system()
 
             self.core.start_continuous_sequence_acquisition(0)
 
@@ -70,7 +74,12 @@ class MicroManagerCameraThread(QThread):
             log.error(f"MicroManagerCameraThread error: {e}")
             self.error.emit(str(e))
         finally:
+            if self.bridge:
+                try:
+                    self.bridge.close()
+                except Exception:
+                    pass
+                self.bridge = None
             self.core = None
 
-    def stop(self):
-        self._stop_requested = True
+    def stop(self):        self._stop_requested = True
