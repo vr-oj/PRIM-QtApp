@@ -1,0 +1,40 @@
+2025-07-09T07:19:46.854534 tid256 [IFO,LogManager] Enabled primary log file C:\Program Files\Micro-Manager-2.0\CoreLogs\CoreLog20250709T071946_pid9876.txt
+2025-07-09T07:19:46.855022 tid256 [IFO,App] User: Pressure Myograph
+2025-07-09T07:19:46.855665 tid256 [IFO,App] Host: DESKTOP-9AES1FL
+2025-07-09T07:19:46.855683 tid256 [IFO,App] MM Studio version: 2.0.3 20241113
+2025-07-09T07:19:46.855740 tid256 [IFO,App] MMCore version 11.2.1
+2025-07-09T07:19:46.855766 tid256 [IFO,App] Device API version 71, Module API version 10
+2025-07-09T07:19:46.855780 tid256 [IFO,App] Operating System: Windows 10 (amd64) 10.0
+2025-07-09T07:19:46.855793 tid256 [IFO,App] JVM: Java HotSpot(TM) 64-Bit Server VM, version 1.8.0_152, 64-bit
+2025-07-09T07:19:47.364055 tid928 [IFO,App] Found plugin org.micromanager.display.inspector.internal.panels.intensity.IntensityInspectorPanelPlugin@6dd6ada
+2025-07-09T07:19:47.365153 tid928 [IFO,App] Found plugin org.micromanager.display.inspector.internal.panels.metadata.SummaryMetadataInspectorPanelPlugin@20f71641
+2025-07-09T07:19:47.365297 tid928 [IFO,App] Found plugin org.micromanager.display.inspector.internal.panels.metadata.PlaneMetadataInspectorPanelPlugin@60da796
+2025-07-09T07:19:47.365436 tid928 [IFO,App] Found plugin org.micromanager.display.inspector.internal.panels.comments.CommentsInspectorPanelPlugin@754af73a
+2025-07-09T07:19:47.366502 tid928 [IFO,App] Found plugin org.micromanager.display.overlay.internal.overlays.PatternOverlayPlugin@29cd236e
+2025-07-09T07:19:47.366651 tid928 [IFO,App] Found plugin org.micromanager.display.inspector.internal.panels.navigation.NavigationInspectorPanelPlugin@b9ce24a
+2025-07-09T07:19:47.366753 tid928 [IFO,App] Found plugin org.micromanager.display.inspector.internal.panels.overlays.OverlaysInspectorPanelPlugin@3b3d187
+2025-07-09T07:19:47.366836 tid928 [IFO,App] Found plugin org.micromanager.display.overlay.internal.overlays.ScaleBarPlugin@79b35eb9
+2025-07-09T07:19:47.366934 tid928 [IFO,App] Found plugin org.micromanager.display.overlay.internal.overlays.TextOverlayPlugin@39a5d4b2
+2025-07-09T07:19:47.367030 tid928 [IFO,App] Found plugin org.micromanager.display.overlay.internal.overlays.TimestampPlugin@55c7ff7e
+2025-07-09T07:19:47.367277 tid928 [IFO,App] Found plugin org.micromanager.acquisition.internal.DefaultMDAPlugin@486523a8
+2025-07-09T07:19:47.367410 tid928 [IFO,App] Found plugin org.micromanager.acquisition.internal.acqengjcompat.multimda.MultiMDA@2bc0ea8b
+2025-07-09T07:19:47.367729 tid928 [IFO,App] Found plugin org.micromanager.display.internal.gearmenu.CopyToImageJItem@3c57ab05
+2025-07-09T07:19:47.367863 tid928 [IFO,App] Found plugin org.micromanager.display.internal.gearmenu.ExportImagesItem@56018ffe
+2025-07-09T07:19:47.367959 tid928 [IFO,App] Found plugin org.micromanager.display.internal.gearmenu.LineProfileItem@37988ef5
+2025-07-09T07:19:47.369744 tid928 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.AutofocusButtons@2dd9f3c0
+2025-07-09T07:19:47.370657 tid928 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.CloseAllButton@57916e4f
+2025-07-09T07:19:47.371863 tid928 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.ExposureTime@670ff823
+2025-07-09T07:19:47.374377 tid928 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.LiveButton@74287fdf
+2025-07-09T07:19:47.378962 tid928 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.MDAButtons@4ae20aa9
+2025-07-09T07:19:47.380808 tid928 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.PresetButton@698ac920
+2025-07-09T07:19:47.380963 tid928 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.RefreshButton@336731fa
+2025-07-09T07:19:47.381603 tid928 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.SavedMDAButton@255a60f3
+2025-07-09T07:19:47.382224 tid928 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.ScriptButton@4567a34a
+2025-07-09T07:19:47.382731 tid928 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.ShutterControl@33cc0eed
+2025-07-09T07:19:47.383794 tid928 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.SnapButton@59f75341
+2025-07-09T07:19:47.383974 tid928 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.TextLabel@a9f85f4
+2025-07-09T07:19:47.384538 tid928 [IFO,App] Plugin loading took 1583ms
+2025-07-09T07:19:47.384769 tid256 [IFO,App] Finished waiting for plugins to load
+2025-07-09T07:20:07.509119 tid256 [IFO,Core] Did unload all devices
+2025-07-09T07:20:07.509131 tid256 [IFO,Core] System reset
+2025-07-09T07:20:07.510176 tid256 [IFO,Core] Core session ended

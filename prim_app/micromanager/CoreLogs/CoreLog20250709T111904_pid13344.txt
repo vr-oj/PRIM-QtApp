@@ -1,0 +1,63 @@
+2025-07-09T11:19:04.374912 tid6352 [IFO,LogManager] Enabled primary log file C:\Program Files\Micro-Manager-2.0\CoreLogs\CoreLog20250709T111904_pid13344.txt
+2025-07-09T11:19:04.375026 tid6352 [IFO,App] User: Pressure Myograph
+2025-07-09T11:19:04.375845 tid6352 [IFO,App] Host: DESKTOP-9AES1FL
+2025-07-09T11:19:04.375863 tid6352 [IFO,App] MM Studio version: 2.0.3 20241113
+2025-07-09T11:19:04.375911 tid6352 [IFO,App] MMCore version 11.2.1
+2025-07-09T11:19:04.375938 tid6352 [IFO,App] Device API version 71, Module API version 10
+2025-07-09T11:19:04.375951 tid6352 [IFO,App] Operating System: Windows 10 (amd64) 10.0
+2025-07-09T11:19:04.375963 tid6352 [IFO,App] JVM: Java HotSpot(TM) 64-Bit Server VM, version 1.8.0_152, 64-bit
+2025-07-09T11:19:04.897207 tid2524 [IFO,App] Found plugin org.micromanager.display.inspector.internal.panels.intensity.IntensityInspectorPanelPlugin@79689cb2
+2025-07-09T11:19:04.899111 tid2524 [IFO,App] Found plugin org.micromanager.display.inspector.internal.panels.metadata.SummaryMetadataInspectorPanelPlugin@47038c5d
+2025-07-09T11:19:04.899268 tid2524 [IFO,App] Found plugin org.micromanager.display.inspector.internal.panels.metadata.PlaneMetadataInspectorPanelPlugin@3d8da1
+2025-07-09T11:19:04.899418 tid2524 [IFO,App] Found plugin org.micromanager.display.inspector.internal.panels.comments.CommentsInspectorPanelPlugin@23976c62
+2025-07-09T11:19:04.900240 tid2524 [IFO,App] Found plugin org.micromanager.display.overlay.internal.overlays.PatternOverlayPlugin@e5c29dc
+2025-07-09T11:19:04.900405 tid2524 [IFO,App] Found plugin org.micromanager.display.inspector.internal.panels.navigation.NavigationInspectorPanelPlugin@1630a009
+2025-07-09T11:19:04.900506 tid2524 [IFO,App] Found plugin org.micromanager.display.inspector.internal.panels.overlays.OverlaysInspectorPanelPlugin@78912f2b
+2025-07-09T11:19:04.900591 tid2524 [IFO,App] Found plugin org.micromanager.display.overlay.internal.overlays.ScaleBarPlugin@1d1185dd
+2025-07-09T11:19:04.900705 tid2524 [IFO,App] Found plugin org.micromanager.display.overlay.internal.overlays.TextOverlayPlugin@72ec4d6a
+2025-07-09T11:19:04.900817 tid2524 [IFO,App] Found plugin org.micromanager.display.overlay.internal.overlays.TimestampPlugin@61cf9bd6
+2025-07-09T11:19:04.901068 tid2524 [IFO,App] Found plugin org.micromanager.acquisition.internal.DefaultMDAPlugin@105608b3
+2025-07-09T11:19:04.901208 tid2524 [IFO,App] Found plugin org.micromanager.acquisition.internal.acqengjcompat.multimda.MultiMDA@1785809
+2025-07-09T11:19:04.901996 tid2524 [IFO,App] Found plugin org.micromanager.display.internal.gearmenu.CopyToImageJItem@11efc251
+2025-07-09T11:19:04.902156 tid2524 [IFO,App] Found plugin org.micromanager.display.internal.gearmenu.ExportImagesItem@ce3fa91
+2025-07-09T11:19:04.902271 tid2524 [IFO,App] Found plugin org.micromanager.display.internal.gearmenu.LineProfileItem@2c50782e
+2025-07-09T11:19:04.903797 tid2524 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.AutofocusButtons@d148df6
+2025-07-09T11:19:04.905260 tid2524 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.CloseAllButton@3c2e7a96
+2025-07-09T11:19:04.906387 tid2524 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.ExposureTime@170d44e9
+2025-07-09T11:19:04.909116 tid2524 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.LiveButton@637aa242
+2025-07-09T11:19:04.911320 tid2524 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.MDAButtons@46006044
+2025-07-09T11:19:04.912376 tid2524 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.PresetButton@6528d146
+2025-07-09T11:19:04.912561 tid2524 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.RefreshButton@206f9fe7
+2025-07-09T11:19:04.913323 tid2524 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.SavedMDAButton@b1dcae4
+2025-07-09T11:19:04.914019 tid2524 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.ScriptButton@71966616
+2025-07-09T11:19:04.914335 tid2524 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.ShutterControl@1439c82a
+2025-07-09T11:19:04.915092 tid2524 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.SnapButton@179082c7
+2025-07-09T11:19:04.915307 tid2524 [IFO,App] Found plugin org.micromanager.quickaccess.internal.controls.TextLabel@4db26087
+2025-07-09T11:19:04.915860 tid2524 [IFO,App] Plugin loading took 1120ms
+2025-07-09T11:19:04.916066 tid6352 [IFO,App] Finished waiting for plugins to load
+2025-07-09T11:19:08.088329 tid6352 [IFO,Core] Did unload all devices
+2025-07-09T11:19:08.088765 tid6352 [IFO,Core] Did unload all devices
+2025-07-09T11:19:08.094022 tid6352 [IFO,Core] Did load device ThorCam from ThorlabsUSBCamera; label = ThorCam
+2025-07-09T11:19:08.094044 tid6352 [IFO,Core] Will initialize 1 devices
+2025-07-09T11:19:08.094083 tid6440 [IFO,Core] Will initialize device ThorCam
+2025-07-09T11:19:09.091235 tid6440 [IFO,dev:ThorCam] Device adapter requests invalid values ( 0, 0) for property: Exposure
+2025-07-09T11:19:09.203608 tid6440 [IFO,Core] Did initialize device ThorCam
+2025-07-09T11:19:09.203660 tid6352 [IFO,Core] Default camera set to ThorCam
+2025-07-09T11:19:09.203671 tid6352 [IFO,Core] Finished initializing 1 devices
+2025-07-09T11:19:09.203752 tid6352 [IFO,Core] Default camera set to ThorCam
+2025-07-09T11:19:09.203893 tid6352 [IFO,Core] Did update system state cache
+2025-07-09T11:19:09.263142 tid6352 [IFO,App] EDTHangLogger: Started monitoring of EDT hangs
+                                   [       ] [heartbeat timeout = 4500 ms, hang check interval = 1000 ms]
+2025-07-09T11:19:09.679810 tid6352 [IFO,App] Rebuilding config group table
+2025-07-09T11:19:09.679894 tid6352 [IFO,App] Finished rebuilding config group table
+2025-07-09T11:19:09.702735 tid6352 [IFO,App] Startup script (C:\Program Files\Micro-Manager-2.0\MMStartup.bsh) not present
+2025-07-09T11:19:09.702757 tid6352 [IFO,App] Updating GUI; config pad = true; from cache = true
+2025-07-09T11:19:09.706955 tid6352 [IFO,App] Rebuilding config group table
+2025-07-09T11:19:09.706965 tid6352 [IFO,App] Finished rebuilding config group table
+2025-07-09T11:19:09.707308 tid6352 [IFO,App] Finished updating GUI
+2025-07-09T11:19:18.832576 tid10488 [IFO,App] Initialized ZMQ Server on port: 4827
+2025-07-09T11:27:14.748362 tid6352 [IFO,App] EDTHangLogger: Stopping monitoring of EDT hangs
+2025-07-09T11:27:15.282928 tid6352 [ERR,Core] Attempt to log message from unregistered device: Camera failed to stop live video.
+2025-07-09T11:27:15.282963 tid6352 [IFO,Core] Did unload all devices
+2025-07-09T11:27:15.282975 tid6352 [IFO,Core] System reset
+2025-07-09T11:27:15.295932 tid6352 [IFO,Core] Core session ended

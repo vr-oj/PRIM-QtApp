@@ -1,0 +1,37 @@
+#ImageJ 1.53c Preferences
+#Wed Jul 09 11:27:15 EDT 2025
+menu.size=14
+fps=7.0
+new.type=0
+new.width=400
+fcolor=\#000000
+div-by-zero=Infinity
+pp.options=0
+prefs.options2=2
+raw.type=0
+ij.y=0
+roicolor=\#FFFF00
+ij.x=1040
+pp.height=340
+noise.sd=25.0
+prefs.options=16384
+new.slices=1
+raw.width=512
+new.height=400
+recent02=C\:\\Users\\Pressure Myograph\\Documents\\Results\\20250213\\20250213_Exp01\\20250213_Hist+H89_Raw.tiff
+new.fill=0
+recent01=C\:\\Users\\Pressure Myograph\\Documents\\Results\\20250213\\20250213_Exp01\\20250213_Hist+H89_Result.tiff
+bcolor=\#FFFFFF
+recent00=C\:\\Users\\Pressure Myograph\\Documents\\Results\\20250212\\20250212_Exp01\\20250212_Hist+H89_OJVR_Result.tiff
+ap.options=64
+pp.width=600
+measurements=19
+precision=3
+pp.fontsize=14
+raw.gap=0
+raw.height=512
+raw.options=0
+showcolor=\#00FFFF
+raw.n=1
+jpeg=75
+raw.offset=0
