@@ -128,13 +128,13 @@ class MainWindow(QMainWindow):
         except ImportError as e:
             log.info(f"Andor SDK3 not available: {e}")
 
-        # ─── Detect µManager availability via pymmcore-plus ───────────────
+        # ─── Detect µManager availability via pycromanager ────────────────
         try:
-            importlib.import_module("pymmcore_plus")
+            importlib.import_module("pycromanager")
             self.mm_available = True
-            log.info("pymmcore-plus available for µManager")
+            log.info("pycromanager available for µManager")
         except ImportError as e:
-            log.info(f"pymmcore-plus not available: {e}")
+            log.info(f"pycromanager not available: {e}")
 
         self.mm_config_file = config.DEFAULT_MM_CONFIG_FILE
 

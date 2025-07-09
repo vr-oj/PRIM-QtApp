@@ -16,7 +16,7 @@
   - Integrates with The Imaging Source DMK cameras (e.g., DMK 33UP5000, DMK 33UX250) via IC Imaging Control 4 (IC4).
   - Optional support for Andor SDK3 cameras and µManager-controlled systems.
   - µManager can run headless by loading a configuration file (*.cfg) using
-    the pure Python `pymmcore-plus` backend.
+    `pycromanager`'s `start_headless()` helper.
   - Fallback support for generic webcams using OpenCV when no specialized device is available.
   - Lists all connected USB3 Vision cameras and enumerates supported resolutions (width×height with PixelFormat) when using IC4.
   - Live preview in an OpenGL-backed QtCameraWidget, with camera control sliders (exposure, gain, brightness) in CameraControlPanel when advanced SDK features are available.
@@ -58,7 +58,7 @@
   - PyQt5
   - imagingcontrol4 (IC4 Python wrapper for camera) — optional for DMK cameras
   - andor3 (for Andor SDK3 cameras)
-  - pymmcore-plus (for µManager integration)
+  - pycromanager (for µManager integration)
   - pyserial
   - numpy
   - tifffile
@@ -154,11 +154,10 @@
 To run a µManager camera without the GUI, place your `.cfg` file in
 `prim_app/configs/MMConfig.cfg` or choose **File → Load µManager Config File…**
 from the menu. The configuration must include your camera and device settings.
-PRIMAcquisition uses `pymmcore-plus` to control µManager devices directly from
-Python—no separate Java process is required. Simply provide a valid `.cfg` file
-and the bundled device adapters will be loaded automatically. The application no
-longer relies on the `MICROMANAGER_PATH` environment variable or the
-`pycromanager` bridge.
+PRIMAcquisition uses `pycromanager`'s `start_headless()` helper to launch
+µManager directly from the bundled `micromanager/` folder. Simply provide a
+valid `.cfg` file and the required device adapters will be loaded automatically.
+The old bridge code is no longer needed.
 
 ## Packaging
 
@@ -228,7 +227,7 @@ PRIMAcquisition/
     - Ensure the GenTL Producer for your DMK camera is installed.
     - Verify that `import imagingcontrol4` in Python works without errors if using the IC4 backend.
     - For Andor cameras, confirm the `andor3` package is installed and the SDK drivers are loaded.
-    - For µManager setups, ensure the `pymmcore-plus` package is installed and that your `.cfg` file loads correctly.
+    - For µManager setups, ensure the `pycromanager` package is installed and that your `.cfg` file loads correctly.
 
 2. **No Serial Data**  
    - Check Arduino COM port in Device Manager (Windows) or `/dev/tty.*` (macOS).  
