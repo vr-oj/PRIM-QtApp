@@ -4,8 +4,14 @@ import os
 from PyQt5.QtCore import Qt, QSettings
 from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QProgressBar, QCheckBox
+    QApplication,
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QProgressBar,
+    QCheckBox,
 )
 
 
@@ -113,6 +119,18 @@ class WelcomeDialog(QDialog):
         layout.addWidget(self.checkbox, alignment=Qt.AlignCenter)
 
         self._update_step()
+
+        # Center the dialog on the screen that contains the parent window
+        self.adjustSize()
+        screen = (
+            self.parent().windowHandle().screen()
+            if self.parent() and self.parent().windowHandle()
+            else QApplication.primaryScreen()
+        )
+        if screen:
+            geo = self.frameGeometry()
+            geo.moveCenter(screen.availableGeometry().center())
+            self.move(geo.topLeft())
 
     # ------------------------------------------------------------------
     def _icon(self, name: str) -> QIcon:

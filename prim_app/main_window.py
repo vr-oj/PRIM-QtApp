@@ -577,16 +577,19 @@ class MainWindow(QMainWindow):
         exp_img_act = QAction("Export Plot &Image…", self)
         exp_img_act.triggered.connect(self.pressure_plot_widget.export_as_image)
         fm.addAction(exp_img_act)
+
         mm_cfg_act = QAction(
-            "Load µManager Config &File…", self, triggered=self._choose_mm_config_file
+            "Load µManager Config &File…",
+            self,
+            triggered=self._choose_mm_config_file,
         )
-        fm.addAction(mm_cfg_act)
+
         mm_path_act = QAction(
             "Set µManager &Path…",
             self,
             triggered=self._choose_mm_app_path,
         )
-        fm.addAction(mm_path_act)
+
         choose_dir_act = QAction(
             "Set &Results Folder…", self, triggered=self._choose_results_dir
         )
@@ -596,6 +599,10 @@ class MainWindow(QMainWindow):
             "&Exit", self, shortcut=QKeySequence.Quit, triggered=self.close
         )
         fm.addAction(exit_act)
+
+        sm = mb.addMenu("&Setup")
+        sm.addAction(mm_cfg_act)
+        sm.addAction(mm_path_act)
 
         am = mb.addMenu("&Acquisition")
         self.start_recording_action = QAction(
