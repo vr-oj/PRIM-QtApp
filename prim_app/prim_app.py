@@ -218,14 +218,6 @@ def main_app_entry():
         log.info("No style.qss found. Using default 'Fusion' style.")
         app.setStyle(QStyleFactory.create("Fusion"))
 
-    # ─── Optional Welcome Dialog ─────────────────────────────────────────
-    from ui.welcome_dialog import WelcomeDialog
-    welcome = WelcomeDialog()
-    if not getattr(welcome, "_skip", False):
-        from PyQt5.QtWidgets import QDialog
-        if welcome.exec_() != QDialog.Accepted:
-            sys.exit(0)
-
     # ─── Import & Launch MainWindow ───────────────────────────────────────
     from main_window import MainWindow
 
@@ -233,6 +225,14 @@ def main_app_entry():
     display_version = CONFIG_APP_VERSION or "Unknown"
     main_win.setWindowTitle(f"{APP_NAME} v{display_version}")
     main_win.show()
+
+    # ─── Optional Welcome Dialog ─────────────────────────────────────────
+    from ui.welcome_dialog import WelcomeDialog
+    welcome = WelcomeDialog(parent=main_win)
+    if not getattr(welcome, "_skip", False):
+        from PyQt5.QtWidgets import QDialog
+        if welcome.exec_() != QDialog.Accepted:
+            sys.exit(0)
 
     exit_code = app.exec_()
     log.info(f"Application event loop ended with exit code {exit_code}.")
