@@ -153,8 +153,8 @@
 To run a µManager camera without the GUI, place your `.cfg` file in
 `prim_app/configs/MMConfig.cfg` or choose **File → Load µManager Config File…**
 from the menu. The configuration must include your camera and device settings.
-When provided, PRIMAcquisition launches µManager via the `pycromanager` Bridge
-in headless mode using that file. Configure the µManager installation folder via
+When provided, PRIMAcquisition launches µManager in headless mode using
+`pycromanager.start_headless`. Configure the µManager installation folder via
 **File → Set µManager Path…**. The selected path is stored in
 `prim_settings.json` so you only need to set it once. If the
 `MICROMANAGER_PATH` environment variable is present it will still be used as the
@@ -163,7 +163,7 @@ default.
 ## Setting MICROMANAGER_PATH
 
 `pycromanager` reads the `MICROMANAGER_PATH` environment variable at import
-time. If the variable is missing or invalid, the `Bridge` class will not be able
+time. If the variable is missing or invalid, `start_headless` will not be able
 to launch µManager automatically. PRIMAcquisition loads the path stored in
 `prim_settings.json` and sets `MICROMANAGER_PATH` before any pycromanager
 modules are imported. To override the path manually, export `MICROMANAGER_PATH`
