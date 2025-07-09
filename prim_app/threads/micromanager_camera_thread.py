@@ -35,7 +35,7 @@ class MicroManagerCameraThread(QThread):
 
             os.environ.setdefault("MICROMANAGER_PATH", mm_path)
 
-            from pycromanager import Bridge
+            from pycromanager import start_headless
 
             bridge = Bridge()
             self.core = bridge.get_core()
