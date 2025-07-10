@@ -154,10 +154,13 @@
 To run a µManager camera without the GUI, place your `.cfg` file in
 `prim_app/configs/MMConfig.cfg` or choose **File → Load µManager Config File…**
 from the menu. The configuration must include your camera and device settings.
-PRIMAcquisition uses `pycromanager`'s `start_headless()` helper to launch
-µManager directly from the bundled `micromanager/` folder. Simply provide a
-valid `.cfg` file and the required device adapters will be loaded automatically.
-The old bridge code is no longer needed.
+PRIMAcquisition now auto‑selects a free ZMQ port and starts µManager headless via
+`pymmcore-plus`'s launcher.  If headless launch fails it will fall back to
+loading the configuration in GUI mode so the camera still works.  The chosen port
+is shown in the status bar and saved in the application settings so power users
+can pin a specific port if needed.  Place your `.cfg` file in
+`prim_app/configs/MMConfig.cfg` (or load it via **Setup → Load µManager Config
+File…**) and the required adapters will be loaded automatically.
 
 ## Packaging
 
