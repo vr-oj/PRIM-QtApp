@@ -1,12 +1,21 @@
 import logging
 import os
-import sys
 import socket
+import sys
+
 import numpy as np
+from pymmcore_plus import CMMCorePlus
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
-from pymmcore_plus import CMMCorePlus
-from mmpycorex.launcher import Launcher
+
+try:
+    # pymmcore-plus >=0.4 provides Launcher in pymmcore_plus.launcher
+    from pymmcore_plus.launcher import Launcher
+except Exception:  # pragma: no cover - fallback for older mmpycorex package
+    try:
+        from mmpycorex.launcher import Launcher  # type: ignore
+    except Exception:  # package not available
+        Launcher = None  # type: ignore
 
 
 def find_free_port(start=4827, end=4900):
@@ -20,15 +29,24 @@ def find_free_port(start=4827, end=4900):
                 continue
     raise RuntimeError(f"No free port in {start}-{end}")
 
+
 log = logging.getLogger(__name__)
 
+
 class MicroManagerCameraThread(QThread):
-    """Acquire frames from µManager using ``pycromanager.start_headless``."""
+    """Acquire frames from µManager using a headless ``Launcher`` if available."""
 
     frame_ready = pyqtSignal(QImage, object)
     error = pyqtSignal(str)
 
-    def __init__(self, parent=None, mm_path=None, config_file=None, adapter_paths=None, zmq_port=None):
+    def __init__(
+        self,
+        parent=None,
+        mm_path=None,
+        config_file=None,
+        adapter_paths=None,
+        zmq_port=None,
+    ):
         super().__init__(parent)
         self._stop_requested = False
         self.core = None
@@ -60,7 +78,11 @@ class MicroManagerCameraThread(QThread):
             os.environ["MICROMANAGER_PATH"] = self.mm_path
 
             try:
-                self.launcher = Launcher(port=self.zmq_port, adapter_paths=self.adapter_paths)
+                if Launcher is None:
+                    raise RuntimeError("Launcher class not available")
+                self.launcher = Launcher(
+                    port=self.zmq_port, adapter_paths=self.adapter_paths
+                )
                 self.core = self.launcher.get_core()
                 self.core.setUseTimeouts(True)
                 self.core.enableStderrLog(False)
@@ -91,9 +113,13 @@ class MicroManagerCameraThread(QThread):
                     arr = tagged.as_array()
                     h, w = arr.shape[:2]
                     if arr.ndim == 2:
-                        qimg = QImage(arr.data, w, h, arr.strides[0], QImage.Format_Grayscale8).copy()
+                        qimg = QImage(
+                            arr.data, w, h, arr.strides[0], QImage.Format_Grayscale8
+                        ).copy()
                     else:
-                        qimg = QImage(arr.data, w, h, arr.strides[0], QImage.Format_RGB888).copy()
+                        qimg = QImage(
+                            arr.data, w, h, arr.strides[0], QImage.Format_RGB888
+                        ).copy()
                     self.frame_ready.emit(qimg, arr)
                 except Exception:
                     self.msleep(5)
