@@ -21,3 +21,4 @@ six==1.16.0
 tifffile>=2023.0
 andor3
 pycromanager
+pymmcore-plus
