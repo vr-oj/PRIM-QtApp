@@ -55,3 +55,4 @@ def load_app_settings():
 SETTING_LAST_CAMERA_INDEX = "last_camera_index"
 SETTING_LAST_PROFILE_NAME = "last_profile_name"
 SETTING_RESULTS_DIR = "results_dir"
+SETTING_MM_PORT = "micromanager_zmq_port"
