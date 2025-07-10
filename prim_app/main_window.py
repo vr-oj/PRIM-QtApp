@@ -82,6 +82,7 @@ from threads.sdk_camera_thread import SDKCameraThread
 from threads.opencv_camera_thread import OpenCVCameraThread
 from threads.andor_camera_thread import AndorCameraThread
 from threads.micromanager_camera_thread import MicroManagerCameraThread
+from threads.thorlabs_camera_thread import ThorlabsCameraThread
 from recording_manager import RecordingManager
 from utils.utils import list_serial_ports
 from ui.welcome_dialog import WelcomeDialog
@@ -98,6 +99,7 @@ class MainWindow(QMainWindow):
         self.ic4_device = None
         self.andor_available = False
         self.mm_available = False
+        self.thorlabs_available = False
         self.opencv_index = config.DEFAULT_CAMERA_INDEX
         try:
             self.ic4 = importlib.import_module("imagingcontrol4")
@@ -135,6 +137,14 @@ class MainWindow(QMainWindow):
         except ImportError as e:
             log.info(f"pymmcore-plus not available: {e}")
 
+        # ─── Detect Thorlabs SDK availability ─────────────────────────────
+        try:
+            importlib.import_module("thorlabs_tsi_sdk")
+            self.thorlabs_available = True
+            log.info("Thorlabs TSI SDK available")
+        except ImportError as e:
+            log.info(f"Thorlabs SDK not available: {e}")
+
         self.mm_config_file = config.DEFAULT_MM_CONFIG_FILE
 
         if (
@@ -148,7 +158,12 @@ class MainWindow(QMainWindow):
                 "Please load a valid .cfg via Setup → Load µManager Config File…",
             )
 
-        if not (self.ic4_available or self.andor_available or self.mm_available):
+        if not (
+            self.ic4_available
+            or self.andor_available
+            or self.mm_available
+            or self.thorlabs_available
+        ):
             from utils.utils import list_opencv_cameras
 
             cams = list_opencv_cameras()
@@ -181,6 +196,13 @@ class MainWindow(QMainWindow):
                     "mm_path": None,
                     "config_file": self.mm_config_file,
                 },
+                "post_init": None,
+                "signals": [],
+                "label": "Connected",
+            },
+            "thorlabs": {
+                "cls": ThorlabsCameraThread,
+                "init_kwargs": lambda: {"parent": self},
                 "post_init": None,
                 "signals": [],
                 "label": "Connected",
@@ -458,7 +480,14 @@ class MainWindow(QMainWindow):
             self.device_combo.addItem("Andor SDK3 Camera", ("andor", None))
         if self.mm_available:
             self.device_combo.addItem("µManager Camera", ("micromanager", None))
-        if not (self.ic4_available or self.andor_available or self.mm_available):
+        if self.thorlabs_available:
+            self.device_combo.addItem("Thorlabs Camera", ("thorlabs", None))
+        if not (
+            self.ic4_available
+            or self.andor_available
+            or self.mm_available
+            or self.thorlabs_available
+        ):
             self.device_combo.addItem(
                 f"OpenCV Camera {self.opencv_index}", ("opencv", self.opencv_index)
             )
