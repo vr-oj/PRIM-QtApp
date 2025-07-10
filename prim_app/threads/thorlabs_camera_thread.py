@@ -1,5 +1,9 @@
 import os
 import logging
+
+# Ensure bundled Thorlabs DLLs are discoverable when running the app
+dll_path = os.path.join(os.path.dirname(__file__), "..", "dlls", "ThorLabs")
+os.add_dll_directory(dll_path)
 import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
