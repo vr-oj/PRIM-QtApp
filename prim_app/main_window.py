@@ -78,6 +78,7 @@ from ui.canvas.pressure_plot_widget import PressurePlotWidget
 
 from threads.serial_thread import SerialThread
 from threads.sdk_camera_thread import SDKCameraThread
+from threads.thorlabs_camera_thread import ThorlabsCameraThread
 from recording_manager import RecordingManager
 from utils.utils import list_serial_ports
 
@@ -102,6 +103,7 @@ class MainWindow(QMainWindow):
         self.camera_control_panel = None
         self.camera_tabs = None
         self.camera_thread = None  # SDKCameraThread instance
+        self.thorlabs_thread = None  # ThorlabsCameraThread instance
 
         # Plot controls
         self.plot_control_panel = None
@@ -243,7 +245,7 @@ class MainWindow(QMainWindow):
         info_layout.addRow("Resolution:", self.resolution_combo)
 
         self.btn_start_camera = QPushButton("Start Camera")
-        self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
+        self.btn_start_camera.clicked.connect(self._on_start_stop_thorlabs)
         info_layout.addRow("", self.btn_start_camera)
 
         self.camera_tabs.addTab(info_tab, "Info")
@@ -458,6 +460,18 @@ class MainWindow(QMainWindow):
             self.lbl_cam_resolution.setText("N/A")
             self.camera_widget.clear_image()
 
+    def _on_start_stop_thorlabs(self):
+        """Start or stop the Thorlabs camera thread."""
+        if self.thorlabs_thread is None or not self.thorlabs_thread.is_alive():
+            self.thorlabs_thread = ThorlabsCameraThread(parent=self)
+            self.thorlabs_thread.start()
+            self.btn_start_camera.setText("Stop Camera")
+        else:
+            self.thorlabs_thread.stop()
+            self.thorlabs_thread.join()
+            self.thorlabs_thread = None
+            self.btn_start_camera.setText("Start Camera")
+
     @pyqtSlot()
     def _on_grabber_ready(self):
         """
@@ -498,6 +512,14 @@ class MainWindow(QMainWindow):
 
         if self.lbl_cam_connection.text() != "Connected":
             self.lbl_cam_connection.setText("Connected")
+
+    def update_camera_frame(self, frame):
+        """Receive NumPy frame from ThorlabsCameraThread and display."""
+        h, w = frame.shape
+        bytes_per_line = w
+        q_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format_Grayscale8)
+        q_img = q_img.copy()
+        self.camera_widget._on_frame_ready(q_img, frame)
 
     @pyqtSlot(str, str)
     def _on_camera_error(self, msg: str, code: str):
@@ -1110,6 +1132,16 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
                 self.camera_thread = None
+
+        # 3b) Stop the Thorlabs camera thread
+        tl_thread = self.thorlabs_thread
+        if tl_thread:
+            try:
+                tl_thread.stop()
+                tl_thread.join(timeout=1.5)
+            except Exception:
+                pass
+            self.thorlabs_thread = None
 
         # 4) Clear UI elements that might hold references
         try:
