@@ -15,8 +15,8 @@
 - **High‑Speed Camera Preview & Control**
   - Integrates with The Imaging Source DMK cameras (e.g., DMK 33UP5000, DMK 33UX250) via IC Imaging Control 4 (IC4).
   - Optional support for Andor SDK3 cameras and µManager-controlled systems.
-  - µManager can run headless by loading a configuration file (*.cfg) using
-    `pycromanager`'s `start_headless()` helper.
+  - µManager integration uses `pymmcore-plus` to load your configuration
+    directly, without Java or the ZMQ bridge.
   - Fallback support for generic webcams using OpenCV when no specialized device is available.
   - Lists all connected USB3 Vision cameras and enumerates supported resolutions (width×height with PixelFormat) when using IC4.
   - Live preview in an OpenGL-backed QtCameraWidget, with camera control sliders (exposure, gain, brightness) in CameraControlPanel when advanced SDK features are available.
@@ -58,7 +58,7 @@
   - PyQt5
   - imagingcontrol4 (IC4 Python wrapper for camera) — optional for DMK cameras
   - andor3 (for Andor SDK3 cameras)
-  - pycromanager (for µManager integration)
+  - pymmcore-plus (for µManager integration)
   - pyserial
   - numpy
   - tifffile
@@ -149,18 +149,12 @@
 
   - Use ImageJ/Fiji or Python (`tifffile`) to inspect frames and metadata.
 
-## µManager Headless Mode
+## µManager Integration
 
-To run a µManager camera without the GUI, place your `.cfg` file in
-`prim_app/configs/MMConfig.cfg` or choose **File → Load µManager Config File…**
-from the menu. The configuration must include your camera and device settings.
-PRIMAcquisition now auto‑selects a free ZMQ port and starts µManager headless via
-`pymmcore-plus`'s launcher.  If headless launch fails it will fall back to
-loading the configuration in GUI mode so the camera still works.  The chosen port
-is shown in the status bar and saved in the application settings so power users
-can pin a specific port if needed.  Place your `.cfg` file in
-`prim_app/configs/MMConfig.cfg` (or load it via **Setup → Load µManager Config
-File…**) and the required adapters will be loaded automatically.
+Place your `.cfg` file in `prim_app/configs/MMConfig.cfg` or load one via
+**File → Load µManager Config File…**. The configuration must include your
+camera and device settings. PRIMAcquisition uses `pymmcore-plus` to load the
+devices directly from the µManager DLLs—no Java or ZMQ port required.
 
 ## Packaging
 
@@ -230,7 +224,7 @@ PRIMAcquisition/
     - Ensure the GenTL Producer for your DMK camera is installed.
     - Verify that `import imagingcontrol4` in Python works without errors if using the IC4 backend.
     - For Andor cameras, confirm the `andor3` package is installed and the SDK drivers are loaded.
-    - For µManager setups, ensure the `pycromanager` package is installed and that your `.cfg` file loads correctly.
+    - For µManager setups, ensure the `pymmcore-plus` package is installed and that your `.cfg` file loads correctly.
 
 2. **No Serial Data**  
    - Check Arduino COM port in Device Manager (Windows) or `/dev/tty.*` (macOS).  

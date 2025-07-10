@@ -53,10 +53,8 @@ import prim_app
 
 from utils.app_settings import (
     save_app_setting,
-    load_app_setting,
     SETTING_LAST_CAMERA_INDEX,
     SETTING_RESULTS_DIR,
-    SETTING_MM_PORT,
 )
 import utils.config as config
 from utils.config import (
@@ -129,16 +127,15 @@ class MainWindow(QMainWindow):
         except ImportError as e:
             log.info(f"Andor SDK3 not available: {e}")
 
-        # ─── Detect µManager availability via pycromanager ────────────────
+        # ─── Detect µManager availability via pymmcore-plus ───────────────
         try:
-            importlib.import_module("pycromanager")
+            importlib.import_module("pymmcore_plus")
             self.mm_available = True
-            log.info("pycromanager available for µManager")
+            log.info("pymmcore-plus available for µManager")
         except ImportError as e:
-            log.info(f"pycromanager not available: {e}")
+            log.info(f"pymmcore-plus not available: {e}")
 
         self.mm_config_file = config.DEFAULT_MM_CONFIG_FILE
-        self.mm_zmq_port = load_app_setting(SETTING_MM_PORT, None)
 
         if (
             not os.path.exists(self.mm_config_file)
@@ -183,7 +180,6 @@ class MainWindow(QMainWindow):
                     "parent": self,
                     "mm_path": None,
                     "config_file": self.mm_config_file,
-                    "zmq_port": self.mm_zmq_port,
                 },
                 "post_init": None,
                 "signals": [],
@@ -528,10 +524,7 @@ class MainWindow(QMainWindow):
 
         self.camera_thread.start()
         if self.current_backend == "micromanager":
-            self.statusBar().showMessage(
-                f"µManager running on port {self.camera_thread.zmq_port}", 5000
-            )
-            save_app_setting(SETTING_MM_PORT, self.camera_thread.zmq_port)
+            self.statusBar().showMessage("µManager started", 5000)
         self.btn_start_camera.setText("Stop Camera")
         self.camera_control_panel.setEnabled(False)
 
