@@ -159,6 +159,42 @@ class MainWindow(QMainWindow):
             else:
                 log.warning("No OpenCV cameras detected on startup")
 
+        # ─── Backend Thread Mapping ─────────────────────────────────────────
+        self._backend_map = {
+            "ic4": {
+                "cls": SDKCameraThread,
+                "init_kwargs": lambda: {"parent": self},
+                "post_init": lambda th: th.set_device_info(self.ic4_device),
+                "signals": ["grabber_ready"],
+                "label": "Connecting…",
+            },
+            "andor": {
+                "cls": AndorCameraThread,
+                "init_kwargs": lambda: {"parent": self},
+                "post_init": None,
+                "signals": [],
+                "label": "Connected",
+            },
+            "micromanager": {
+                "cls": MicroManagerCameraThread,
+                "init_kwargs": lambda: {
+                    "parent": self,
+                    "mm_path": None,
+                    "config_file": self.mm_config_file,
+                },
+                "post_init": None,
+                "signals": [],
+                "label": "Connected",
+            },
+            "opencv": {
+                "cls": OpenCVCameraThread,
+                "init_kwargs": lambda: {"index": self.opencv_index, "parent": self},
+                "post_init": None,
+                "signals": [],
+                "label": "Connected",
+            },
+        }
+
         # ─── State Variables ─────────────────────────────────────────────────────
         self._serial_thread = None
         self._serial_active = False
@@ -458,57 +494,38 @@ class MainWindow(QMainWindow):
         """
         Called when the user clicks “Start Camera” or “Stop Camera”.
         """
-        if self.camera_thread is None or not self.camera_thread.isRunning():
-            # ─── Start camera ─────────────────────────────────────────────────
-            if self.current_backend == "ic4" and self.ic4_available and self.ic4_device:
-                self.camera_thread = SDKCameraThread(parent=self)
-                self.camera_thread.set_device_info(self.ic4_device)
-                self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
-                self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
-                self.camera_thread.frame_ready.connect(self._update_camera_info)
-                self.camera_thread.error.connect(self._on_camera_error)
-                self.lbl_cam_connection.setText("Connecting…")
-            elif self.current_backend == "andor" and self.andor_available:
-                self.camera_thread = AndorCameraThread(parent=self)
-                self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
-                self.camera_thread.frame_ready.connect(self._update_camera_info)
-                self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
-                self.lbl_cam_connection.setText("Connected")
-            elif self.current_backend == "micromanager" and self.mm_available:
-                self.camera_thread = MicroManagerCameraThread(
-                    config_file=self.mm_config_file
-                )
-                self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
-                self.camera_thread.frame_ready.connect(self._update_camera_info)
-                self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
-                self.lbl_cam_connection.setText("Connected")
-            else:
-                self.camera_thread = OpenCVCameraThread(index=self.opencv_index, parent=self)
-                self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
-                self.camera_thread.frame_ready.connect(self._update_camera_info)
-                self.camera_thread.error.connect(lambda msg: QMessageBox.critical(self, "Camera Error", msg))
-                self.lbl_cam_connection.setText("Connected")
-
-            self.lbl_cam_frame.setText("0")
-            self.lbl_cam_resolution.setText("N/A")
-
-            # Actually start the thread
-            self.camera_thread.start()
-            self.btn_start_camera.setText("Stop Camera")
-            self.camera_control_panel.setEnabled(False)
-
-        else:
-            # ─── Stop camera ──────────────────────────────────────────────────
+        if self.camera_thread and self.camera_thread.isRunning():
             self.camera_thread.stop()
             self.camera_thread = None
+            self._reset_camera_ui()
+            return
 
-            # Reset UI
-            self.btn_start_camera.setText("Start Camera")
-            self.camera_control_panel.setEnabled(False)
-            self.lbl_cam_connection.setText("Disconnected")
-            self.lbl_cam_frame.setText("0")
-            self.lbl_cam_resolution.setText("N/A")
-            self.camera_widget.clear_image()
+        back = self._backend_map.get(self.current_backend, self._backend_map["opencv"])
+
+        params = back["init_kwargs"]()
+        self.camera_thread = back["cls"](**params)
+        post = back.get("post_init")
+        if callable(post):
+            post(self.camera_thread)
+
+        # Common signal hookups
+        self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
+        self.camera_thread.frame_ready.connect(self._update_camera_info)
+
+        for extra in back.get("signals", []):
+            getattr(self.camera_thread, extra).connect(self._on_grabber_ready)
+
+        err_sig = getattr(self.camera_thread, "error", None)
+        if err_sig:
+            err_sig.connect(lambda *args: QMessageBox.critical(self, "Camera Error", args[0]))
+
+        self.lbl_cam_connection.setText(back.get("label", "Connected"))
+        self.lbl_cam_frame.setText("0")
+        self.lbl_cam_resolution.setText("N/A")
+
+        self.camera_thread.start()
+        self.btn_start_camera.setText("Stop Camera")
+        self.camera_control_panel.setEnabled(False)
 
     @pyqtSlot()
     def _on_grabber_ready(self):
@@ -572,6 +589,16 @@ class MainWindow(QMainWindow):
         self.lbl_cam_resolution.setText("N/A")
         self.camera_widget.clear_image()
         self.btn_start_camera.setText("Start Camera")
+
+    def _reset_camera_ui(self):
+        self.btn_start_camera.setText("Start Camera")
+        if self.camera_control_panel:
+            self.camera_control_panel.setEnabled(False)
+        self.lbl_cam_connection.setText("Disconnected")
+        self.lbl_cam_frame.setText("0")
+        self.lbl_cam_resolution.setText("N/A")
+        if self.camera_widget:
+            self.camera_widget.clear_image()
 
     def _build_menus(self):
         mb = self.menuBar()
