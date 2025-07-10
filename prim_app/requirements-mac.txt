@@ -23,3 +23,4 @@ six==1.17.0
 tifffile==2025.6.11
 andor3
 pymmcore-plus
+thorlabs_tsi_sdk

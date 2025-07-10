@@ -13,8 +13,8 @@
   - Numeric readouts (frame index, device time, pressure) in the TopControlPanel.
 
 - **High‑Speed Camera Preview & Control**
-  - Integrates with The Imaging Source DMK cameras (e.g., DMK 33UP5000, DMK 33UX250) via IC Imaging Control 4 (IC4).
-  - Optional support for Andor SDK3 cameras and µManager-controlled systems.
+- Integrates with The Imaging Source DMK cameras (e.g., DMK 33UP5000, DMK 33UX250) via IC Imaging Control 4 (IC4).
+  - Optional support for Andor SDK3 cameras, Thorlabs cameras (via `thorlabs_tsi_sdk`), and µManager-controlled systems.
   - µManager integration uses `pymmcore-plus` to load your configuration
     directly, without Java or the ZMQ bridge.
   - Fallback support for generic webcams using OpenCV when no specialized device is available.
@@ -49,15 +49,17 @@
 
 - **Operating System**: Windows 10/11 (with IC4 SDK installed), or macOS with GenTL drivers.  
 - **Python**: 3.8 – 3.10 (tested); use a virtual environment.  
-- **Hardware**:  
-  - DMK 33UP5000 or DMK 33UX250 camera with USB 3.0.  
-  - Arduino (or compatible) running PRIM firmware (PRIM_v3_01.ino).  
+- **Hardware**:
+  - DMK 33UP5000 or DMK 33UX250 camera with USB 3.0.
+  - Thorlabs USB cameras.
+  - Arduino (or compatible) running PRIM firmware (PRIM_v3_01.ino).
   - Pressure transducer wired to an ADS ADC (e.g., ADS1115), connected to Arduino.
 
 - **Python Packages**:
   - PyQt5
   - imagingcontrol4 (IC4 Python wrapper for camera) — optional for DMK cameras
   - andor3 (for Andor SDK3 cameras)
+  - thorlabs_tsi_sdk (for Thorlabs cameras)
   - pymmcore-plus (for µManager integration)
   - pyserial
   - numpy
@@ -224,6 +226,7 @@ PRIMAcquisition/
     - Ensure the GenTL Producer for your DMK camera is installed.
     - Verify that `import imagingcontrol4` in Python works without errors if using the IC4 backend.
     - For Andor cameras, confirm the `andor3` package is installed and the SDK drivers are loaded.
+    - For Thorlabs cameras, install `thorlabs_tsi_sdk` and copy the DLLs into a folder on your `PATH`.
     - For µManager setups, ensure the `pymmcore-plus` package is installed and that your `.cfg` file loads correctly.
 
 2. **No Serial Data**  
