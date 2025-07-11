@@ -18,34 +18,27 @@ class MicroManagerCameraThread(QThread):
         self._stop_requested = False
         self.core = None
         self.config_file = config_file  # optional path to MM .cfg for headless mode
-        self.available = None
-        self.Core = None
+
+        try:
+            from pycromanager import Core
+            self.Core = Core
+            self.available = True
+        except ImportError as e:
+            log.error(f"pycromanager not found: {e}")
+            self.Core = None
+            self.available = False
 
     def run(self):
+        if not self.available:
+            self.error.emit("pycromanager not available")
+            return
+
         try:
-            if self.Core is None:
-                try:
-                    from pycromanager import Core
-                    self.Core = Core
-                    self.available = True
-                except ImportError as e:
-                    log.error(f"pycromanager not found: {e}")
-                    self.available = False
-
-            if not self.available:
-                self.error.emit("pycromanager not available")
-                return
-
             self.core = self.Core()
 
             # Optional: support standalone mode by loading a config file
-            if self.config_file:
-                try:
-                    self.core.load_system_configuration(self.config_file)
-                except Exception as e:
-                    log.error(f"Failed to load µManager config: {e}")
-                    self.error.emit("Default µManager config missing or invalid. Please load a valid .cfg via Setup → Load µManager Config File…")
-                    return
+            # if self.config_file:
+            #     self.core.load_system_configuration(self.config_file)
 
             self.core.start_continuous_sequence_acquisition(0)
 
