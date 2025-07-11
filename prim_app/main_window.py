@@ -147,17 +147,6 @@ class MainWindow(QMainWindow):
 
         self.mm_config_file = config.DEFAULT_MM_CONFIG_FILE
 
-        if (
-            not os.path.exists(self.mm_config_file)
-            or "placeholder" in open(self.mm_config_file, "r").read(128).lower()
-        ):
-            QMessageBox.warning(
-                self,
-                "µManager Config Required",
-                "Default µManager config missing or invalid. "
-                "Please load a valid .cfg via Setup → Load µManager Config File…",
-            )
-
         if not (
             self.ic4_available
             or self.andor_available
@@ -528,6 +517,15 @@ class MainWindow(QMainWindow):
             self._reset_camera_ui()
             return
 
+        if self.current_backend == "micromanager" and not self._mm_config_valid():
+            QMessageBox.warning(
+                self,
+                "µManager Config Required",
+                "Default µManager config missing or invalid. "
+                "Please load a valid .cfg via Setup → Load µManager Config File…",
+            )
+            return
+
         back = self._backend_map.get(self.current_backend, self._backend_map["opencv"])
 
         params = back["init_kwargs"]()
@@ -868,6 +866,19 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"µManager config loaded from {path}", 5000
             )
+
+    def _mm_config_valid(self) -> bool:
+        """Return True if the µManager config file appears valid."""
+        if not os.path.exists(self.mm_config_file):
+            return False
+        try:
+            with open(self.mm_config_file, "r") as f:
+                head = f.read(128).lower()
+            if "placeholder" in head:
+                return False
+        except Exception:
+            return False
+        return True
 
 
     def _show_about_dialog(self):
