@@ -53,3 +53,24 @@ QLabel[status="disconnected"], QLabel[status="error"] {
     border-radius: 8px;
     padding: 2px 8px;
 }
+
+/* Modern slider and spin box styling */
+QSlider::groove:horizontal {
+    height: 6px;
+    background: #444;
+    border-radius: 3px;
+}
+QSlider::handle:horizontal {
+    background: #0078d7;
+    width: 14px;
+    border-radius: 7px;
+}
+QDoubleSpinBox, QSpinBox {
+    background: #222;
+    color: white;
+    border: 1px solid #555;
+    padding: 2px;
+}
+QCheckBox {
+    color: white;
+}

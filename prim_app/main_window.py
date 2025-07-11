@@ -573,6 +573,11 @@ class MainWindow(QMainWindow):
         self.camera_control_panel._on_grabber_ready()
         self.camera_control_panel.setEnabled(True)
 
+        # Connect live property updates
+        prop_sig = getattr(self.camera_thread, "property_updated", None)
+        if prop_sig:
+            prop_sig.connect(self.camera_control_panel.update_property)
+
         self.lbl_cam_connection.setText("Connected")
 
     @pyqtSlot(QImage, object)
