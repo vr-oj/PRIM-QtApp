@@ -33,7 +33,7 @@ class TopControlPanel(QWidget):
         status_box = QGroupBox("PRIM Device Status")
         status_layout = QFormLayout(status_box)
         self.conn_lbl = QLabel("Disconnected")
-        self.conn_lbl.setStyleSheet("font-weight:bold;color:#D6C832;")
+        self.conn_lbl.setProperty("status", "disconnected")
         status_layout.addRow("Connection:", self.conn_lbl)
 
         self.idx_lbl = QLabel("N/A")
@@ -59,12 +59,14 @@ class TopControlPanel(QWidget):
         """
         self.conn_lbl.setText(text)
         if connected:
-            color = "#A3BE8C"
+            status = "connected"
         elif "error" in text.lower() or "failed" in text.lower():
-            color = "#BF616A"
+            status = "error"
         else:
-            color = "#D6C832"
-        self.conn_lbl.setStyleSheet(f"font-weight:bold;color:{color};")
+            status = "disconnected"
+        self.conn_lbl.setProperty("status", status)
+        self.conn_lbl.style().unpolish(self.conn_lbl)
+        self.conn_lbl.style().polish(self.conn_lbl)
         self.zero_btn.setEnabled(connected)
 
     def update_prim_data(self, idx: int, t_dev: float, p_dev: float):
