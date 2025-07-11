@@ -18,14 +18,12 @@ PROPERTY_SPECS = [
     {
         "id_enum": "ExposureTimeAbs",
         "id_float": "ExposureTime",
-        "label": "Exposure",
-        "unit": "ms",
-        "display_scale": 0.001,  # convert µs -> ms
-        "log_slider": True,
+        "label": "Exposure (µs)",
+        "unit": "µs",
     },
     {"id_float": "Gain", "label": "Gain", "unit": ""},
-    {"id_enum": "ExposureAuto", "label": "Auto Exposure", "type": "enum_bool", "auto_target": "ExposureTime"},
-    {"id_enum": "GainAuto", "label": "Auto Gain", "type": "enum_bool", "auto_target": "Gain"},
+    {"id_enum": "ExposureAuto", "label": "Auto Exposure", "type": "enum_bool"},
+    {"id_enum": "GainAuto", "label": "Auto Gain", "type": "enum_bool"},
     {
         "id_float": "AcquisitionFrameRate",
         "label": "Frame Rate (fps)",
@@ -45,29 +43,6 @@ class CameraControlPanel(QWidget):
         self.layout = QFormLayout(self)
         self.layout.setContentsMargins(4, 4, 4, 4)
         self.layout.setSpacing(6)
-
-    # ------------------------------------------------------------------
-    # Helper methods
-    def _slider_to_value(self, sval: int, lo: float, hi: float, log=False) -> float:
-        pos = max(0.0, min(1.0, sval / 100.0))
-        if log and lo > 0 and hi > lo:
-            return lo * (hi / lo) ** pos
-        return lo + pos * (hi - lo)
-
-    def _value_to_slider(self, val: float, lo: float, hi: float, log=False) -> int:
-        if log and val > 0 and lo > 0 and hi > lo:
-            pos = math.log(val / lo) / math.log(hi / lo)
-        else:
-            pos = (val - lo) / (hi - lo) if hi != lo else 0
-        pos = max(0.0, min(1.0, pos))
-        return int(pos * 100)
-
-    def _toggle_float_controls(self, float_id: str, enabled: bool) -> None:
-        ctrl = self.controls.get(float_id)
-        if ctrl and isinstance(ctrl, tuple):
-            spin, slider = ctrl
-            spin.setEnabled(enabled)
-            slider.setEnabled(enabled)
 
     def set_recording_state(self, recording: bool):
         self.is_recording = recording
@@ -123,12 +98,6 @@ class CameraControlPanel(QWidget):
                     )
                     self.layout.addRow(chk)
                     self.controls[spec.get("id_enum")] = chk
-                    tgt = spec.get("auto_target")
-                    if tgt:
-                        chk.stateChanged.connect(
-                            lambda st, fid=tgt: self._toggle_float_controls(fid, st != Qt.Checked)
-                        )
-                        self._toggle_float_controls(tgt, chk.isChecked() == False)
                 else:
                     combo = QComboBox()
                     for entry in enum_node.entries:
@@ -165,43 +134,31 @@ class CameraControlPanel(QWidget):
             step = incr if incr and incr > 0 else (hi - lo) / 100.0
             cur_val = float_node.value
 
-            disp_scale = spec.get("display_scale", 1.0)
-            log_slider = spec.get("log_slider", False)
-
             spin = QDoubleSpinBox()
             spin.setSuffix(f" {spec.get('unit', '')}")
-            spin.setRange(lo * disp_scale, hi * disp_scale)
-            spin.setSingleStep(step * disp_scale)
+            spin.setRange(lo, hi)
+            spin.setSingleStep(step)
             if step < 1.0:
                 dec = max(0, -int(math.floor(math.log10(step))))
             else:
                 dec = 0
             spin.setDecimals(min(dec, 6))
-            spin.setValue(cur_val * disp_scale)
+            spin.setValue(cur_val)
 
             slider = QSlider(Qt.Horizontal)
-            slider.setRange(0, 100)
-            slider.setValue(self._value_to_slider(cur_val, lo, hi, log_slider))
+            scale = 10 ** dec
+            slider.setRange(int(lo * scale), int(hi * scale))
+            slider.setSingleStep(max(1, int(step * scale)))
+            slider.setValue(int(cur_val * scale))
 
             spin.valueChanged.connect(
-                lambda v, s=slider, lo=lo, hi=hi, log=log_slider, sc=disp_scale: s.setValue(
-                    self._value_to_slider(v / sc, lo, hi, log)
-                )
-            )
-            spin.editingFinished.connect(
-                lambda n=float_node, sp=spin, sc=disp_scale: self._set_node_value(
-                    n, sp.value() / sc
+                lambda v, n=float_node, s=slider, sc=scale: (
+                    self._set_node_value(n, float(v)),
+                    s.setValue(int(v * sc)),
                 )
             )
             slider.valueChanged.connect(
-                lambda iv, sp=spin, lo=lo, hi=hi, log=log_slider, sc=disp_scale: sp.setValue(
-                    self._slider_to_value(iv, lo, hi, log) * sc
-                )
-            )
-            slider.sliderReleased.connect(
-                lambda n=float_node, sl=slider, lo=lo, hi=hi, log=log_slider: self._set_node_value(
-                    n, self._slider_to_value(sl.value(), lo, hi, log)
-                )
+                lambda iv, sp=spin, sc=scale: sp.setValue(iv / sc)
             )
 
             row = QWidget()
