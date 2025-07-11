@@ -3,7 +3,11 @@ import logging
 
 # Ensure bundled Thorlabs DLLs are discoverable when running the app
 dll_path = os.path.join(os.path.dirname(__file__), "..", "dlls", "ThorLabs")
-os.add_dll_directory(dll_path)
+if os.path.isdir(dll_path):
+    try:
+        os.add_dll_directory(dll_path)
+    except Exception:
+        pass
 import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
@@ -33,16 +37,22 @@ class ThorlabsCameraThread(QThread):
         self.camera = None
 
     def _init_sdk(self):
+        if self.sdk is not None:
+            # SDK already initialized; avoid double init errors
+            return
         if not THORLABS_AVAILABLE:
             raise RuntimeError("thorlabs_tsi_sdk not installed")
         if self.dll_path:
             try:
                 os.add_dll_directory(self.dll_path)
             except Exception as e:
-                log.warning(f"Failed to add DLL directory '{self.dll_path}': {e}")
+                log.warning(
+                    f"Failed to add DLL directory '{self.dll_path}': {e}"
+                )
         self.sdk = TLCameraSDK()
 
     def run(self):
+        self._stop_requested = False
         try:
             self._init_sdk()
             cams = self.sdk.discover_available_cameras()
