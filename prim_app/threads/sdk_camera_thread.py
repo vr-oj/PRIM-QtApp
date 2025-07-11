@@ -28,6 +28,9 @@ class SDKCameraThread(QThread):
     # Emitted on error: (message, code_as_string)
     error = pyqtSignal(str, str)
 
+    # Emitted when a camera property value changes: (identifier, value)
+    property_updated = pyqtSignal(str, object)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.grabber = None
@@ -46,6 +49,10 @@ class SDKCameraThread(QThread):
 
         # Keep a reference to the sink so we can stop it later
         self._sink = None
+
+        # Store property nodes for live updates
+        self._float_nodes = {}
+        self._enum_nodes = {}
 
     def set_device_info(self, dev_info):
         self._device_info = dev_info
@@ -95,6 +102,22 @@ class SDKCameraThread(QThread):
 
             # ─── Set Default Camera Properties BEFORE Streaming ───────────────
             props = self.grabber.device_property_map
+
+            # Cache nodes for properties we want to monitor
+            for name in ("ExposureTime", "Gain", "AcquisitionFrameRate"):
+                try:
+                    node = props.find_float(name)
+                    if node:
+                        self._float_nodes[name] = node
+                except Exception:
+                    pass
+            for name in ("ExposureAuto", "GainAuto"):
+                try:
+                    node = props.find_enumeration(name)
+                    if node:
+                        self._enum_nodes[name] = node
+                except Exception:
+                    pass
             try:
                 exp_prop = props.find_float("ExposureTime")
                 exp_prop.value = 10000.0  # Default to 10ms
@@ -195,6 +218,18 @@ class SDKCameraThread(QThread):
             # ─── Signal “grabber_ready” so UI can enable controls ────────────────
             self.grabber_ready.emit()
 
+            # Emit initial property values
+            for name, node in self._float_nodes.items():
+                try:
+                    self.property_updated.emit(name, float(node.value))
+                except Exception:
+                    pass
+            for name, node in self._enum_nodes.items():
+                try:
+                    self.property_updated.emit(name, node.value)
+                except Exception:
+                    pass
+
             # ─── Build QueueSink requesting Mono8 (fallback to native PF if needed)─
             try:
                 self._sink = self.ic4.QueueSink(
@@ -268,6 +303,18 @@ class SDKCameraThread(QThread):
 
             # Emit to the UI
             self.frame_ready.emit(qimg, buf)
+
+            # Also emit current property values
+            for name, node in self._float_nodes.items():
+                try:
+                    self.property_updated.emit(name, float(node.value))
+                except Exception:
+                    pass
+            for name, node in self._enum_nodes.items():
+                try:
+                    self.property_updated.emit(name, node.value)
+                except Exception:
+                    pass
 
         except Exception as e:
             log.error(

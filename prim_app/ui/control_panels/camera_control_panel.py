@@ -32,6 +32,9 @@ PROPERTY_SPECS = [
     {"id_enum": "PixelFormat", "label": "Pixel Format"},
 ]
 
+# Map auto properties to the float property they control
+AUTO_MAP = {"ExposureAuto": "ExposureTime", "GainAuto": "Gain"}
+
 
 class CameraControlPanel(QWidget):
     def __init__(self, parent=None):
@@ -39,6 +42,9 @@ class CameraControlPanel(QWidget):
         self.grabber = None
         self.is_recording = False
         self.controls = {}
+        self.blocks = {}
+        self.scales = {}
+        self.nodes = {}
 
         self.layout = QFormLayout(self)
         self.layout.setContentsMargins(4, 4, 4, 4)
@@ -64,6 +70,32 @@ class CameraControlPanel(QWidget):
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
+
+    def update_property(self, ident: str, value):
+        ctrl = self.controls.get(ident)
+        if ctrl is None:
+            return
+        if isinstance(ctrl, tuple):
+            spin, slider = ctrl
+            block = self.blocks.get(ident, {"val": False})
+            scale = self.scales.get(ident, 1)
+            self.blocks[ident] = block
+            block["val"] = True
+            try:
+                spin.setValue(float(value))
+                slider.setValue(int(float(value) * scale))
+            finally:
+                block["val"] = False
+        elif isinstance(ctrl, QCheckBox):
+            checked = value in ("Continuous", "On", True, 1, "True")
+            ctrl.blockSignals(True)
+            ctrl.setChecked(checked)
+            ctrl.blockSignals(False)
+            float_name = AUTO_MAP.get(ident)
+            if float_name and float_name in self.controls:
+                sp, sl = self.controls[float_name]
+                sp.setEnabled(not checked)
+                sl.setEnabled(not checked)
 
     def _on_grabber_ready(self):
         log.info("CameraControlPanel: _on_grabber_ready() called")
@@ -91,23 +123,33 @@ class CameraControlPanel(QWidget):
                 if spec.get("type") == "enum_bool":
                     chk = QCheckBox(spec["label"])
                     chk.setChecked(enum_node.value in ("Continuous", "On", True))
-                    chk.stateChanged.connect(
-                        lambda st, n=enum_node: self._set_node_value(
-                            n, "Continuous" if st == Qt.Checked else "Off"
-                        )
-                    )
+
+                    def _auto_changed(st, n=enum_node, ident=spec.get("id_enum")):
+                        self._set_node_value(n, "Continuous" if st == Qt.Checked else "Off")
+                        float_name = AUTO_MAP.get(ident)
+                        if float_name and float_name in self.controls:
+                            sp, sl = self.controls[float_name]
+                            enabled = st != Qt.Checked
+                            sp.setEnabled(enabled)
+                            sl.setEnabled(enabled)
+
+                    chk.stateChanged.connect(_auto_changed)
                     self.layout.addRow(chk)
                     self.controls[spec.get("id_enum")] = chk
+                    self.nodes[spec.get("id_enum")] = enum_node
                 else:
                     combo = QComboBox()
                     for entry in enum_node.entries:
                         combo.addItem(entry.name)
                     combo.setCurrentText(enum_node.value)
-                    combo.currentTextChanged.connect(
-                        lambda v, n=enum_node: self._set_node_value(n, v)
-                    )
+
+                    def _combo_changed(v, n=enum_node):
+                        self._set_node_value(n, v)
+
+                    combo.currentTextChanged.connect(_combo_changed)
                     self.layout.addRow(QLabel(spec["label"]), combo)
                     self.controls[spec.get("id_enum")] = combo
+                    self.nodes[spec.get("id_enum")] = enum_node
                 continue
 
             float_node = None
@@ -151,15 +193,31 @@ class CameraControlPanel(QWidget):
             slider.setSingleStep(max(1, int(step * scale)))
             slider.setValue(int(cur_val * scale))
 
-            spin.valueChanged.connect(
-                lambda v, n=float_node, s=slider, sc=scale: (
-                    self._set_node_value(n, float(v)),
-                    s.setValue(int(v * sc)),
-                )
-            )
-            slider.valueChanged.connect(
-                lambda iv, sp=spin, sc=scale: sp.setValue(iv / sc)
-            )
+            block = {"val": False}
+
+            def _spin_changed(v, n=float_node, s=slider, sc=scale, b=block):
+                if b["val"]:
+                    return
+                b["val"] = True
+                self._set_node_value(n, float(v))
+                s.setValue(int(v * sc))
+                b["val"] = False
+
+            def _slider_changed(iv, sp=spin, sc=scale, n=float_node, b=block):
+                if b["val"]:
+                    return
+                b["val"] = True
+                val = iv / sc
+                sp.setValue(val)
+                self._set_node_value(n, float(val))
+                b["val"] = False
+
+            spin.valueChanged.connect(_spin_changed)
+            slider.valueChanged.connect(_slider_changed)
+
+            self.blocks[spec.get("id_float")] = block
+            self.scales[spec.get("id_float")] = scale
+            self.nodes[spec.get("id_float")] = float_node
 
             row = QWidget()
             hl = QHBoxLayout(row)
@@ -168,4 +226,13 @@ class CameraControlPanel(QWidget):
             hl.addWidget(spin)
             self.layout.addRow(QLabel(spec["label"]), row)
             self.controls[spec.get("id_float")] = (spin, slider)
+
+        # Disable manual controls if auto is already enabled
+        for auto_ident, float_ident in AUTO_MAP.items():
+            chk = self.controls.get(auto_ident)
+            if isinstance(chk, QCheckBox) and chk.isChecked():
+                ctrl = self.controls.get(float_ident)
+                if ctrl:
+                    ctrl[0].setEnabled(False)
+                    ctrl[1].setEnabled(False)
 
