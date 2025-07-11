@@ -39,6 +39,21 @@ if not module_log.handlers:
     module_log.addHandler(handler)
     module_log.setLevel(logging.INFO)
 
+# Add Thorlabs SDK DLL directory on Windows before importing thorlabs_tsi_sdk
+if os.name == "nt" and hasattr(os, "add_dll_directory"):
+    dll_dir = os.path.join(
+        os.path.dirname(__file__),
+        "thorlabs",
+        "Python Toolkit",
+        "dlls",
+        "64_lib",
+    )
+    if os.path.isdir(dll_dir):
+        os.add_dll_directory(dll_dir)
+        module_log.info(f"Added Thorlabs DLL directory: {dll_dir}")
+    else:
+        module_log.warning(f"Thorlabs DLL directory not found: {dll_dir}")
+
 
 # === load_app_setting / save_app_setting stubs if missing ===
 try:
