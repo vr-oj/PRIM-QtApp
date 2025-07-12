@@ -6,7 +6,7 @@ import numpy as np
 
 from utils.config import DEFAULT_FPS
 
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QImage
 
 log = logging.getLogger(__name__)
@@ -332,6 +332,31 @@ class SDKCameraThread(QThread):
     def sink_disconnected(self, sink) -> None:
         # Called when the sink is torn down—no action needed
         pass
+
+    @pyqtSlot()
+    def snap(self):
+        """Capture a single frame on demand and emit :pyattr:`frame_ready`."""
+        if not self.grabber:
+            log.warning("snap() called but grabber is not initialized")
+            return
+        try:
+            buf = self.grabber.snap_image()
+            if buf is None:
+                return
+            arr = buf.numpy_wrap()
+            if arr.dtype != np.uint8:
+                max_val = float(arr.max()) if arr.max() > 0 else 1.0
+                arr8 = (arr.astype(np.float32) * (255.0 / max_val)).astype(np.uint8)
+            else:
+                arr8 = arr
+            h, w = arr8.shape[:2]
+            qimg = QImage(arr8.data, w, h, arr8.strides[0], QImage.Format_Grayscale8)
+            self.frame_ready.emit(qimg.copy(), buf)
+        except Exception as e:
+            log.exception("SDKCameraThread.snap failed")
+            code_enum = getattr(e, "code", None)
+            code_str = str(code_enum) if code_enum else ""
+            self.error.emit(str(e), code_str)
 
     def stop(self):
         """

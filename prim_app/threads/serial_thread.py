@@ -184,6 +184,10 @@ class SerialThread(QThread):
             log.warning("Serial thread not running → cannot send command.")
             self.error_occurred.emit("Cannot send: Serial disconnected.")
 
+    def request_pressure_sample(self):
+        """Convenience wrapper to request a single pressure reading."""
+        self.send_command("P")
+
     def stop(self):
         """
         Ask the thread to exit cleanly. If it doesn't within 2 seconds, force‐terminate.

@@ -9,6 +9,8 @@ import csv
 import json
 from datetime import datetime
 import importlib
+import time
+from collections import deque
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -234,6 +236,15 @@ class MainWindow(QMainWindow):
         self.lbl_cam_connection = None
         self.lbl_cam_frame = None
         self.lbl_cam_resolution = None
+
+        # Synchronized acquisition
+        self.acq_timer = None
+        self._acq_start_time = 0.0
+        self._frame_counter = 0
+        self._timestamp_queue = deque()
+        self._index_queue = deque()
+        self._frame_queue = deque()
+        self._pressure_queue = deque()
 
         # ─── CREATE THE RECORDER THREAD + WORKER ─────────────────────────────────
         # 1) Instantiate the thread object:
@@ -514,6 +525,7 @@ class MainWindow(QMainWindow):
         if self.camera_thread and self.camera_thread.isRunning():
             self.camera_thread.stop()
             self.camera_thread = None
+            self.stop_synchronized_acquisition()
             self._reset_camera_ui()
             return
 
@@ -537,6 +549,7 @@ class MainWindow(QMainWindow):
         # Common signal hookups
         self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
         self.camera_thread.frame_ready.connect(self._update_camera_info)
+        self.camera_thread.frame_ready.connect(self._handle_camera_frame)
 
         for extra in back.get("signals", []):
             getattr(self.camera_thread, extra).connect(self._on_grabber_ready)
@@ -600,6 +613,12 @@ class MainWindow(QMainWindow):
 
         if self.lbl_cam_connection.text() != "Connected":
             self.lbl_cam_connection.setText("Connected")
+
+    @pyqtSlot(QImage, object)
+    def _handle_camera_frame(self, qimg: QImage, raw):
+        """Buffer frames until a pressure sample arrives."""
+        self._frame_queue.append((qimg, raw))
+        self._try_emit_record()
 
     @pyqtSlot(str, str)
     def _on_camera_error(self, msg: str, code: str):
@@ -1022,25 +1041,9 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(int, float, float)
     def _handle_new_serial_data(self, idx: int, t: float, p: float):
-        """
-        Called whenever SerialThread emits data_ready(idx, t, p).
-        Pushes new data into TopControlPanel and the live plot.
-        """
-        # 1) Update TopControlPanel (frame count, device time, pressure)
-        self.top_ctrl.update_prim_data(idx, t, p)
-
-        # 2) Read the auto-scale checkboxes from PlotControlPanel
-        ax = self.plot_control_panel.auto_x_cb.isChecked()
-        ay = self.plot_control_panel.auto_y_cb.isChecked()
-
-        # 3) Send the new sample to the PressurePlotWidget
-        self.pressure_plot_widget.update_plot(t, p, ax, ay)
-
-        # 4) Also log it to the console dock if visible
-        if self.dock_console.isVisible():
-            self.console_out_textedit.append(
-                f"PRIM Data: Idx={idx}, Time={t:.3f}s, P={p:.2f}"
-            )
+        """Handle a pressure sample from the SerialThread."""
+        self._pressure_queue.append(p)
+        self._try_emit_record()
 
     # ──────────────────────────────────────────────────────────────
     # Recording Management
@@ -1075,9 +1078,7 @@ class MainWindow(QMainWindow):
             self._on_recorder_ready
         )
 
-        # 8) Hook camera + serial into the worker:
-        self._serial_thread.data_ready.connect(self._recorder_worker.append_pressure)
-        self.camera_thread.frame_ready.connect(self._recorder_worker.append_frame)
+        # 8) Frames and pressure will be routed through _try_emit_record
 
         # 9) Kick off the recording thread:
         self._recorder_thread.start()
@@ -1095,12 +1096,8 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _on_recorder_ready(self):
-        """Send the start command to the Arduino when recording setup is done."""
-        try:
-            if self._serial_thread:
-                self._serial_thread.send_command("G")
-        except Exception:
-            log.exception("Failed to send start command to Arduino")
+        """Begin the synchronized acquisition loop once files are ready."""
+        self.start_synchronized_acquisition(DEFAULT_FPS)
 
     @pyqtSlot()
     def _on_stop_recording(self):
@@ -1112,27 +1109,8 @@ class MainWindow(QMainWindow):
         if not self._recorder_worker or not self._recorder_thread:
             return
 
-        # Send stop command to the Arduino before disconnecting
-        try:
-            if self._serial_thread:
-                self._serial_thread.send_command("S")
-        except Exception:
-            log.exception("Failed to send stop command to Arduino")
-
-        # 1) Disconnect signals so no new data is queued
-        try:
-            self._serial_thread.data_ready.disconnect(
-                self._recorder_worker.append_pressure
-            )
-        except Exception:
-            pass
-
-        try:
-            self.camera_thread.frame_ready.disconnect(
-                self._recorder_worker.append_frame
-            )
-        except Exception:
-            pass
+        # Stop acquisition timer
+        self.stop_synchronized_acquisition()
 
         # 2) When the worker actually finishes, clean up our Python references.
         def _cleanup_recorder():
@@ -1182,9 +1160,72 @@ class MainWindow(QMainWindow):
         self.start_recording_action.setEnabled(can_start)
         self.stop_recording_action.setEnabled(can_stop)
 
+    # ------------------------------------------------------------------
+    # Synchronized acquisition control
+    # ------------------------------------------------------------------
+    def start_synchronized_acquisition(self, fps=DEFAULT_FPS):
+        interval_ms = int(1000 / fps)
+        self._acq_start_time = time.perf_counter()
+        self._frame_counter = 0
+        self._timestamp_queue.clear()
+        self._index_queue.clear()
+        self._frame_queue.clear()
+        self._pressure_queue.clear()
+
+        self.acq_timer = QTimer(self)
+        self.acq_timer.timeout.connect(self._acq_iteration)
+        self.acq_timer.start(interval_ms)
+        log.info(f"Synchronized acquisition started at {fps} FPS")
+
+    def stop_synchronized_acquisition(self):
+        if self.acq_timer:
+            self.acq_timer.stop()
+            self.acq_timer.deleteLater()
+            self.acq_timer = None
+            log.info("Synchronized acquisition stopped")
+
+    def _acq_iteration(self):
+        self._frame_counter += 1
+        ts = time.perf_counter() - self._acq_start_time
+        self._timestamp_queue.append(ts)
+        self._index_queue.append(self._frame_counter)
+        if self.camera_thread:
+            QMetaObject.invokeMethod(self.camera_thread, "snap", Qt.QueuedConnection)
+        if self._serial_thread:
+            self._serial_thread.request_pressure_sample()
+
+    def _try_emit_record(self):
+        while (
+            self._frame_queue
+            and self._pressure_queue
+            and self._timestamp_queue
+            and self._index_queue
+        ):
+            qimg, raw = self._frame_queue.popleft()
+            pressure = self._pressure_queue.popleft()
+            ts = self._timestamp_queue.popleft()
+            idx = self._index_queue.popleft()
+
+            # Update UI
+            self.top_ctrl.update_prim_data(idx, ts, pressure)
+            ax = self.plot_control_panel.auto_x_cb.isChecked()
+            ay = self.plot_control_panel.auto_y_cb.isChecked()
+            self.pressure_plot_widget.update_plot(ts, pressure, ax, ay)
+            if self.dock_console.isVisible():
+                self.console_out_textedit.append(
+                    f"PRIM Data: Idx={idx}, Time={ts:.3f}s, P={pressure:.2f}"
+                )
+
+            if self._recorder_worker:
+                self._recorder_worker.append_pressure(idx, ts, pressure)
+                self._recorder_worker.append_frame(qimg, raw)
+
     # ─── Window Close Cleanup ──────────────────────────────────────────────────
     def closeEvent(self, event):
         log.info("MainWindow closeEvent triggered.")
+
+        # Ensure acquisition timer is stopped
+        self.stop_synchronized_acquisition()
 
         # 1) If RecordingManager is still running, request stop_recording() and wait.
         if self._recorder_worker and self._recorder_thread:
