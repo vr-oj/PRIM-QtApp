@@ -11,7 +11,12 @@ a = Analysis(
         ('prim_app/ui/style.qss', 'prim_app/ui'),
         ('prim_app/configs/*.cfg', 'prim_app/configs'),
     ],
-    hiddenimports=['imagingcontrol4'],
+    hiddenimports=[
+        'imagingcontrol4',
+        'prim_app.controllers.arduino_serial',
+        'prim_app.controllers.ic4_camera',
+        'prim_app.sync_manager',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

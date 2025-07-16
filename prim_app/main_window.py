@@ -78,6 +78,7 @@ from ui.control_panels.camera_control_panel import CameraControlPanel
 from ui.control_panels.top_control_panel import TopControlPanel
 from ui.control_panels.plot_control_panel import PlotControlPanel
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
+from sync_manager import SyncManager
 
 from threads.serial_thread import SerialThread
 from threads.sdk_camera_thread import SDKCameraThread
@@ -245,6 +246,7 @@ class MainWindow(QMainWindow):
         self._index_queue = deque()
         self._frame_queue = deque()
         self._pressure_queue = deque()
+        self.sync_mgr = None
 
         # ─── CREATE THE RECORDER THREAD + WORKER ─────────────────────────────────
         # 1) Instantiate the thread object:
@@ -1160,28 +1162,44 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def start_synchronized_acquisition(self, fps=DEFAULT_FPS):
         interval_ms = int(1000 / fps)
-        self._acq_start_time = time.perf_counter()
         self._frame_counter = 0
         self._timestamp_queue.clear()
         self._index_queue.clear()
         self._frame_queue.clear()
         self._pressure_queue.clear()
 
+        if config.MASTER_CLOCK_MODE:
+            self.sync_mgr = SyncManager()
+            self.sync_period_ms = interval_ms
+            start_interval = 0
+        else:
+            self._acq_start_time = time.perf_counter()
+            self.sync_mgr = None
+            self.sync_period_ms = interval_ms
+            start_interval = interval_ms
+
         self.acq_timer = QTimer(self)
         self.acq_timer.timeout.connect(self._acq_iteration)
-        self.acq_timer.start(interval_ms)
-        log.info(f"Synchronized acquisition started at {fps} FPS")
+        self.acq_timer.start(start_interval)
+        log.info(
+            f"Synchronized acquisition started at {fps} FPS (master={config.MASTER_CLOCK_MODE})"
+        )
 
     def stop_synchronized_acquisition(self):
         if self.acq_timer:
             self.acq_timer.stop()
             self.acq_timer.deleteLater()
             self.acq_timer = None
-            log.info("Synchronized acquisition stopped")
+        self.sync_mgr = None
+        log.info("Synchronized acquisition stopped")
 
     def _acq_iteration(self):
+        if config.MASTER_CLOCK_MODE and self.sync_mgr:
+            self.sync_mgr.wait_next_period(self.sync_period_ms)
+            ts = self.sync_mgr.get_time_ns() / 1_000_000_000
+        else:
+            ts = time.perf_counter() - self._acq_start_time
         self._frame_counter += 1
-        ts = time.perf_counter() - self._acq_start_time
         self._timestamp_queue.append(ts)
         self._index_queue.append(self._frame_counter)
         if self.camera_thread:

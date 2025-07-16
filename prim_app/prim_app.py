@@ -6,6 +6,7 @@ import re
 import traceback
 import logging
 import importlib
+import argparse
 
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication
@@ -121,7 +122,21 @@ def load_processed_qss(path):
         return ""
 
 
+def _parse_cli_args():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
+        "--master-clock",
+        action="store_true",
+        help="Run PRIMAcquisition as the master clock controller",
+    )
+    args, remaining = parser.parse_known_args()
+    sys.argv = [sys.argv[0]] + remaining
+    return args.master_clock
+
+
 def main_app_entry():
+    use_master_clock = _parse_cli_args()
+    config.MASTER_CLOCK_MODE = use_master_clock
     # ─── Set Default OpenGL 3.3 Core Profile ─────────────────────────────
     fmt = QSurfaceFormat()
     fmt.setRenderableType(QSurfaceFormat.OpenGL)

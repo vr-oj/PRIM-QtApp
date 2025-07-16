@@ -110,6 +110,8 @@
    python prim_app.py --master-clock
    ```
    This mode makes the application the master clock for camera and Arduino.
+   You can also set the environment variable `PRIM_MASTER_CLOCK=1` before
+   launching to enable the same behavior.
 
 ---
 
@@ -182,8 +184,9 @@ pyinstaller PRIMAcquisition.spec
 ```
 
 `PRIMAcquisition.spec` bundles the installed `imagingcontrol4` package and the
-configuration files found in `prim_app/configs`. µManager files are not
-included; install additional SDKs separately if needed.
+configuration files found in `prim_app/configs`. Master clock modules are
+included automatically. µManager files are not included; install additional
+SDKs separately if needed.
 
 ---
 

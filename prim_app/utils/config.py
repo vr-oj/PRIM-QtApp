@@ -70,3 +70,8 @@ PLOT_DEFAULT_Y_MAX = 30  # Typical pressure range in mmHg
 APP_CONFIG_DIR = QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)
 CAMERA_PROFILES_DIR = os.path.join(APP_CONFIG_DIR, "camera_profiles")
 QDir().mkpath(CAMERA_PROFILES_DIR)
+
+# ---------------------------------------------------------------------------
+# Master clock mode flag
+# ---------------------------------------------------------------------------
+MASTER_CLOCK_MODE = os.environ.get("PRIM_MASTER_CLOCK", "0") == "1"
