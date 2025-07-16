@@ -78,6 +78,7 @@ from ui.control_panels.camera_control_panel import CameraControlPanel
 from ui.control_panels.top_control_panel import TopControlPanel
 from ui.control_panels.plot_control_panel import PlotControlPanel
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
+from utils.sync_manager import SyncManager
 
 from threads.serial_thread import SerialThread
 from threads.sdk_camera_thread import SDKCameraThread
@@ -245,6 +246,10 @@ class MainWindow(QMainWindow):
         self._index_queue = deque()
         self._frame_queue = deque()
         self._pressure_queue = deque()
+
+        # Master clock
+        self.master_timer = None
+        self.master_btn = None
 
         # ─── CREATE THE RECORDER THREAD + WORKER ─────────────────────────────────
         # 1) Instantiate the thread object:
@@ -769,6 +774,11 @@ class MainWindow(QMainWindow):
         if hasattr(self, "stop_recording_action"):
             tb.addAction(self.stop_recording_action)
 
+        self.master_btn = QPushButton("Master Clock: OFF")
+        self.master_btn.setCheckable(True)
+        self.master_btn.clicked.connect(self._toggle_master_clock)
+        tb.addWidget(self.master_btn)
+
     def _build_status_bar(self):
         sb = self.statusBar()
         self.app_session_time_label = QLabel("Session: 00:00:00")
@@ -1035,7 +1045,7 @@ class MainWindow(QMainWindow):
         self._refresh_recording_button_states()
 
     @pyqtSlot(int, float, float)
-    def _handle_new_serial_data(self, idx: int, t: float, p: float):
+    def _handle_new_serial_data(self, ts: int, t: float, p: float):
         """Handle a pressure sample from the SerialThread."""
         self._pressure_queue.append(p)
         self._try_emit_record()
@@ -1154,6 +1164,32 @@ class MainWindow(QMainWindow):
 
         self.start_recording_action.setEnabled(can_start)
         self.stop_recording_action.setEnabled(can_stop)
+
+    # ------------------------------------------------------------------
+    # Master clock control
+    # ------------------------------------------------------------------
+    def _toggle_master_clock(self, checked: bool):
+        if checked:
+            self.master_btn.setText("Master Clock: ON")
+            if self._serial_thread:
+                self._serial_thread.send_command("MASTER_ON")
+            if self.camera_thread and hasattr(self.camera_thread, "start"):
+                pass
+            SyncManager().start(100, self._on_master_tick)
+        else:
+            self.master_btn.setText("Master Clock: OFF")
+            SyncManager().stop()
+            if self._serial_thread:
+                self._serial_thread.send_command("MASTER_OFF")
+            if self.camera_thread and hasattr(self.camera_thread, "stop"):
+                pass
+
+    def _on_master_tick(self):
+        t0 = SyncManager.now()
+        if self._serial_thread:
+            self._serial_thread.send_command("TICK")
+        if self.camera_thread:
+            QMetaObject.invokeMethod(self.camera_thread, "snap", Qt.QueuedConnection)
 
     # ------------------------------------------------------------------
     # Synchronized acquisition control
