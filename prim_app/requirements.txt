@@ -19,6 +19,7 @@ pyserial==3.5
 python-dateutil==2.8.2
 six==1.16.0
 tifffile>=2023.0
-andor3
-pymmcore-plus
-thorlabs_tsi_sdk
+# Optional camera SDKs
+# andor3
+# pymmcore-plus
+# thorlabs_tsi_sdk

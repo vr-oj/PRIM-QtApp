@@ -21,6 +21,7 @@ PyYAML==6.0.2
 serial==0.0.97
 six==1.17.0
 tifffile==2025.6.11
-andor3
-pymmcore-plus
-thorlabs_tsi_sdk
+# Optional camera SDKs
+# andor3
+# pymmcore-plus
+# thorlabs_tsi_sdk
