@@ -93,6 +93,24 @@
    - Download and install the TIS IC4 SDK for your camera. Ensure that the GenTL Producer is configured for your DMK camera.  
    - On Windows, verify that `imagingcontrol4` Python module can import successfully if you plan to use DMK cameras.
 
+## Getting Started
+
+1. **Hardware Wiring**
+   - Connect the PRIM Arduino's `CamTrig` output to the camera trigger input.
+   - Wire a TTL line from the application to Arduino digital pin 2 (`EXT_TRIG_PIN`).
+   - Pressure transducer wiring remains the same via ADS1115.
+
+2. **Software Prerequisites**
+   - Python 3.8–10 with `pyserial`, `PyQt5`, `tifffile`, and `imagingcontrol4`.
+   - Install the IC4 SDK if using DMK cameras.
+
+3. **Launching in Master Clock Mode**
+   ```bash
+   cd prim_app
+   python prim_app.py --master-clock
+   ```
+   This mode makes the application the master clock for camera and Arduino.
+
 ---
 
 ## Running the App

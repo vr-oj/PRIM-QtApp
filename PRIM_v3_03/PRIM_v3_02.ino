@@ -80,11 +80,16 @@ void fPinCS() {
 
 /*Lighting Pins and camera*/
 #define CamTrig 13     //attach + to J13 jumper and - to GND.
+#define EXT_TRIG_PIN 2  //external trigger input from PRIMAcquisition
 #define redPin A2         //attach + to JA2 jumper and - to GND.
 #define bluePin 1        //attach + to JA5 jumper and - to GND.
 #define whitePin A5        //attach + to J1  jumper and - to GND.
 char lights;
 static int interval = 5;         //time for the camera to trigger high
+
+void IRAM_ATTR onExternalTrigger() {
+  ext_triggered = true;
+}
 
 /*Pressure sensor calibration an setup*/
 int txdx1 = 0;                      //identity of first transducer
@@ -129,6 +134,7 @@ char diagnostic[32];
 double avg;
 double currentTime;
 bool UseStartTime = true;
+volatile bool ext_triggered = false;
 char receivedChar;
 bool newData;
 
@@ -141,6 +147,7 @@ void setup() {
   pinMode(bluePin, OUTPUT);
   pinMode(whitePin, OUTPUT);
   pinMode(CamTrig, OUTPUT);
+  pinMode(EXT_TRIG_PIN, INPUT_PULLUP);
   pinMode(PumpTrig, OUTPUT);
   digitalWrite(CamTrig, LOW);
   digitalWrite(redPin, LOW);
@@ -150,7 +157,8 @@ void setup() {
   pinMode(pinDC, INPUT_PULLUP);
   pinMode(pinCS, INPUT_PULLUP);
   attachInterrupt(pinDC, fPinDC, CHANGE);     //Sets interrupt for rotary encoder so that it works with above functions;
-  attachInterrupt(pinCS, fPinCS, CHANGE);     //RISING for old RE; CHANGE for blue one. 
+  attachInterrupt(pinCS, fPinCS, CHANGE);     //RISING for old RE; CHANGE for blue one.
+  attachInterrupt(digitalPinToInterrupt(EXT_TRIG_PIN), onExternalTrigger, RISING);
   maskA = digitalPinToBitMask(pinDC);
   maskB = digitalPinToBitMask(pinCS);
   maskAB = maskA | maskB;
@@ -612,14 +620,34 @@ void showNewData() {
     runState = 0;
     encoderPos = 0;
   }
+  else if (receivedChar == 'Y') {
+    unsigned long t = micros();
+    Serial.print("SYNC,");
+    Serial.println(t);
+  }
  newData = false;
- }
+}
 }
 
 /*******************************Core Functions *******************************/
 void isRunning() {
   recvOneChar();
   showNewData();
+  if (ext_triggered) {
+    ext_triggered = false;
+    currentTime = micros() / 1000000.0;
+    averagingPressure();
+    dtostrf(avg, 5, 2, pressure);
+    dtostrf(count, 5, 0, frameCount);
+    dtostrf(currentTime, 8, 2, time);
+    Serial.print(count);
+    Serial.print(", ");
+    Serial.print(currentTime);
+    Serial.print(", ");
+    Serial.println(avg);
+    count++;
+    return;
+  }
   if (UseStartTime == true) {
     startMillis = millis();
     previousMillis = startMillis;
