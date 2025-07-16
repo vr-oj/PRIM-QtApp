@@ -9,7 +9,6 @@ a = Analysis(
         ('.primenv/Lib/site-packages/imagingcontrol4/*', 'imagingcontrol4'),
         ('prim_app/ui/icons/*', 'prim_app/ui/icons'),
         ('prim_app/ui/style.qss', 'prim_app/ui'),
-        ('prim_app/micromanager/**/*', 'prim_app/micromanager'),
         ('prim_app/configs/*.cfg', 'prim_app/configs'),
     ],
     hiddenimports=['imagingcontrol4'],
