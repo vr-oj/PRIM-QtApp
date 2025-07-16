@@ -164,23 +164,23 @@ class SDKCameraThread(QThread):
                 except Exception as e:
                     log.warning(f"SDKCameraThread: Could not set resolution/PF: {e}")
 
-            # ─── Disable Auto features to keep manual settings stable ─────────
+            # ─── Enable Auto features so camera self-adjusts by default ──────
 
             try:
                 ae_node = self.grabber.device_property_map.find_enumeration(
                     "ExposureAuto"
                 )
                 if ae_node:
-                    ae_node.value = "Off"
-                    log.info("SDKCameraThread: Set ExposureAuto = Off")
+                    ae_node.value = "Continuous"
+                    log.info("SDKCameraThread: Set ExposureAuto = Continuous")
             except Exception as e:
                 log.warning(f"SDKCameraThread: Could not set ExposureAuto: {e}")
 
             try:
                 ag_node = self.grabber.device_property_map.find_enumeration("GainAuto")
                 if ag_node:
-                    ag_node.value = "Off"
-                    log.info("SDKCameraThread: Set GainAuto = Off")
+                    ag_node.value = "Continuous"
+                    log.info("SDKCameraThread: Set GainAuto = Continuous")
             except Exception as e:
                 log.warning(f"SDKCameraThread: Could not set GainAuto: {e}")
 
