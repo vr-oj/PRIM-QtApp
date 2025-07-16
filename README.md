@@ -206,14 +206,18 @@ PRIMAcquisition/
 
 ---
 
-## Arduino Firmware (PRIM_v3_01)
+## Arduino Firmware (PRIM_v3_04_master_clock)
 
-- The Arduino sketch (PRIM_v3_01.ino) reads a pressure transducer via an ADS ADC, averages samples, and prints lines over serial at 115200 baud in the format:  
+- The Arduino sketch (`PRIM_v3_04_master_clock.ino`) reads a pressure transducer via an ADS1115 and prints lines over serial at 115200 baud in the format:
   ```
-  <frame_index>, <elapsed_time_s>, <pressure_value>
-  ```  
-- Every `startup.timeDelay` milliseconds, the Arduino pulses its `CamTrig` pin to trigger exactly one camera frame (hardware trigger).  
+  <arduino_microseconds>,<pressure_value>
+  ```
+- Every `startup.timeDelay` milliseconds, the Arduino pulses its `CamTrig` pin to trigger one camera frame when running autonomously.
 - It also toggles `PumpTrig` HIGH/LOW to control an external pump via a relay or transistor.
+- **Master mode commands**:
+  - `MASTER_ON` – switch to triggered-sampling mode.
+  - `MASTER_OFF` – return to normal autonomous sampling.
+  - `TICK` – when in master mode, take one sample immediately and return a data line.
 
 ---
 
