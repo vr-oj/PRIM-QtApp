@@ -375,14 +375,9 @@ class MainWindow(QMainWindow):
         self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
         info_layout.addRow("", self.btn_start_camera)
 
-        if self.mm_available:
-            self.mm_info_label = QLabel(
-                "Place your .cfg in 'configs' or choose Load µManager Config File."
-            )
-            self.mm_info_label.setWordWrap(True)
-            info_layout.addRow("", self.mm_info_label)
+        
 
-        self.camera_tabs.addTab(info_tab, "Info")
+        self.camera_tabs.addTab(info_tab, "Camera")
 
         # Controls Tab
         controls_tab = QWidget()
