@@ -13,9 +13,7 @@ from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
     QWidget,
-    QHBoxLayout,
     QVBoxLayout,
-    QSplitter,
     QFormLayout,
     QDockWidget,
     QTextEdit,
@@ -145,7 +143,6 @@ class MainWindow(QMainWindow):
         self._set_initial_control_states()
 
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
-        QTimer.singleShot(50, self._set_initial_splitter_sizes)
         log.info("MainWindow initialized.")
         self.showMaximized()
 
@@ -277,24 +274,23 @@ class MainWindow(QMainWindow):
         main_vlay.addWidget(top_row_widget, stretch=0)
 
         # ─── Bottom Row ───────────────────────────────────────────────────
-        self.bottom_split = QSplitter(Qt.Horizontal)
-        self.bottom_split.setChildrenCollapsible(False)
+        bottom_row_widget = QWidget()
+        bottom_row_layout = QHBoxLayout(bottom_row_widget)
+        bottom_row_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_row_layout.setSpacing(6)
 
         # Left: live viewfinder
         self.camera_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.bottom_split.addWidget(self.camera_widget)
+        bottom_row_layout.addWidget(self.camera_widget, stretch=1)
 
         # Right: live plot
         self.pressure_plot_widget = PressurePlotWidget(self)
         self.pressure_plot_widget.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Expanding
         )
-        self.bottom_split.addWidget(self.pressure_plot_widget)
+        bottom_row_layout.addWidget(self.pressure_plot_widget, stretch=1)
 
-        self.bottom_split.setStretchFactor(0, 1)
-        self.bottom_split.setStretchFactor(1, 1)
-
-        main_vlay.addWidget(self.bottom_split, stretch=1)
+        main_vlay.addWidget(bottom_row_widget, stretch=1)
 
         # ─── Wire Up PlotControlPanel → PressurePlotWidget ────────────────
         if hasattr(self.pressure_plot_widget, "set_auto_scale_x"):
@@ -706,14 +702,6 @@ class MainWindow(QMainWindow):
                 )
         except Exception:
             log.exception("Failed to send stop pump command")
-
-    def _set_initial_splitter_sizes(self):
-        if self.bottom_split:
-            w = self.bottom_split.width()
-            if w > 0:
-                self.bottom_split.setSizes([int(w * 0.6), int(w * 0.4)])
-            else:
-                QTimer.singleShot(100, self._set_initial_splitter_sizes)
 
     def _set_initial_control_states(self):
         if hasattr(self, "start_recording_action"):
