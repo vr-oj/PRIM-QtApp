@@ -108,14 +108,7 @@ class CameraControlPanel(QWidget):
             min_val = prop.minimum
             max_val = prop.maximum
             cur_val = prop.value
-            step = 0.1  # Default fallback
-
-            try:
-                step = prop.increment
-                if step <= 0:
-                    raise ValueError()
-            except Exception:
-                step = (max_val - min_val) / 100.0
+            step = (max_val - min_val) / 100.0
 
             spinbox.setRange(min_val, max_val)
             spinbox.setSingleStep(step)
