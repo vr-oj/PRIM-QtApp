@@ -72,6 +72,7 @@ from ui.canvas.qtcamera_widget import QtCameraWidget
 from ui.control_panels.camera_control_panel import CameraControlPanel
 from ui.control_panels.top_control_panel import TopControlPanel
 from ui.control_panels.plot_control_panel import PlotControlPanel
+from ui.control_panels.pump_control_panel import PumpControlPanel
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
 
 from threads.serial_thread import SerialThread
@@ -106,6 +107,9 @@ class MainWindow(QMainWindow):
 
         # Top control (Arduino status)
         self.top_ctrl = None
+
+        # Pump control panel
+        self.pump_panel = None
 
         # Plotting
         self.pressure_plot_widget = None
@@ -195,8 +199,9 @@ class MainWindow(QMainWindow):
 
     def _build_central_widget_layout(self):
         """
-        Top row: [Camera Info/Controls tabs] [TopControlPanel] [PlotControlPanel]
-        Bottom row: [QtCameraWidget (live)] | [PressurePlotWidget (live plot)]
+        Top row: control ribbon with Camera | PRIM Device | Syringe Pump | Plot
+        Controls. Bottom row: [QtCameraWidget (live)] | [PressurePlotWidget
+        (live plot)]
         """
         self.camera_widget = QtCameraWidget(self)
 
@@ -205,7 +210,7 @@ class MainWindow(QMainWindow):
         main_vlay.setContentsMargins(4, 4, 4, 4)
         main_vlay.setSpacing(6)
 
-        # ─── Top Row ──────────────────────────────────────────────────────
+        # ─── Top Row (Control Ribbon) ─────────────────────────────────────
         top_row_widget = QWidget()
         top_row_lay = QHBoxLayout(top_row_widget)
         top_row_lay.setContentsMargins(0, 0, 0, 0)
@@ -258,16 +263,25 @@ class MainWindow(QMainWindow):
 
         self.camera_tabs.addTab(controls_tab, "Controls")
 
-        top_row_lay.addWidget(self.camera_tabs, stretch=2)
+        cam_group = QGroupBox("Camera")
+        cam_layout = QVBoxLayout(cam_group)
+        cam_layout.setContentsMargins(3, 3, 3, 3)
+        cam_layout.setSpacing(4)
+        cam_layout.addWidget(self.camera_tabs)
+        top_row_lay.addWidget(cam_group, stretch=2)
 
-        # TopControlPanel (center)
+        # PRIM Device panel
         self.top_ctrl = TopControlPanel(self)
         self.top_ctrl.zero_requested.connect(self._on_zero_prim)
         self.top_ctrl.pump_start_requested.connect(self._on_start_pump)
         self.top_ctrl.pump_stop_requested.connect(self._on_stop_pump)
         top_row_lay.addWidget(self.top_ctrl, stretch=2)
 
-        # PlotControlPanel (right)
+        # Syringe Pump panel
+        self.pump_panel = PumpControlPanel(self)
+        top_row_lay.addWidget(self.pump_panel, stretch=1)
+
+        # Plot controls panel
         self.plot_control_panel = PlotControlPanel(self)
         top_row_lay.addWidget(self.plot_control_panel, stretch=2)
 

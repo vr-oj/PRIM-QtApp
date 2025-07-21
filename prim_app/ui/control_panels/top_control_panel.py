@@ -10,15 +10,12 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 
-from .plot_control_panel import PlotControlPanel
 
 log = logging.getLogger(__name__)
 
 
 class TopControlPanel(QWidget):
-    """
-    Composite panel combining camera controls, device status, and plot controls.
-    """
+    """PRIM device status and pump control panel."""
 
     parameter_changed = pyqtSignal(str, object)
     zero_requested = pyqtSignal()
