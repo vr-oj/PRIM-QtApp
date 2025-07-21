@@ -17,7 +17,7 @@ IDLE_TIMEOUT_S = 2.0
 
 
 class SerialThread(QThread):
-    data_ready = pyqtSignal(int, float, float)  # (master_ts_ns, device_ts_s, pressure)
+    data_ready = pyqtSignal(int, float, float)  # (frameIndex, timestamp_s, pressure)
     error_occurred = pyqtSignal(str)  # For reporting errors back to the GUI
     status_changed = pyqtSignal(str)  # For general status updates
 
@@ -118,10 +118,8 @@ class SerialThread(QThread):
                                 except ValueError as ve:
                                     log.error(f"Parse error for line '{line}': {ve}")
                                 else:
-                                    from utils.sync_manager import SyncManager
-                                    ts = SyncManager.now()
-                                    # Valid packet → emit signal with master timestamp
-                                    self.data_ready.emit(ts, t_device, p)
+                                    # Valid packet → emit signal
+                                    self.data_ready.emit(frame_idx_device, t_device, p)
 
                                     # Mark that we've seen at least one packet
                                     if not self._got_first_packet:
@@ -185,10 +183,6 @@ class SerialThread(QThread):
         else:
             log.warning("Serial thread not running → cannot send command.")
             self.error_occurred.emit("Cannot send: Serial disconnected.")
-
-    def request_pressure_sample(self):
-        """Convenience wrapper to request a single pressure reading."""
-        self.send_command("P")
 
     def stop(self):
         """

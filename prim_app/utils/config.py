@@ -15,10 +15,6 @@ PRIM_RESULTS_DIR = os.environ.get("PRIM_RESULTS_DIR", DEFAULT_RESULTS_DIR)
 PRIM_ROOT = PRIM_RESULTS_DIR  # alias kept for backwards compatibility
 Path(PRIM_RESULTS_DIR).mkdir(parents=True, exist_ok=True)
 
-# ─── µManager configuration ───────────────────────────────────────────────────
-MM_CONFIGS_DIR = os.path.join(Path(__file__).resolve().parents[1], "configs")
-DEFAULT_MM_CONFIG_FILE = os.path.join(MM_CONFIGS_DIR, "MMConfig.cfg")
-
 
 def set_results_dir(path: str):
     """Update ``PRIM_RESULTS_DIR`` and ensure the folder exists."""
@@ -47,7 +43,7 @@ SERIAL_COMMAND_TERMINATOR = b"\n"  # Arduino uses Serial.println()
 
 # ─── Application info ───────────────────────────────────────────────────────────
 APP_NAME = "PRIMAcquisition"
-APP_VERSION = "1.1"
+APP_VERSION = "1.0"
 ABOUT_TEXT = f"""
 <strong>{APP_NAME} v{APP_VERSION}</strong>
 <p>Passive Data Logger and Viewer for the PRIM system.</p>

@@ -2,15 +2,12 @@
 
 import os
 import sys
-
-import logging
 import re
+import logging
 import csv
 import json
 from datetime import datetime
-import importlib
-import time
-from collections import deque
+import imagingcontrol4 as ic4
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -55,6 +52,7 @@ import prim_app
 
 from utils.app_settings import (
     save_app_setting,
+    load_app_setting,
     SETTING_LAST_CAMERA_INDEX,
     SETTING_RESULTS_DIR,
 )
@@ -70,7 +68,6 @@ from utils.config import (
     ABOUT_TEXT,
     PLOT_DEFAULT_Y_MIN,
     PLOT_DEFAULT_Y_MAX,
-    DEFAULT_MM_CONFIG_FILE,
 )
 from utils.path_helpers import get_next_fill_folder
 from ui.canvas.qtcamera_widget import QtCameraWidget
@@ -78,17 +75,11 @@ from ui.control_panels.camera_control_panel import CameraControlPanel
 from ui.control_panels.top_control_panel import TopControlPanel
 from ui.control_panels.plot_control_panel import PlotControlPanel
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
-from utils.sync_manager import SyncManager
 
 from threads.serial_thread import SerialThread
 from threads.sdk_camera_thread import SDKCameraThread
-from threads.opencv_camera_thread import OpenCVCameraThread
-from threads.andor_camera_thread import AndorCameraThread
-from threads.micromanager_camera_thread import MicroManagerCameraThread
-from threads.thorlabs_camera_thread import ThorlabsCameraThread
 from recording_manager import RecordingManager
 from utils.utils import list_serial_ports
-from ui.welcome_dialog import WelcomeDialog
 
 log = logging.getLogger(__name__)
 
@@ -96,117 +87,6 @@ log = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-
-        self.ic4 = None
-        self.ic4_available = False
-        self.ic4_device = None
-        self.andor_available = False
-        self.mm_available = False
-        self.thorlabs_available = False
-        self.opencv_index = config.DEFAULT_CAMERA_INDEX
-        try:
-            self.ic4 = importlib.import_module("imagingcontrol4")
-            devices = []
-            try:
-                devices = self.ic4.DeviceEnum.devices()
-            except Exception as e:
-                log.error(f"Failed to enumerate IC4 devices: {e}")
-            if devices:
-                self.ic4_device = devices[0]
-                self.ic4_available = True
-                log.info(
-                    f"IC4 device detected: {self.ic4_device.model_name} (S/N {self.ic4_device.serial})"
-                )
-            else:
-                log.info("IC4 SDK loaded but no devices found. Falling back to OpenCV camera")
-                self.ic4 = None
-        except ImportError as e:
-            log.info(f"IC4 SDK not available: {e}")
-            self.ic4 = None
-
-        # ─── Detect Andor SDK3 availability ────────────────────────────────
-        try:
-            importlib.import_module("andor3")
-            self.andor_available = True
-            log.info("Andor SDK3 available")
-        except ImportError as e:
-            log.info(f"Andor SDK3 not available: {e}")
-
-        # ─── Detect µManager availability via pymmcore-plus ───────────────
-        try:
-            importlib.import_module("pymmcore_plus")
-            self.mm_available = True
-            log.info("pymmcore-plus available for µManager")
-        except ImportError as e:
-            log.info(f"pymmcore-plus not available: {e}")
-
-        # ─── Detect Thorlabs SDK availability ─────────────────────────────
-        try:
-            importlib.import_module("thorlabs_tsi_sdk")
-            self.thorlabs_available = True
-            log.info("Thorlabs TSI SDK available")
-        except ImportError as e:
-            log.info(f"Thorlabs SDK not available: {e}")
-
-        self.mm_config_file = config.DEFAULT_MM_CONFIG_FILE
-
-        if not (
-            self.ic4_available
-            or self.andor_available
-            or self.mm_available
-            or self.thorlabs_available
-        ):
-            from utils.utils import list_opencv_cameras
-
-            cams = list_opencv_cameras()
-            if cams:
-                self.opencv_index = cams[0]
-                log.info(f"OpenCV camera index {self.opencv_index} will be used")
-            else:
-                log.warning("No OpenCV cameras detected on startup")
-
-        # ─── Backend Thread Mapping ─────────────────────────────────────────
-        self._backend_map = {
-            "ic4": {
-                "cls": SDKCameraThread,
-                "init_kwargs": lambda: {"parent": self},
-                "post_init": lambda th: th.set_device_info(self.ic4_device),
-                "signals": ["grabber_ready"],
-                "label": "Connecting…",
-            },
-            "andor": {
-                "cls": AndorCameraThread,
-                "init_kwargs": lambda: {"parent": self},
-                "post_init": None,
-                "signals": [],
-                "label": "Connected",
-            },
-            "micromanager": {
-                "cls": MicroManagerCameraThread,
-                "init_kwargs": lambda: {
-                    "parent": self,
-                    "mm_path": None,
-                    "config_file": self.mm_config_file,
-                },
-                "post_init": None,
-                "signals": [],
-                "label": "Connected",
-            },
-            "thorlabs": {
-                "cls": ThorlabsCameraThread,
-                "init_kwargs": lambda: {"parent": self},
-                "post_init": None,
-                "signals": [],
-                "label": "Connected",
-            },
-            "opencv": {
-                "cls": OpenCVCameraThread,
-                "init_kwargs": lambda: {"index": self.opencv_index, "parent": self},
-                "post_init": None,
-                "signals": [],
-                "label": "Connected",
-            },
-        }
 
         # ─── State Variables ─────────────────────────────────────────────────────
         self._serial_thread = None
@@ -222,7 +102,6 @@ class MainWindow(QMainWindow):
         self.camera_control_panel = None
         self.camera_tabs = None
         self.camera_thread = None  # SDKCameraThread instance
-        self.current_backend = None
 
         # Plot controls
         self.plot_control_panel = None
@@ -237,19 +116,6 @@ class MainWindow(QMainWindow):
         self.lbl_cam_connection = None
         self.lbl_cam_frame = None
         self.lbl_cam_resolution = None
-
-        # Synchronized acquisition
-        self.acq_timer = None
-        self._acq_start_time = 0.0
-        self._frame_counter = 0
-        self._timestamp_queue = deque()
-        self._index_queue = deque()
-        self._frame_queue = deque()
-        self._pressure_queue = deque()
-
-        # Master clock
-        self.master_timer = None
-        self.master_btn = None
 
         # ─── CREATE THE RECORDER THREAD + WORKER ─────────────────────────────────
         # 1) Instantiate the thread object:
@@ -380,9 +246,7 @@ class MainWindow(QMainWindow):
         self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
         info_layout.addRow("", self.btn_start_camera)
 
-        
-
-        self.camera_tabs.addTab(info_tab, "Camera")
+        self.camera_tabs.addTab(info_tab, "Info")
 
         # Controls Tab
         controls_tab = QWidget()
@@ -467,106 +331,132 @@ class MainWindow(QMainWindow):
 
     # ─── Camera Device & Resolution Enumeration ─────────────────────────────
     def _populate_device_list(self):
-        """Populate device/resolution combos based on available backend."""
+        try:
+            device_list = ic4.DeviceEnum.devices()
+        except Exception as e:
+            log.error(f"Failed to enumerate IC4 devices: {e}")
+            device_list = []
+
+        if not device_list:
+            log.info("DEBUG: DeviceEnum.devices() returned ZERO devices.")
+        else:
+            for idx, dev in enumerate(device_list):
+                log.info(
+                    f"DEBUG: Device {idx} = {dev.model_name!r} (S/N {dev.serial!r})"
+                )
+
         self.device_combo.clear()
-        self.resolution_combo.clear()
-
-        if self.ic4_available and self.ic4_device:
-            display = (
-                f"IC4: {self.ic4_device.model_name} (S/N: {self.ic4_device.serial})"
-            )
-            self.device_combo.addItem(display, ("ic4", self.ic4_device))
-        if self.andor_available:
-            self.device_combo.addItem("Andor SDK3 Camera", ("andor", None))
-        if self.mm_available:
-            self.device_combo.addItem("µManager Camera", ("micromanager", None))
-        if self.thorlabs_available:
-            self.device_combo.addItem("Thorlabs Camera", ("thorlabs", None))
-        if not (
-            self.ic4_available
-            or self.andor_available
-            or self.mm_available
-            or self.thorlabs_available
-        ):
-            self.device_combo.addItem(
-                f"OpenCV Camera {self.opencv_index}", ("opencv", self.opencv_index)
-            )
-
-        # Set current backend to first item by default
-        if self.device_combo.count() > 0:
-            first_data = self.device_combo.itemData(0)
-            if first_data:
-                self.current_backend = first_data[0]
-
-        w, h = config.DEFAULT_FRAME_SIZE
-        self.resolution_combo.addItem("Default", (w, h, None))
+        self.device_combo.addItem("Select Device...", None)
+        for dev in device_list:
+            display_str = f"{dev.model_name}  (S/N: {dev.serial})"
+            self.device_combo.addItem(display_str, dev)
 
     @pyqtSlot(int)
     def _on_device_selected(self, index):
-        """Update current device info (no enumeration needed)."""
+        """
+        Called whenever the user picks a different camera in the “Device” combo.
+        Open it briefly, enumerate PixelFormat × (W,H), then close.
+        """
         dev_info = self.device_combo.itemData(index)
         self.resolution_combo.clear()
-        w, h = config.DEFAULT_FRAME_SIZE
-        self.resolution_combo.addItem("Default", (w, h, None))
+        self.resolution_combo.addItem("Select Resolution…", None)
 
         if not dev_info:
             return
 
-        backend, data = dev_info
-        self.current_backend = backend
-        if backend == "ic4":
-            self.ic4_device = data
+        grab = ic4.Grabber()
+        try:
+            grab.device_open(dev_info)
+
+            # Force Continuous acquisition if possible
+            acq_node = grab.device_property_map.find_enumeration("AcquisitionMode")
+            if acq_node:
+                names = [e.name for e in acq_node.entries]
+                if "Continuous" in names:
+                    acq_node.value = "Continuous"
+                else:
+                    acq_node.value = names[0]
+
+            pf_node = grab.device_property_map.find_enumeration("PixelFormat")
+            if pf_node:
+                for entry in pf_node.entries:
+                    pf_name = entry.name
+                    try:
+                        pf_node.value = pf_name
+                        w_prop = grab.device_property_map.find_integer("Width")
+                        h_prop = grab.device_property_map.find_integer("Height")
+                        if w_prop and h_prop:
+                            w = w_prop.value
+                            h = h_prop.value
+                            display_str = f"{w}×{h} ({pf_name})"
+                            self.resolution_combo.addItem(display_str, (w, h, pf_name))
+                    except Exception:
+                        # skip any PF that fails
+                        pass
+
+        except Exception as e:
+            log.error(f"Failed to get formats for {dev_info}: {e}")
+        finally:
+            try:
+                grab.device_close()
+            except Exception:
+                pass
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
         """
         Called when the user clicks “Start Camera” or “Stop Camera”.
         """
-        if self.camera_thread and self.camera_thread.isRunning():
+        if self.camera_thread is None or not self.camera_thread.isRunning():
+            # ─── Start camera ─────────────────────────────────────────────────
+            dev_info = self.device_combo.currentData()
+            if dev_info is None:
+                QMessageBox.warning(self, "Camera", "Please select a device first.")
+                return
+
+            resdata = self.resolution_combo.currentData()
+            if not resdata:
+                QMessageBox.warning(self, "Camera", "Please select a resolution first.")
+                return
+
+            w, h, pf_name = resdata
+
+            # Instantiate the SDK camera thread
+            self.camera_thread = SDKCameraThread(parent=self)
+            self.camera_thread.set_device_info(dev_info)
+            self.camera_thread.set_resolution((w, h, pf_name))
+
+            # 1) When the grabber is open & streaming, enable the sliders, etc.
+            self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
+
+            # 2) Each time a new frame is ready, update the QtCameraWidget
+            self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
+
+            # 3) On any camera error, pop up a dialog and tear everything down
+            self.camera_thread.error.connect(self._on_camera_error)
+
+            # Show “Connecting…” in the Info tab
+            self.lbl_cam_connection.setText("Connecting…")
+            self.lbl_cam_frame.setText("0")
+            self.lbl_cam_resolution.setText("N/A")
+
+            # Actually start the thread
+            self.camera_thread.start()
+            self.btn_start_camera.setText("Stop Camera")
+            self.camera_control_panel.setEnabled(False)
+
+        else:
+            # ─── Stop camera ──────────────────────────────────────────────────
             self.camera_thread.stop()
             self.camera_thread = None
-            self.stop_synchronized_acquisition()
-            self._reset_camera_ui()
-            return
 
-        if self.current_backend == "micromanager" and not self._mm_config_valid():
-            QMessageBox.warning(
-                self,
-                "µManager Config Required",
-                "Default µManager config missing or invalid. "
-                "Please load a valid .cfg via Setup → Load µManager Config File…",
-            )
-            return
-
-        back = self._backend_map.get(self.current_backend, self._backend_map["opencv"])
-
-        params = back["init_kwargs"]()
-        self.camera_thread = back["cls"](**params)
-        post = back.get("post_init")
-        if callable(post):
-            post(self.camera_thread)
-
-        # Common signal hookups
-        self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
-        self.camera_thread.frame_ready.connect(self._update_camera_info)
-        self.camera_thread.frame_ready.connect(self._handle_camera_frame)
-
-        for extra in back.get("signals", []):
-            getattr(self.camera_thread, extra).connect(self._on_grabber_ready)
-
-        err_sig = getattr(self.camera_thread, "error", None)
-        if err_sig:
-            err_sig.connect(lambda *args: QMessageBox.critical(self, "Camera Error", args[0]))
-
-        self.lbl_cam_connection.setText(back.get("label", "Connected"))
-        self.lbl_cam_frame.setText("0")
-        self.lbl_cam_resolution.setText("N/A")
-
-        self.camera_thread.start()
-        if self.current_backend == "micromanager":
-            self.statusBar().showMessage("µManager started", 5000)
-        self.btn_start_camera.setText("Stop Camera")
-        self.camera_control_panel.setEnabled(False)
+            # Reset UI
+            self.btn_start_camera.setText("Start Camera")
+            self.camera_control_panel.setEnabled(False)
+            self.lbl_cam_connection.setText("Disconnected")
+            self.lbl_cam_frame.setText("0")
+            self.lbl_cam_resolution.setText("N/A")
+            self.camera_widget.clear_image()
 
     @pyqtSlot()
     def _on_grabber_ready(self):
@@ -585,11 +475,6 @@ class MainWindow(QMainWindow):
         self.camera_control_panel.grabber = grabber
         self.camera_control_panel._on_grabber_ready()
         self.camera_control_panel.setEnabled(True)
-
-        # Connect live property updates
-        prop_sig = getattr(self.camera_thread, "property_updated", None)
-        if prop_sig:
-            prop_sig.connect(self.camera_control_panel.update_property)
 
         self.lbl_cam_connection.setText("Connected")
 
@@ -614,12 +499,6 @@ class MainWindow(QMainWindow):
         if self.lbl_cam_connection.text() != "Connected":
             self.lbl_cam_connection.setText("Connected")
 
-    @pyqtSlot(QImage, object)
-    def _handle_camera_frame(self, qimg: QImage, raw):
-        """Buffer frames until a pressure sample arrives."""
-        self._frame_queue.append((qimg, raw))
-        self._try_emit_record()
-
     @pyqtSlot(str, str)
     def _on_camera_error(self, msg: str, code: str):
         """
@@ -642,16 +521,6 @@ class MainWindow(QMainWindow):
         self.camera_widget.clear_image()
         self.btn_start_camera.setText("Start Camera")
 
-    def _reset_camera_ui(self):
-        self.btn_start_camera.setText("Start Camera")
-        if self.camera_control_panel:
-            self.camera_control_panel.setEnabled(False)
-        self.lbl_cam_connection.setText("Disconnected")
-        self.lbl_cam_frame.setText("0")
-        self.lbl_cam_resolution.setText("N/A")
-        if self.camera_widget:
-            self.camera_widget.clear_image()
-
     def _build_menus(self):
         mb = self.menuBar()
         fm = mb.addMenu("&File")
@@ -662,14 +531,6 @@ class MainWindow(QMainWindow):
         exp_img_act = QAction("Export Plot &Image…", self)
         exp_img_act.triggered.connect(self.pressure_plot_widget.export_as_image)
         fm.addAction(exp_img_act)
-
-        mm_cfg_act = QAction(
-            "Load µManager Config &File…",
-            self,
-            triggered=self._choose_mm_config_file,
-        )
-
-
         choose_dir_act = QAction(
             "Set &Results Folder…", self, triggered=self._choose_results_dir
         )
@@ -679,9 +540,6 @@ class MainWindow(QMainWindow):
             "&Exit", self, shortcut=QKeySequence.Quit, triggered=self.close
         )
         fm.addAction(exit_act)
-
-        sm = mb.addMenu("&Setup")
-        sm.addAction(mm_cfg_act)
 
         am = mb.addMenu("&Acquisition")
         self.start_recording_action = QAction(
@@ -730,12 +588,6 @@ class MainWindow(QMainWindow):
             f"&About {APP_NAME}", self, triggered=self._show_about_dialog
         )
         hm.addAction(about_act)
-        welcome_act = QAction(
-            "&Welcome Screen",
-            self,
-            triggered=self._show_welcome_dialog,
-        )
-        hm.addAction(welcome_act)
         hm.addAction("About &Qt", QApplication.instance().aboutQt)
 
     def _build_main_toolbar(self):
@@ -773,11 +625,6 @@ class MainWindow(QMainWindow):
             tb.addAction(self.start_recording_action)
         if hasattr(self, "stop_recording_action"):
             tb.addAction(self.stop_recording_action)
-
-        self.master_btn = QPushButton("Master Clock: OFF")
-        self.master_btn.setCheckable(True)
-        self.master_btn.clicked.connect(self._toggle_master_clock)
-        tb.addWidget(self.master_btn)
 
     def _build_status_bar(self):
         sb = self.statusBar()
@@ -883,39 +730,8 @@ class MainWindow(QMainWindow):
                 f"Results folder set to {results_dir}", 5000
             )
 
-    def _choose_mm_config_file(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Load µManager Config File",
-            os.path.dirname(self.mm_config_file),
-            "Config Files (*.cfg)",
-        )
-        if path:
-            self.mm_config_file = path
-            self.statusBar().showMessage(
-                f"µManager config loaded from {path}", 5000
-            )
-
-    def _mm_config_valid(self) -> bool:
-        """Return True if the µManager config file appears valid."""
-        if not os.path.exists(self.mm_config_file):
-            return False
-        try:
-            with open(self.mm_config_file, "r") as f:
-                head = f.read(128).lower()
-            if "placeholder" in head:
-                return False
-        except Exception:
-            return False
-        return True
-
-
     def _show_about_dialog(self):
         QMessageBox.information(self, f"About {APP_NAME}", ABOUT_TEXT)
-
-    def _show_welcome_dialog(self):
-        dlg = WelcomeDialog(parent=self, force_show=True)
-        dlg.exec_()
 
     # ─── Toggle Serial Connection ────────────────────────────────────────────
     def _toggle_serial_connection(self):
@@ -1045,10 +861,26 @@ class MainWindow(QMainWindow):
         self._refresh_recording_button_states()
 
     @pyqtSlot(int, float, float)
-    def _handle_new_serial_data(self, ts: int, t: float, p: float):
-        """Handle a pressure sample from the SerialThread."""
-        self._pressure_queue.append(p)
-        self._try_emit_record()
+    def _handle_new_serial_data(self, idx: int, t: float, p: float):
+        """
+        Called whenever SerialThread emits data_ready(idx, t, p).
+        Pushes new data into TopControlPanel and the live plot.
+        """
+        # 1) Update TopControlPanel (frame count, device time, pressure)
+        self.top_ctrl.update_prim_data(idx, t, p)
+
+        # 2) Read the auto-scale checkboxes from PlotControlPanel
+        ax = self.plot_control_panel.auto_x_cb.isChecked()
+        ay = self.plot_control_panel.auto_y_cb.isChecked()
+
+        # 3) Send the new sample to the PressurePlotWidget
+        self.pressure_plot_widget.update_plot(t, p, ax, ay)
+
+        # 4) Also log it to the console dock if visible
+        if self.dock_console.isVisible():
+            self.console_out_textedit.append(
+                f"PRIM Data: Idx={idx}, Time={t:.3f}s, P={p:.2f}"
+            )
 
     # ──────────────────────────────────────────────────────────────
     # Recording Management
@@ -1083,7 +915,9 @@ class MainWindow(QMainWindow):
             self._on_recorder_ready
         )
 
-        # 8) Frames and pressure will be routed through _try_emit_record
+        # 8) Hook camera + serial into the worker:
+        self._serial_thread.data_ready.connect(self._recorder_worker.append_pressure)
+        self.camera_thread.frame_ready.connect(self._recorder_worker.append_frame)
 
         # 9) Kick off the recording thread:
         self._recorder_thread.start()
@@ -1101,8 +935,12 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _on_recorder_ready(self):
-        """Begin the synchronized acquisition loop once files are ready."""
-        self.start_synchronized_acquisition(DEFAULT_FPS)
+        """Send the start command to the Arduino when recording setup is done."""
+        try:
+            if self._serial_thread:
+                self._serial_thread.send_command("G")
+        except Exception:
+            log.exception("Failed to send start command to Arduino")
 
     @pyqtSlot()
     def _on_stop_recording(self):
@@ -1114,8 +952,27 @@ class MainWindow(QMainWindow):
         if not self._recorder_worker or not self._recorder_thread:
             return
 
-        # Stop acquisition timer
-        self.stop_synchronized_acquisition()
+        # Send stop command to the Arduino before disconnecting
+        try:
+            if self._serial_thread:
+                self._serial_thread.send_command("S")
+        except Exception:
+            log.exception("Failed to send stop command to Arduino")
+
+        # 1) Disconnect signals so no new data is queued
+        try:
+            self._serial_thread.data_ready.disconnect(
+                self._recorder_worker.append_pressure
+            )
+        except Exception:
+            pass
+
+        try:
+            self.camera_thread.frame_ready.disconnect(
+                self._recorder_worker.append_frame
+            )
+        except Exception:
+            pass
 
         # 2) When the worker actually finishes, clean up our Python references.
         def _cleanup_recorder():
@@ -1165,98 +1022,9 @@ class MainWindow(QMainWindow):
         self.start_recording_action.setEnabled(can_start)
         self.stop_recording_action.setEnabled(can_stop)
 
-    # ------------------------------------------------------------------
-    # Master clock control
-    # ------------------------------------------------------------------
-    def _toggle_master_clock(self, checked: bool):
-        if checked:
-            self.master_btn.setText("Master Clock: ON")
-            if self._serial_thread:
-                self._serial_thread.send_command("MASTER_ON")
-            if self.camera_thread and hasattr(self.camera_thread, "start"):
-                pass
-            SyncManager().start(100, self._on_master_tick)
-        else:
-            self.master_btn.setText("Master Clock: OFF")
-            SyncManager().stop()
-            if self._serial_thread:
-                self._serial_thread.send_command("MASTER_OFF")
-            if self.camera_thread and hasattr(self.camera_thread, "stop"):
-                pass
-
-    def _on_master_tick(self):
-        t0 = SyncManager.now()
-        if self._serial_thread:
-            self._serial_thread.send_command("TICK")
-        if self.camera_thread:
-            QMetaObject.invokeMethod(self.camera_thread, "snap", Qt.QueuedConnection)
-
-    # ------------------------------------------------------------------
-    # Synchronized acquisition control
-    # ------------------------------------------------------------------
-    def start_synchronized_acquisition(self, fps=DEFAULT_FPS):
-        interval_ms = int(1000 / fps)
-        self._acq_start_time = time.perf_counter()
-        self._frame_counter = 0
-        self._timestamp_queue.clear()
-        self._index_queue.clear()
-        self._frame_queue.clear()
-        self._pressure_queue.clear()
-
-        self.acq_timer = QTimer(self)
-        self.acq_timer.timeout.connect(self._acq_iteration)
-        self.acq_timer.start(interval_ms)
-        log.info(f"Synchronized acquisition started at {fps} FPS")
-
-    def stop_synchronized_acquisition(self):
-        if self.acq_timer:
-            self.acq_timer.stop()
-            self.acq_timer.deleteLater()
-            self.acq_timer = None
-            log.info("Synchronized acquisition stopped")
-
-    def _acq_iteration(self):
-        self._frame_counter += 1
-        ts = time.perf_counter() - self._acq_start_time
-        self._timestamp_queue.append(ts)
-        self._index_queue.append(self._frame_counter)
-        if self.camera_thread:
-            QMetaObject.invokeMethod(self.camera_thread, "snap", Qt.QueuedConnection)
-        if self._serial_thread:
-            self._serial_thread.request_pressure_sample()
-
-    def _try_emit_record(self):
-        while (
-            self._frame_queue
-            and self._pressure_queue
-            and self._timestamp_queue
-            and self._index_queue
-        ):
-            qimg, raw = self._frame_queue.popleft()
-            pressure = self._pressure_queue.popleft()
-            ts = self._timestamp_queue.popleft()
-            idx = self._index_queue.popleft()
-
-            # Update UI
-            self.top_ctrl.update_prim_data(idx, ts, pressure)
-            ax = self.plot_control_panel.auto_x_cb.isChecked()
-            ay = self.plot_control_panel.auto_y_cb.isChecked()
-            self.pressure_plot_widget.update_plot(ts, pressure, ax, ay)
-            if self.dock_console.isVisible():
-                self.console_out_textedit.append(
-                    f"PRIM Data: Idx={idx}, Time={ts:.3f}s, P={pressure:.2f}"
-                )
-
-            if self._recorder_worker:
-                self._recorder_worker.append_pressure(idx, ts, pressure)
-                self._recorder_worker.append_frame(qimg, raw)
-
     # ─── Window Close Cleanup ──────────────────────────────────────────────────
     def closeEvent(self, event):
         log.info("MainWindow closeEvent triggered.")
-
-        # Ensure acquisition timer is stopped
-        self.stop_synchronized_acquisition()
 
         # 1) If RecordingManager is still running, request stop_recording() and wait.
         if self._recorder_worker and self._recorder_thread:

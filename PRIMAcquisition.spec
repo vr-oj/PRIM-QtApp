@@ -5,12 +5,7 @@ a = Analysis(
     ['prim_app\\prim_app.py'],
     pathex=[],
     binaries=[],
-    datas=[
-        ('.primenv/Lib/site-packages/imagingcontrol4/*', 'imagingcontrol4'),
-        ('prim_app/ui/icons/*', 'prim_app/ui/icons'),
-        ('prim_app/ui/style.qss', 'prim_app/ui'),
-        ('prim_app/configs/*.cfg', 'prim_app/configs'),
-    ],
+    datas=[('.primenv/Lib/site-packages/imagingcontrol4/*', 'imagingcontrol4'), ('prim_app/ui/icons/*', 'prim_app/ui/icons'), ('prim_app/ui/style.qss', 'prim_app/ui')],
     hiddenimports=['imagingcontrol4'],
     hookspath=[],
     hooksconfig={},

@@ -5,7 +5,7 @@ import os
 import re
 import traceback
 import logging
-import importlib
+import imagingcontrol4 as ic4
 
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication
@@ -38,21 +38,6 @@ if not module_log.handlers:
     handler.setFormatter(formatter)
     module_log.addHandler(handler)
     module_log.setLevel(logging.INFO)
-
-# Add Thorlabs SDK DLL directory on Windows before importing thorlabs_tsi_sdk
-if os.name == "nt" and hasattr(os, "add_dll_directory"):
-    dll_dir = os.path.join(
-        os.path.dirname(__file__),
-        "thorlabs",
-        "Python Toolkit",
-        "dlls",
-        "64_lib",
-    )
-    if os.path.isdir(dll_dir):
-        os.add_dll_directory(dll_dir)
-        module_log.info(f"Added Thorlabs DLL directory: {dll_dir}")
-    else:
-        module_log.warning(f"Thorlabs DLL directory not found: {dll_dir}")
 
 
 # === load_app_setting / save_app_setting stubs if missing ===
@@ -139,18 +124,16 @@ def main_app_entry():
     if hasattr(Qt, "AA_UseHighDpiPixmaps"):
         QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
-    # ─── Try to initialize IC4 globally; fallback to OpenCV if unavailable ───
+    # ─── Initialize IC4 globally so MainWindow can enumerate devices ─────────
     try:
-        ic4 = importlib.import_module("imagingcontrol4")
         ic4.Library.init(
             api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
         )
-        ic4_available = True
         log.info("Global IC4 Library.init() succeeded.")
     except Exception as e:
-        ic4 = None
-        ic4_available = False
-        log.warning(f"IC4 SDK not available: {e}; using OpenCV backend")
+        log.error(f"Could not initialize IC4 in main thread: {e}")
+        # You might still allow the UI to start (with an empty device list),
+        # or choose to exit right here with sys.exit(1).
 
     # Create the QApplication
     app = QApplication(sys.argv)
@@ -241,18 +224,11 @@ def main_app_entry():
     main_win.setWindowTitle(f"{APP_NAME} v{display_version}")
     main_win.show()
 
-    # ─── Optional Welcome Dialog ─────────────────────────────────────────
-    from ui.welcome_dialog import WelcomeDialog
-    welcome = WelcomeDialog(parent=main_win)
-    if not getattr(welcome, "_skip", False):
-        welcome.exec_()
-
     exit_code = app.exec_()
     log.info(f"Application event loop ended with exit code {exit_code}.")
 
     try:
-        if ic4:
-            ic4.Library.exit()
+        ic4.Library.exit()
     except Exception:
         pass
 

@@ -38,10 +38,9 @@ class RecordingManager(QObject):
         self.is_recording = False
         self._got_first_sample = False
 
-        # Frame counter and last values
+        # Frame counter and timer
         self._frame_counter = 0
-        self._last_timestamp = 0
-        self._last_pressure = 0
+        self._last_device_time = 0
 
     @pyqtSlot()
     def start_recording(self):
@@ -68,10 +67,7 @@ class RecordingManager(QObject):
         self.is_recording = True
         self._got_first_sample = False
         self._frame_counter = 0
-        self._last_timestamp = 0
-        self._last_pressure = 0
-        self._last_timestamp = 0
-        self._last_pressure = 0
+        self._last_device_time = 0
 
         print(
             f"[RecordingManager] Ready to record →\n  CSV will be: {self._csv_path}\n  TIFF will be: {self._tiff_path}"
@@ -83,7 +79,7 @@ class RecordingManager(QObject):
         self.ready_for_acquisition.emit()
 
     @pyqtSlot(int, float, float)
-    def append_pressure(self, frameIdx, timestamp, pressure):
+    def append_pressure(self, frameIdx, t_device, pressure):
         """Handle a pressure sample from the serial thread."""
         if not self.is_recording:
             return
@@ -114,12 +110,11 @@ class RecordingManager(QObject):
 
         if self.csv_writer:
             try:
-                self.csv_writer.writerow([frameIdx, timestamp, pressure])
-                self._last_timestamp = timestamp
-                self._last_pressure = pressure
+                self.csv_writer.writerow([frameIdx, t_device, pressure])
+                self._last_device_time = t_device
             except Exception as e:
                 print(
-                    f"[RecordingManager] Error writing CSV row ({frameIdx}, {timestamp}, {pressure}): {e}"
+                    f"[RecordingManager] Error writing CSV row ({frameIdx}, {t_device}, {pressure}): {e}"
                 )
 
     @pyqtSlot(QImage, object)
@@ -131,18 +126,12 @@ class RecordingManager(QObject):
         if self.tif_writer:
             try:
                 arr = self._qimage_to_numpy(qimage)
-                metadata = {
-                    "frameIdx": self._frame_counter,
-                    "timestamp": self._last_timestamp,
-                    "pressure": self._last_pressure,
-                }
+                metadata = {"frameIdx": self._frame_counter, "deviceTime": self._last_device_time}  # Embed device time for FPS tracking
                 self.tif_writer.write(arr, description=json.dumps(metadata))
                 self._frame_counter += 1
             except Exception as e:
                 failed_idx = max(0, self._frame_counter)
-                print(
-                    f"[RecordingManager] Error writing TIFF page for frame {failed_idx}: {e}"
-                )
+                print(f"[RecordingManager] Error writing TIFF page for frame {failed_idx}: {e}")
 
     @pyqtSlot()
     def stop_recording(self):

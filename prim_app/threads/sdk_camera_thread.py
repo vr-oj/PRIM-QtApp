@@ -1,12 +1,12 @@
 # File: prim_app/threads/sdk_camera_thread.py
 
 import logging
-import importlib
+import imagingcontrol4 as ic4
 import numpy as np
 
 from utils.config import DEFAULT_FPS
 
-from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 
 log = logging.getLogger(__name__)
@@ -28,31 +28,17 @@ class SDKCameraThread(QThread):
     # Emitted on error: (message, code_as_string)
     error = pyqtSignal(str, str)
 
-    # Emitted when a camera property value changes: (identifier, value)
-    property_updated = pyqtSignal(str, object)
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.grabber = None
         self._stop_requested = False
-        try:
-            self.ic4 = importlib.import_module("imagingcontrol4")
-            self.available = True
-        except ImportError as e:
-            log.error(f"IC4 SDK not found: {e}")
-            self.ic4 = None
-            self.available = False
 
         # Will be set by MainWindow before start():
-        self._device_info = None  # an imagingcontrol4.DeviceInfo instance
+        self._device_info = None  # an ic4.DeviceInfo instance
         self._resolution = None  # tuple (width, height, pixel_format_name)
 
         # Keep a reference to the sink so we can stop it later
         self._sink = None
-
-        # Store property nodes for live updates
-        self._float_nodes = {}
-        self._enum_nodes = {}
 
     def set_device_info(self, dev_info):
         self._device_info = dev_info
@@ -64,11 +50,9 @@ class SDKCameraThread(QThread):
     def run(self):
         try:
             # ─── Initialize IC4 (with “already called” catch) ─────────────────
-            if not self.available:
-                raise RuntimeError("IC4 SDK not available")
             try:
-                self.ic4.Library.init(
-                    api_log_level=self.ic4.LogLevel.INFO, log_targets=self.ic4.LogTarget.STDERR
+                ic4.Library.init(
+                    api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
                 )
                 log.info("SDKCameraThread: Library.init() succeeded.")
             except RuntimeError as e:
@@ -82,7 +66,7 @@ class SDKCameraThread(QThread):
                 raise RuntimeError("No DeviceInfo passed to SDKCameraThread.")
 
             # ─── Open the grabber ───────────────────────────────────────────────
-            self.grabber = self.ic4.Grabber()
+            self.grabber = ic4.Grabber()
             self.grabber.device_open(self._device_info)
             log.info(
                 f"SDKCameraThread: device_open() succeeded for "
@@ -102,22 +86,6 @@ class SDKCameraThread(QThread):
 
             # ─── Set Default Camera Properties BEFORE Streaming ───────────────
             props = self.grabber.device_property_map
-
-            # Cache nodes for properties we want to monitor
-            for name in ("ExposureTime", "Gain", "AcquisitionFrameRate"):
-                try:
-                    node = props.find_float(name)
-                    if node:
-                        self._float_nodes[name] = node
-                except Exception:
-                    pass
-            for name in ("ExposureAuto", "GainAuto"):
-                try:
-                    node = props.find_enumeration(name)
-                    if node:
-                        self._enum_nodes[name] = node
-                except Exception:
-                    pass
             try:
                 exp_prop = props.find_float("ExposureTime")
                 exp_prop.value = 10000.0  # Default to 10ms
@@ -164,23 +132,23 @@ class SDKCameraThread(QThread):
                 except Exception as e:
                     log.warning(f"SDKCameraThread: Could not set resolution/PF: {e}")
 
-            # ─── Enable Auto features so camera self-adjusts by default ──────
+            # ─── Disable Auto features to keep manual settings stable ─────────
 
             try:
                 ae_node = self.grabber.device_property_map.find_enumeration(
                     "ExposureAuto"
                 )
                 if ae_node:
-                    ae_node.value = "Continuous"
-                    log.info("SDKCameraThread: Set ExposureAuto = Continuous")
+                    ae_node.value = "Off"
+                    log.info("SDKCameraThread: Set ExposureAuto = Off")
             except Exception as e:
                 log.warning(f"SDKCameraThread: Could not set ExposureAuto: {e}")
 
             try:
                 ag_node = self.grabber.device_property_map.find_enumeration("GainAuto")
                 if ag_node:
-                    ag_node.value = "Continuous"
-                    log.info("SDKCameraThread: Set GainAuto = Continuous")
+                    ag_node.value = "Off"
+                    log.info("SDKCameraThread: Set GainAuto = Off")
             except Exception as e:
                 log.warning(f"SDKCameraThread: Could not set GainAuto: {e}")
 
@@ -218,29 +186,17 @@ class SDKCameraThread(QThread):
             # ─── Signal “grabber_ready” so UI can enable controls ────────────────
             self.grabber_ready.emit()
 
-            # Emit initial property values
-            for name, node in self._float_nodes.items():
-                try:
-                    self.property_updated.emit(name, float(node.value))
-                except Exception:
-                    pass
-            for name, node in self._enum_nodes.items():
-                try:
-                    self.property_updated.emit(name, node.value)
-                except Exception:
-                    pass
-
             # ─── Build QueueSink requesting Mono8 (fallback to native PF if needed)─
             try:
-                self._sink = self.ic4.QueueSink(
-                    self, [self.ic4.PixelFormat.Mono8], max_output_buffers=1
+                self._sink = ic4.QueueSink(
+                    self, [ic4.PixelFormat.Mono8], max_output_buffers=1
                 )
             except:
                 native_pf = self._resolution[2] if self._resolution else None
-                if native_pf and hasattr(self.ic4.PixelFormat, native_pf):
-                    self._sink = self.ic4.QueueSink(
+                if native_pf and hasattr(ic4.PixelFormat, native_pf):
+                    self._sink = ic4.QueueSink(
                         self,
-                        [getattr(self.ic4.PixelFormat, native_pf)],
+                        [getattr(ic4.PixelFormat, native_pf)],
                         max_output_buffers=1,
                     )
                 else:
@@ -249,7 +205,7 @@ class SDKCameraThread(QThread):
                     )
 
             # ─── Start streaming immediately ───────────────────────────────────────
-            StreamSetupOption = self.ic4.StreamSetupOption
+            from imagingcontrol4 import StreamSetupOption
 
             self.grabber.stream_setup(
                 self._sink,
@@ -304,18 +260,6 @@ class SDKCameraThread(QThread):
             # Emit to the UI
             self.frame_ready.emit(qimg, buf)
 
-            # Also emit current property values
-            for name, node in self._float_nodes.items():
-                try:
-                    self.property_updated.emit(name, float(node.value))
-                except Exception:
-                    pass
-            for name, node in self._enum_nodes.items():
-                try:
-                    self.property_updated.emit(name, node.value)
-                except Exception:
-                    pass
-
         except Exception as e:
             log.error(
                 f"SDKCameraThread.frames_queued: Error popping/converting buffer: {e}"
@@ -332,31 +276,6 @@ class SDKCameraThread(QThread):
     def sink_disconnected(self, sink) -> None:
         # Called when the sink is torn down—no action needed
         pass
-
-    @pyqtSlot()
-    def snap(self):
-        """Capture a single frame on demand and emit :pyattr:`frame_ready`."""
-        if not self.grabber:
-            log.warning("snap() called but grabber is not initialized")
-            return
-        try:
-            buf = self.grabber.snap_image()
-            if buf is None:
-                return
-            arr = buf.numpy_wrap()
-            if arr.dtype != np.uint8:
-                max_val = float(arr.max()) if arr.max() > 0 else 1.0
-                arr8 = (arr.astype(np.float32) * (255.0 / max_val)).astype(np.uint8)
-            else:
-                arr8 = arr
-            h, w = arr8.shape[:2]
-            qimg = QImage(arr8.data, w, h, arr8.strides[0], QImage.Format_Grayscale8)
-            self.frame_ready.emit(qimg.copy(), buf)
-        except Exception as e:
-            log.exception("SDKCameraThread.snap failed")
-            code_enum = getattr(e, "code", None)
-            code_str = str(code_enum) if code_enum else ""
-            self.error.emit(str(e), code_str)
 
     def stop(self):
         """

@@ -12,13 +12,10 @@
   - Displays live pressure vs. time trace in a PyQt5 plot widget.  
   - Numeric readouts (frame index, device time, pressure) in the TopControlPanel.
 
-- **High‑Speed Camera Preview & Control**
-- Integrates with The Imaging Source DMK cameras (e.g., DMK 33UP5000, DMK 33UX250) via IC Imaging Control 4 (IC4).
-- Optional support for Andor cameras or other SDKs can be enabled by installing the relevant packages separately.
-  µManager and Thorlabs support are no longer bundled with the application.
-  - Fallback support for generic webcams using OpenCV when no specialized device is available.
-  - Lists all connected USB3 Vision cameras and enumerates supported resolutions (width×height with PixelFormat) when using IC4.
-  - Live preview in an OpenGL-backed QtCameraWidget, with camera control sliders (exposure, gain, brightness) in CameraControlPanel when advanced SDK features are available.
+- **High‑Speed Camera Preview & Control**  
+  - Integrates with The Imaging Source DMK cameras (e.g., DMK 33UP5000, DMK 33UX250) via IC Imaging Control 4 (IC4).  
+  - Lists all connected USB3 Vision cameras and enumerates supported resolutions (width×height with PixelFormat).  
+  - Live preview in an OpenGL-backed QtCameraWidget, with camera control sliders (exposure, gain, brightness) in CameraControlPanel.
 
 - **Synchronized Recording**  
   - Hardware‑triggered camera acquisition: Arduino pulses `CamTrig` pin for each sample.  
@@ -48,19 +45,17 @@
 
 - **Operating System**: Windows 10/11 (with IC4 SDK installed), or macOS with GenTL drivers.  
 - **Python**: 3.8 – 3.10 (tested); use a virtual environment.  
-- **Hardware**:
-  - DMK 33UP5000 or DMK 33UX250 camera with USB 3.0.
-  - (Optional) other cameras such as Andor or Thorlabs models if their SDKs are installed.
-  - Arduino (or compatible) running PRIM firmware (PRIM_v3_01.ino).
+- **Hardware**:  
+  - DMK 33UP5000 or DMK 33UX250 camera with USB 3.0.  
+  - Arduino (or compatible) running PRIM firmware (PRIM_v3_01.ino).  
   - Pressure transducer wired to an ADS ADC (e.g., ADS1115), connected to Arduino.
 
-- **Python Packages**:
-  - PyQt5
-  - imagingcontrol4 (IC4 Python wrapper for DMK cameras)
-  - (Optional) `andor3`, `pymmcore-plus`, or `thorlabs_tsi_sdk` if using those respective camera systems
-  - pyserial
-  - numpy
-  - tifffile
+- **Python Packages**:  
+  - PyQt5  
+  - imagingcontrol4 (IC4 Python wrapper for camera)  
+  - pyserial  
+  - numpy  
+  - tifffile  
 
 ---
 
@@ -84,14 +79,14 @@
    pip install --upgrade pip
    pip install -r requirements.txt
    ```  
-   - If `requirements.txt` is not provided, install manually (omit `imagingcontrol4` if you only use OpenCV cameras):
+   - If `requirements.txt` is not provided, install manually:  
      ```bash
      pip install pyqt5 imagingcontrol4 pyserial numpy tifffile
      ```
 
 4. **Install IC Imaging Control 4 SDK**  
    - Download and install the TIS IC4 SDK for your camera. Ensure that the GenTL Producer is configured for your DMK camera.  
-   - On Windows, verify that `imagingcontrol4` Python module can import successfully if you plan to use DMK cameras.
+   - On Windows, verify that `imagingcontrol4` Python module can import successfully.
 
 ---
 
@@ -144,28 +139,17 @@
      …  
      ```  
 
-  - **experiment_video.tif**: Uncompressed grayscale TIFF.
+   - **experiment_video.tif**: Uncompressed grayscale TIFF.
 
   - Use ImageJ/Fiji or Python (`tifffile`) to inspect frames and metadata.
-
-## µManager Integration (Optional)
-
-If you install `pymmcore-plus` and supply a valid `.cfg` file, you can still
-control µManager-based setups. Place your configuration in
-`prim_app/configs/MMConfig.cfg` or load one via **File → Load µManager Config
-File…**. These files are not bundled with the application.
 
 ## Packaging
 
 Build a standalone executable with PyInstaller:
 
 ```bash
-pyinstaller PRIMAcquisition.spec
+pyinstaller prim_app.spec
 ```
-
-`PRIMAcquisition.spec` bundles the installed `imagingcontrol4` package and the
-configuration files found in `prim_app/configs`. µManager files are not
-included; install additional SDKs separately if needed.
 
 ---
 
@@ -181,7 +165,6 @@ PRIMAcquisition/
 │  │  ├─ serial_thread.py
 │  │  ├─ sdk_camera_thread.py
 │  │  └─ …
-│  ├─ cameras/           ← Camera abstraction backends (IC4, OpenCV)
 │  ├─ ui/
 │  │  ├─ canvas/
 │  │  │  ├─ qtcamera_widget.py
@@ -206,28 +189,22 @@ PRIMAcquisition/
 
 ---
 
-## Arduino Firmware (PRIM_v3_04_master_clock)
+## Arduino Firmware (PRIM_v3_01)
 
-- The Arduino sketch (`PRIM_v3_04_master_clock.ino`) reads a pressure transducer via an ADS1115 and prints lines over serial at 115200 baud in the format:
+- The Arduino sketch (PRIM_v3_01.ino) reads a pressure transducer via an ADS ADC, averages samples, and prints lines over serial at 115200 baud in the format:  
   ```
-  <arduino_microseconds>,<pressure_value>
-  ```
-- Every `startup.timeDelay` milliseconds, the Arduino pulses its `CamTrig` pin to trigger one camera frame when running autonomously.
+  <frame_index>, <elapsed_time_s>, <pressure_value>
+  ```  
+- Every `startup.timeDelay` milliseconds, the Arduino pulses its `CamTrig` pin to trigger exactly one camera frame (hardware trigger).  
 - It also toggles `PumpTrig` HIGH/LOW to control an external pump via a relay or transistor.
-- **Master mode commands**:
-  - `MASTER_ON` – switch to triggered-sampling mode.
-  - `MASTER_OFF` – return to normal autonomous sampling.
-  - `TICK` – when in master mode, take one sample immediately and return a data line.
 
 ---
 
 ## Troubleshooting
 
-1. **Camera Not Listed**
-    - Ensure the GenTL Producer for your DMK camera is installed.
-    - Verify that `import imagingcontrol4` in Python works without errors if using the IC4 backend.
-    - For Andor or Thorlabs cameras, ensure their SDKs and Python packages are installed.
-    - For µManager setups, install `pymmcore-plus` and provide a valid `.cfg` file.
+1. **Camera Not Listed**  
+   - Ensure the GenTL Producer for your DMK camera is installed.  
+   - Verify that `import imagingcontrol4` in Python works without errors.
 
 2. **No Serial Data**  
    - Check Arduino COM port in Device Manager (Windows) or `/dev/tty.*` (macOS).  
@@ -237,13 +214,9 @@ PRIMAcquisition/
    - Make sure USB 3.0 port is used for the DMK camera.  
    - Lower resolution or frame rate if bandwidth is insufficient.
 
-4. **TIFF Cannot Open**
-   - Ensure you have `tifffile` installed in Python.
+4. **TIFF Cannot Open**  
+   - Ensure you have `tifffile` installed in Python.  
    - Open the TIFF in ImageJ or Python to diagnostics page metadata.
-
-5. **µManager Fails to Start**
-   - Install `pymmcore-plus` and provide a valid configuration file via
-     **Setup → Load µManager Config File…**.
 
 ---
 
