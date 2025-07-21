@@ -8,19 +8,17 @@ from PyQt5.QtWidgets import (
     QLabel,
     QPushButton,
 )
-from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import pyqtSignal
 
 
 log = logging.getLogger(__name__)
 
 
 class TopControlPanel(QWidget):
-    """PRIM device status and pump control panel."""
+    """PRIM device status panel."""
 
     parameter_changed = pyqtSignal(str, object)
     zero_requested = pyqtSignal()
-    pump_start_requested = pyqtSignal()
-    pump_stop_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -50,15 +48,6 @@ class TopControlPanel(QWidget):
         self.zero_btn.clicked.connect(self.zero_requested.emit)
         status_layout.addRow(self.zero_btn)
 
-        self.pump_start_btn = QPushButton("Start Fill")
-        self.pump_start_btn.setEnabled(False)
-        self.pump_start_btn.clicked.connect(self.pump_start_requested.emit)
-        status_layout.addRow(self.pump_start_btn)
-
-        self.pump_stop_btn = QPushButton("Stop Pump")
-        self.pump_stop_btn.setEnabled(False)
-        self.pump_stop_btn.clicked.connect(self.pump_stop_requested.emit)
-        status_layout.addRow(self.pump_stop_btn)
 
         layout.addWidget(status_box, 1)
 
@@ -75,8 +64,6 @@ class TopControlPanel(QWidget):
             color = "#D6C832"
         self.conn_lbl.setStyleSheet(f"font-weight:bold;color:{color};")
         self.zero_btn.setEnabled(connected)
-        self.pump_start_btn.setEnabled(connected)
-        self.pump_stop_btn.setEnabled(connected)
 
     def update_prim_data(self, idx: int, t_dev: float, p_dev: float):
         """

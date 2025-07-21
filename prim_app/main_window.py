@@ -216,11 +216,11 @@ class MainWindow(QMainWindow):
         top_row_lay.setContentsMargins(0, 0, 0, 0)
         top_row_lay.setSpacing(10)
 
-        # Camera Control Tabs (Info & Controls)
+        # Camera Control Tabs (Camera & Controls)
         self.camera_tabs = QTabWidget()
         self.camera_tabs.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
 
-        # Info Tab
+        # Camera Info Tab
         info_tab = QWidget()
         info_layout = QFormLayout(info_tab)
         info_layout.setContentsMargins(6, 6, 6, 6)
@@ -248,7 +248,7 @@ class MainWindow(QMainWindow):
         self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
         info_layout.addRow("", self.btn_start_camera)
 
-        self.camera_tabs.addTab(info_tab, "Info")
+        self.camera_tabs.addTab(info_tab, "Camera")
 
         # Controls Tab
         controls_tab = QWidget()
@@ -273,13 +273,13 @@ class MainWindow(QMainWindow):
         # PRIM Device panel
         self.top_ctrl = TopControlPanel(self)
         self.top_ctrl.zero_requested.connect(self._on_zero_prim)
-        self.top_ctrl.pump_start_requested.connect(self._on_start_pump)
-        self.top_ctrl.pump_stop_requested.connect(self._on_stop_pump)
         top_row_lay.addWidget(self.top_ctrl, stretch=2)
 
         # Syringe Pump panel
         self.pump_panel = PumpControlPanel(self)
-        top_row_lay.addWidget(self.pump_panel, stretch=1)
+        self.pump_panel.pump_start_requested.connect(self._on_start_pump)
+        self.pump_panel.pump_stop_requested.connect(self._on_stop_pump)
+        top_row_lay.addWidget(self.pump_panel, stretch=2)
 
         # Plot controls panel
         self.plot_control_panel = PlotControlPanel(self)
@@ -447,7 +447,7 @@ class MainWindow(QMainWindow):
             # 3) On any camera error, pop up a dialog and tear everything down
             self.camera_thread.error.connect(self._on_camera_error)
 
-            # Show “Connecting…” in the Info tab
+            # Show “Connecting…” in the Camera tab
             self.lbl_cam_connection.setText("Connecting…")
             self.lbl_cam_frame.setText("0")
             self.lbl_cam_resolution.setText("N/A")
@@ -493,7 +493,7 @@ class MainWindow(QMainWindow):
     @pyqtSlot(QImage, object)
     def _update_camera_info(self, image: QImage, raw):
         """
-        (Optional) Keep updating frame count & resolution in the “Info” tab
+        (Optional) Keep updating frame count & resolution in the “Camera” tab
         every time a new frame arrives.  If you want to hook this up, simply:
             self.camera_thread.frame_ready.connect(self._update_camera_info)
         """
@@ -857,6 +857,8 @@ class MainWindow(QMainWindow):
             "connected" in status.lower() or "opened serial port" in status.lower()
         )
         self.top_ctrl.update_connection_status(status, connected_flag)
+        if hasattr(self, "pump_panel"):
+            self.pump_panel.update_connection_status(connected_flag)
 
         self._refresh_recording_button_states()
 

@@ -13,9 +13,11 @@ log = logging.getLogger(__name__)
 
 
 class PumpControlPanel(QGroupBox):
-    """Simple UI panel for syringe pump info."""
+    """Simple UI panel for syringe pump info and controls."""
 
     set_rate_requested = pyqtSignal(float)
+    pump_start_requested = pyqtSignal()
+    pump_stop_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__("Syringe Pump", parent)
@@ -39,6 +41,21 @@ class PumpControlPanel(QGroupBox):
         self.set_rate_btn.clicked.connect(self._emit_rate)
         layout.addRow(self.set_rate_btn)
 
+        self.start_btn = QPushButton("Start Fill")
+        self.start_btn.setEnabled(False)
+        self.start_btn.clicked.connect(self.pump_start_requested.emit)
+        layout.addRow(self.start_btn)
+
+        self.stop_btn = QPushButton("Stop Pump")
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self.pump_stop_requested.emit)
+        layout.addRow(self.stop_btn)
+
     def _emit_rate(self):
         self.set_rate_requested.emit(self.target_rate_spin.value())
+
+    def update_connection_status(self, connected: bool):
+        """Enable or disable pump controls based on PRIM connection."""
+        self.start_btn.setEnabled(connected)
+        self.stop_btn.setEnabled(connected)
 

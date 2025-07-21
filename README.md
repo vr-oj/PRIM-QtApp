@@ -35,7 +35,7 @@
     folder from **File → Set Results Folder…** in the menu bar.
 
 - **Simple UI Layout**  
-  - **Top row**: Camera Info/Controls tabs, Arduino status/controls (TopControlPanel), Plot controls (PlotControlPanel).  
+  - **Top row**: Camera/Controls tabs, Arduino status/controls (TopControlPanel), Syringe Pump panel, Plot controls (PlotControlPanel).
   - **Bottom row**: Live camera viewfinder (OpenGL QtCameraWidget) | Live pressure plot (PressurePlotWidget).
   - Menu actions for connecting to PRIM device, arming/stopping recording, exporting plot data/image.
 
@@ -103,8 +103,8 @@
    - Click **Connect PRIM Device**.
    - TopControlPanel will display “PRIM Connected.” Live pressure data will start streaming when the Arduino is running.
 
-3. **Select Camera & Resolution**  
-   - In the **Camera** → **Info** tab, choose your camera from the **Device** drop‑down.  
+3. **Select Camera & Resolution**
+   - In the **Camera** tab, choose your camera from the **Device** drop‑down.
    - Wait for “Connecting…” to change to “Connected.”  
    - The **Resolution** drop‑down populates with available `Width×Height (PixelFormat)` entries.  
    - Select a resolution, then click **Start Camera**. Live preview appears in the left pane.
