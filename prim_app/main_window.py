@@ -266,6 +266,8 @@ class MainWindow(QMainWindow):
         # TopControlPanel (center)
         self.top_ctrl = TopControlPanel(self)
         self.top_ctrl.zero_requested.connect(self._on_zero_prim)
+        self.top_ctrl.pump_start_requested.connect(self._on_start_pump)
+        self.top_ctrl.pump_stop_requested.connect(self._on_stop_pump)
         top_row_lay.addWidget(self.top_ctrl, stretch=2)
 
         # PlotControlPanel (right)
@@ -676,6 +678,34 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(msg, 3000)
         except Exception:
             log.exception("Failed to send zero command to Arduino")
+
+    @pyqtSlot()
+    def _on_start_pump(self):
+        """Send command to start the syringe pump without recording."""
+        try:
+            if self._serial_thread and self._serial_thread.isRunning():
+                self._serial_thread.send_command("L")
+                self.statusBar().showMessage("Pump start command sent.", 3000)
+            else:
+                self.statusBar().showMessage(
+                    "PRIM device not connected; cannot start pump.", 3000
+                )
+        except Exception:
+            log.exception("Failed to send start pump command")
+
+    @pyqtSlot()
+    def _on_stop_pump(self):
+        """Send command to stop the syringe pump."""
+        try:
+            if self._serial_thread and self._serial_thread.isRunning():
+                self._serial_thread.send_command("O")
+                self.statusBar().showMessage("Pump stop command sent.", 3000)
+            else:
+                self.statusBar().showMessage(
+                    "PRIM device not connected; cannot stop pump.", 3000
+                )
+        except Exception:
+            log.exception("Failed to send stop pump command")
 
     def _set_initial_splitter_sizes(self):
         if self.bottom_split:
