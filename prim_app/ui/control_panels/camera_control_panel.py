@@ -114,13 +114,28 @@ class CameraControlPanel(QWidget):
             min_val = to_ui(prop.minimum)
             max_val = to_ui(prop.maximum)
             cur_val = to_ui(prop.value)
-            step = (max_val - min_val) / 100.0
+
+            # Try to use the property's increment if available; fall back to
+            # dividing the range into 100 steps which was the previous
+            # behaviour. Using the increment gives a much finer control for
+            # properties like ExposureTime that support very small steps.
+            step = 0.0
+            try:
+                step = to_ui(getattr(prop, "increment"))
+            except Exception:
+                step = 0.0
+            if not step or step <= 0.0:
+                step = (max_val - min_val) / 100.0
 
             spinbox.setRange(min_val, max_val)
             spinbox.setSingleStep(step)
 
             if step < 1.0:
-                decimals = max(decimals, int(-math.floor(math.log10(step))) + 1)
+                # Ensure enough decimal places to represent the step size but
+                # avoid artificially increasing the precision. The old formula
+                # added one extra decimal place which caused "0.01" steps to
+                # display three decimals.
+                decimals = max(decimals, int(-math.log10(step)))
             spinbox.setDecimals(min(decimals, 6))
 
             spinbox.setValue(cur_val)
