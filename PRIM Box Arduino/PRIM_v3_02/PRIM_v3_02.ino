@@ -603,12 +603,6 @@ void showNewData() {
     runState = 0;
     encoderPos = 0;
   }
-  else if (receivedChar == 'L') {
-    digitalWrite(PumpTrig, HIGH);
-  }
-  else if (receivedChar == 'O') {
-    digitalWrite(PumpTrig, LOW);
-  }
   else if (receivedChar == 'Z') {
     digitalWrite(PumpTrig, LOW);
     tft.fillScreen(ST7735_BLACK);
