@@ -35,12 +35,12 @@ class WelcomeDialog(QDialog):
         self.steps = [
             (
                 "Connect PRIM Device",
-                "Select your Arduino from the PRIM Device dropdown and click Connect.",
+                "Select your Arduino from the PRIM Device dropdown and click Connect PRIM Device. PRIM Device will show up as USB Serial Device (COM#)",
                 "plug.svg",
             ),
             (
                 "Configure Camera",
-                "Choose your camera if an SDK has been installed. If using \u00b5Manager, make sure to select the software path and include the config file (.cfg) on the Setup menu.",
+                "Choose your camera and resolution from the Select Device and Select Resolution dropdown menu. (At the moment only Imaging Source cameras are supported)",
                 "settings.svg",
             ),
             (
@@ -55,7 +55,7 @@ class WelcomeDialog(QDialog):
             ),
             (
                 "Finish & Reset",
-                "Click Stop Recording, then Zero PRIM to reset the pressure baseline.",
+                "Click Stop Recording, then Zero PRIM to reset the pressure baseline. Files will be saved to the PRIMAcquisition folder in documents. Destination can be changed from the File menu",
                 "reset_zoom.svg",
             ),
         ]
