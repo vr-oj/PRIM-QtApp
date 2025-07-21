@@ -206,12 +206,14 @@ def main_app_entry():
     # Look for style.qss within the ui directory
     style_path = os.path.join(base_dir, "ui", "style.qss")
     if os.path.exists(style_path):
-        qss = load_processed_qss(style_path)
-        if qss:
-            app.setStyleSheet(qss)
+        try:
+            with open(style_path, "r") as f:
+                app.setStyleSheet(f.read())
             log.info(f"Applied stylesheet from: {style_path}")
-        else:
-            log.warning(f"Stylesheet was empty or failed to load: {style_path}")
+        except Exception as e:
+            log.warning(
+                f"Failed to load stylesheet {style_path}: {e}. Using default 'Fusion' style."
+            )
             app.setStyle(QStyleFactory.create("Fusion"))
     else:
         log.info("No style.qss found. Using default 'Fusion' style.")
