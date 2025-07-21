@@ -13,9 +13,7 @@ from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
     QWidget,
-    QHBoxLayout,
     QVBoxLayout,
-    QSplitter,
     QFormLayout,
     QDockWidget,
     QTextEdit,
@@ -74,6 +72,7 @@ from ui.canvas.qtcamera_widget import QtCameraWidget
 from ui.control_panels.camera_control_panel import CameraControlPanel
 from ui.control_panels.top_control_panel import TopControlPanel
 from ui.control_panels.plot_control_panel import PlotControlPanel
+from ui.control_panels.pump_control_panel import PumpControlPanel
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
 
 from threads.serial_thread import SerialThread
@@ -108,6 +107,9 @@ class MainWindow(QMainWindow):
 
         # Top control (Arduino status)
         self.top_ctrl = None
+
+        # Pump control panel
+        self.pump_panel = None
 
         # Plotting
         self.pressure_plot_widget = None
@@ -145,7 +147,6 @@ class MainWindow(QMainWindow):
         self._set_initial_control_states()
 
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
-        QTimer.singleShot(50, self._set_initial_splitter_sizes)
         log.info("MainWindow initialized.")
         self.showMaximized()
 
@@ -198,8 +199,9 @@ class MainWindow(QMainWindow):
 
     def _build_central_widget_layout(self):
         """
-        Top row: [Camera Info/Controls tabs] [TopControlPanel] [PlotControlPanel]
-        Bottom row: [QtCameraWidget (live)] | [PressurePlotWidget (live plot)]
+        Top row: control ribbon with Camera | PRIM Device | Syringe Pump | Plot
+        Controls. Bottom row: [QtCameraWidget (live)] | [PressurePlotWidget
+        (live plot)]
         """
         self.camera_widget = QtCameraWidget(self)
 
@@ -208,7 +210,7 @@ class MainWindow(QMainWindow):
         main_vlay.setContentsMargins(4, 4, 4, 4)
         main_vlay.setSpacing(6)
 
-        # ─── Top Row ──────────────────────────────────────────────────────
+        # ─── Top Row (Control Ribbon) ─────────────────────────────────────
         top_row_widget = QWidget()
         top_row_lay = QHBoxLayout(top_row_widget)
         top_row_lay.setContentsMargins(0, 0, 0, 0)
@@ -261,40 +263,48 @@ class MainWindow(QMainWindow):
 
         self.camera_tabs.addTab(controls_tab, "Controls")
 
-        top_row_lay.addWidget(self.camera_tabs, stretch=2)
+        cam_group = QGroupBox("Camera")
+        cam_layout = QVBoxLayout(cam_group)
+        cam_layout.setContentsMargins(3, 3, 3, 3)
+        cam_layout.setSpacing(4)
+        cam_layout.addWidget(self.camera_tabs)
+        top_row_lay.addWidget(cam_group, stretch=2)
 
-        # TopControlPanel (center)
+        # PRIM Device panel
         self.top_ctrl = TopControlPanel(self)
         self.top_ctrl.zero_requested.connect(self._on_zero_prim)
         self.top_ctrl.pump_start_requested.connect(self._on_start_pump)
         self.top_ctrl.pump_stop_requested.connect(self._on_stop_pump)
         top_row_lay.addWidget(self.top_ctrl, stretch=2)
 
-        # PlotControlPanel (right)
+        # Syringe Pump panel
+        self.pump_panel = PumpControlPanel(self)
+        top_row_lay.addWidget(self.pump_panel, stretch=1)
+
+        # Plot controls panel
         self.plot_control_panel = PlotControlPanel(self)
         top_row_lay.addWidget(self.plot_control_panel, stretch=2)
 
         main_vlay.addWidget(top_row_widget, stretch=0)
 
         # ─── Bottom Row ───────────────────────────────────────────────────
-        self.bottom_split = QSplitter(Qt.Horizontal)
-        self.bottom_split.setChildrenCollapsible(False)
+        bottom_row_widget = QWidget()
+        bottom_row_layout = QHBoxLayout(bottom_row_widget)
+        bottom_row_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_row_layout.setSpacing(6)
 
         # Left: live viewfinder
         self.camera_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.bottom_split.addWidget(self.camera_widget)
+        bottom_row_layout.addWidget(self.camera_widget, stretch=1)
 
         # Right: live plot
         self.pressure_plot_widget = PressurePlotWidget(self)
         self.pressure_plot_widget.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Expanding
         )
-        self.bottom_split.addWidget(self.pressure_plot_widget)
+        bottom_row_layout.addWidget(self.pressure_plot_widget, stretch=1)
 
-        self.bottom_split.setStretchFactor(0, 1)
-        self.bottom_split.setStretchFactor(1, 1)
-
-        main_vlay.addWidget(self.bottom_split, stretch=1)
+        main_vlay.addWidget(bottom_row_widget, stretch=1)
 
         # ─── Wire Up PlotControlPanel → PressurePlotWidget ────────────────
         if hasattr(self.pressure_plot_widget, "set_auto_scale_x"):
@@ -706,14 +716,6 @@ class MainWindow(QMainWindow):
                 )
         except Exception:
             log.exception("Failed to send stop pump command")
-
-    def _set_initial_splitter_sizes(self):
-        if self.bottom_split:
-            w = self.bottom_split.width()
-            if w > 0:
-                self.bottom_split.setSizes([int(w * 0.6), int(w * 0.4)])
-            else:
-                QTimer.singleShot(100, self._set_initial_splitter_sizes)
 
     def _set_initial_control_states(self):
         if hasattr(self, "start_recording_action"):
