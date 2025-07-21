@@ -50,7 +50,7 @@ class QtCameraWidget(QOpenGLWidget):
         if self._current_qimage:
             # Scale the image to fit this widget, preserving aspect ratio
             scaled = self._current_qimage.scaled(
-                self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                self.size(), Qt.KeepAspectRatio, Qt.FastTransformation
             )
             # Center the image
             x = (self.width() - scaled.width()) // 2
