@@ -203,7 +203,8 @@ def main_app_entry():
     sys.excepthook = custom_exception_handler
 
     # ─── Load Application QSS (if present) ────────────────────────────────
-    style_path = os.path.join(base_dir, "style.qss")
+    # Look for style.qss within the ui directory
+    style_path = os.path.join(base_dir, "ui", "style.qss")
     if os.path.exists(style_path):
         qss = load_processed_qss(style_path)
         if qss:
@@ -218,11 +219,17 @@ def main_app_entry():
 
     # ─── Import & Launch MainWindow ───────────────────────────────────────
     from main_window import MainWindow
+    from ui.welcome_dialog import WelcomeDialog
 
     main_win = MainWindow()
     display_version = CONFIG_APP_VERSION or "Unknown"
     main_win.setWindowTitle(f"{APP_NAME} v{display_version}")
     main_win.show()
+
+    # Show welcome dialog on startup (respect user's "Don't show again" choice)
+    welcome = WelcomeDialog(parent=main_win)
+    if not getattr(welcome, "_skip", False):
+        welcome.exec_()
 
     exit_code = app.exec_()
     log.info(f"Application event loop ended with exit code {exit_code}.")
