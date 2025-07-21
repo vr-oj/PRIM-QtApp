@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QSlider,
     QHBoxLayout,
+    QVBoxLayout,
 )
 
 from imagingcontrol4 import IC4Exception
