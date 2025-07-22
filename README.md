@@ -1,226 +1,173 @@
-
 # PRIMAcquisition
 
-**PRIMAcquisition** (PRIM) is a Python‑based application for synchronized acquisition of pressure data (from an Arduino‑controlled pressure transducer) and live camera imaging. Designed for vascular physiology experiments, PRIMAcquisition displays live pressure traces, controls and previews a high‑speed camera feed, and saves synchronized recordings (as a CSV and TIFF stack) for offline analysis.
+**PRIMAcquisition** (PRIM) is a Python-based application for synchronized acquisition of pressure data (from an Arduino-controlled pressure transducer) and live camera imaging. Designed for vascular physiology experiments, PRIMAcquisition displays live pressure traces, previews a high-speed camera feed, and saves synchronized recordings (as a CSV and TIFF stack) for offline analysis.
 
 ---
 
 ## Features
 
-- **Real‑Time Pressure Plotting**  
-  - Receives pressure readings from an Arduino (PRIM device) over serial (115200 baud).  
-  - Displays live pressure vs. time trace in a PyQt5 plot widget.  
-  - Numeric readouts (frame index, device time, pressure) in the TopControlPanel.
+### 🎥 Real-Time Pressure + Video Recording
+- **Arduino is the master clock**:
+  - Generates precise trigger pulses (`CamTrig`) to the camera for each frame.
+  - Immediately sends synchronized serial data: `frame_index, elapsed_time_s, pressure_value`.
+- **App listens for first Arduino tick**, then begins writing data.
+- **Perfect sync** is maintained:
+  - Each TIFF frame corresponds to exactly one Arduino trigger.
+  - Each pressure value corresponds to exactly one recorded frame.
 
-- **High‑Speed Camera Preview & Control**  
-  - Integrates with The Imaging Source DMK cameras (e.g., DMK 33UP5000, DMK 33UX250) via IC Imaging Control 4 (IC4).  
-  - Lists all connected USB3 Vision cameras and enumerates supported resolutions (width×height with PixelFormat).  
-  - Live preview in an OpenGL-backed QtCameraWidget, with camera control sliders (exposure, gain, brightness) in CameraControlPanel.
+### 📈 Live Pressure Plotting
+- Receives pressure readings from Arduino (115200 baud).
+- Displays live pressure trace in real time.
+- Shows frame index, elapsed time, and pressure in the top panel.
 
-- **Synchronized Recording**  
-  - Hardware‑triggered camera acquisition: Arduino pulses `CamTrig` pin for each sample.  
-  - RecordingManager captures exactly one camera frame per Arduino trigger, pulls the corresponding serial line (`frame_idx, elapsed_time_s, pressure`) and writes:
-    - **experiment_data.csv** (`frame_index, elapsed_time_s, pressure_value`)
-    - **experiment_video.tif** (uncompressed grayscale TIFF)
+### 🎥 High-Speed Camera Preview & Control
+- Integrates with The Imaging Source DMK cameras via IC Imaging Control 4 (IC4).
+- Lists connected USB3 Vision cameras with supported resolutions.
+- Displays a full-resolution preview using OpenGL viewfinder.
+- Camera settings (exposure, gain, brightness) adjustable via sliders.
 
-  - Output folder structure:  
-    ```
-    PRIM_ROOT/YYYY-MM-DD/FillN/
-      ├ experiment_data.csv
-      └ experiment_video.tif
-    ```
-    The default `PRIM_ROOT` is `~/Documents/PRIMAcquisition Results`. You can
-    override this location by setting the environment variable
-    `PRIM_RESULTS_DIR` before launching the application, or choose a different
-    folder from **File → Set Results Folder…** in the menu bar.
-
-- **Simple UI Layout**  
-  - **Top row**: Camera/Controls tabs, Arduino status/controls (TopControlPanel), Syringe Pump panel, Plot controls (PlotControlPanel).
-  - **Bottom row**: Live camera viewfinder (OpenGL QtCameraWidget) | Live pressure plot (PressurePlotWidget).
-  - Menu actions for connecting to PRIM device, arming/stopping recording, exporting plot data/image.
+### 💾 Synchronized Recording Output
+- Folder structure:
+```
+PRIM_ROOT/YYYY-MM-DD/FillN/
+├ recording_*.csv     ← Pressure + frame index
+└ recording_*.tif     ← Grayscale video, one frame per Arduino trigger
+```
+- Files are automatically named and saved in time-stamped subfolders.
+- Environment variable `PRIM_RESULTS_DIR` overrides default save location.
 
 ---
 
-## Requirements
+## How Synchronization Works
 
-- **Operating System**: Windows 10/11 (with IC4 SDK installed), or macOS with GenTL drivers.  
-- **Python**: 3.8 – 3.10 (tested); use a virtual environment.  
-- **Hardware**:  
-  - DMK 33UP5000 or DMK 33UX250 camera with USB 3.0.  
-  - Arduino (or compatible) running PRIM firmware (PRIM_v3_01.ino).  
-  - Pressure transducer wired to an ADS ADC (e.g., ADS1115), connected to Arduino.
+PRIMAcquisition uses a **hardware-triggered acquisition model**:
 
-- **Python Packages**:  
-  - PyQt5  
-  - imagingcontrol4 (IC4 Python wrapper for camera)  
-  - pyserial  
-  - numpy  
-  - tifffile  
+| Component | Role |
+|----------|------|
+| **Arduino** | ⏱ Master clock; sends trigger pulses and serial data |
+| **Camera**  | 🎥 Triggered via `CamTrig` pin from Arduino |
+| **App**     | 🧠 Waits for first Arduino message, then saves video + CSV |
+
+Each cycle:
+1. Arduino triggers a camera frame via digital HIGH → LOW on `CamTrig`.
+2. Arduino immediately sends pressure data and timestamp via serial.
+3. App receives both the frame and serial line, logs them together.
+
+Result: **pixel-perfect and time-accurate alignment** of pressure + video frames.
 
 ---
 
 ## Installation
 
-1. **Clone the Repository**  
+1. **Clone the Repository**
+ ```bash
+ git clone https://github.com/your-repo/PRIMAcquisition.git
+ cd PRIMAcquisition/prim_app
+```
+
+2. **Create a Virtual Environment**
+
    ```bash
-   git clone https://github.com/your‑repo/PRIMAcquisition.git
-   cd PRIMAcquisition/prim_app
+   python -m venv .venv
+   .venv\Scripts\activate   # On Windows
    ```
 
-2. **Create a Virtual Environment**  
-   ```bash
-   python3 -m venv primenv
-   source primenv/bin/activate    # macOS/Linux
-   primenv\Scripts\activate.bat   # Windows
-   ```
+3. **Install Dependencies**
 
-3. **Install Dependencies**  
    ```bash
-   pip install --upgrade pip
    pip install -r requirements.txt
-   ```  
-   - If `requirements.txt` is not provided, install manually:  
-     ```bash
-     pip install pyqt5 imagingcontrol4 pyserial numpy tifffile
-     ```
+   ```
 
-4. **Install IC Imaging Control 4 SDK**  
-   - Download and install the TIS IC4 SDK for your camera. Ensure that the GenTL Producer is configured for your DMK camera.  
-   - On Windows, verify that `imagingcontrol4` Python module can import successfully.
+   Or manually:
+
+   ```bash
+   pip install pyqt5 imagingcontrol4 pyserial numpy tifffile
+   ```
+
+4. **Install IC4 SDK**
+
+   * Required for DMK camera support.
+   * Ensure GenTL Producer is installed and camera enumerates via IC4.
 
 ---
 
 ## Running the App
 
-1. **Launch PRIMAcquisition**  
+1. **Start App**
+
    ```bash
-   cd prim_app
    python prim_app.py
    ```
 
-2. **Connect PRIM Device (Arduino)**
-   - In the main toolbar, choose your serial port from the drop‑down (e.g. COM3).
-   - Click **Connect PRIM Device**.
-   - TopControlPanel will display “PRIM Connected.” Live pressure data will start streaming when the Arduino is running.
+2. **Connect Arduino**
 
-3. **Select Camera & Resolution**
-   - In the **Camera** tab, choose your camera from the **Device** drop‑down.
-   - Wait for “Connecting…” to change to “Connected.”  
-   - The **Resolution** drop‑down populates with available `Width×Height (PixelFormat)` entries.  
-   - Select a resolution, then click **Start Camera**. Live preview appears in the left pane.
+   * Select COM port (e.g., COM8), then click **Connect PRIM Device**.
+   * Confirm status shows “Connected”.
 
-4. **Preview & Adjust**  
-   - Switch to the **Controls** tab to adjust Exposure, Gain, Brightness, etc.  
-   - Confirm live feed is smooth and properly exposed.
+3. **Configure Camera**
 
-5. **Start Recording**
-   - In the menu bar, go to **Acquisition → Start Recording** (or press **Ctrl+R**).
-   - A new folder (`PRIM_ROOT/YYYY-MM-DD/FillN/`) will be created automatically.
-     To record somewhere else, set `PRIM_RESULTS_DIR` before launching the app or
-     use **File → Set Results Folder…** to pick a new location.
-   - The app sends the character `G` to the PRIM device to begin camera triggers and serial output.
-   - RecordingManager launches in the background: Camera frames and serial data are synced and saved.
-   - The status bar shows “Recording to ‘…’ …”.
+   * Select camera and resolution.
+   * Click **Start Camera** to preview live feed.
 
-6. **Stop Recording**
-   - Click **Acquisition → Stop Recording** (or press **Ctrl+T**).
-   - The character `S` is sent to the PRIM device so it halts camera acquisition and data streaming.
-   - RecordingManager finalizes `experiment_data.csv` and `experiment_video.tif`.
-   - Status bar reads “Recording stopped and saved.”
+4. **Start Recording**
 
-7. **Review Output**  
-   - Navigate to the folder created in step 5.  
-   - **experiment_data.csv**:  
-     ```
-     frame_index, elapsed_time_s, pressure_value
-     1, 0.1000, 15.32
-     2, 0.2000, 15.47
-     3, 0.3000, 15.45
-     …  
-     ```  
+   * Use menu: **Acquisition → Start Recording** or press **Ctrl+R**.
+   * App waits for first Arduino `'T...'` tick to begin synchronized recording.
+   * TIFF and CSV are saved in the correct folder.
 
-   - **experiment_video.tif**: Uncompressed grayscale TIFF.
+5. **Stop Recording**
 
-  - Use ImageJ/Fiji or Python (`tifffile`) to inspect frames and metadata.
-
-## Packaging
-
-Build a standalone executable with PyInstaller:
-
-```bash
-pyinstaller prim_app.spec
-```
+   * Use menu: **Acquisition → Stop Recording** or press **Ctrl+T**.
+   * Files are finalized and closed cleanly.
 
 ---
 
-## Folder Structure
+## Arduino Firmware (PRIM_v3_02)
 
-```
-PRIMAcquisition/
-├─ prim_app/
-│  ├─ main_window.py
-│  ├─ prim_app.py
-│  ├─ recording_manager.py    ← Recording logic lives here
-│  ├─ threads/
-│  │  ├─ serial_thread.py
-│  │  ├─ sdk_camera_thread.py
-│  │  └─ …
-│  ├─ ui/
-│  │  ├─ canvas/
-│  │  │  ├─ qtcamera_widget.py
-│  │  │  └─ pressure_plot_widget.py
-│  │  └─ control_panels/
-│  │     ├─ camera_control_panel.py
-│  │     ├─ top_control_panel.py
-│  │     └─ plot_control_panel.py
-│  ├─ utils/
-│  │  ├─ app_settings.py
-│  │  ├─ config.py
-│  │  ├─ path_helpers.py          ← Folder creation logic
-│  │  └─ utils.py
-│  ├─ ui/… (icons, etc)
-│  └─ requirements.txt
-└─ README.md  ← This file
-```
+* Loops every `startup.timeDelay` milliseconds.
+* Sends a `CamTrig` HIGH–LOW pulse to trigger one camera frame.
+* Immediately sends formatted serial data:
 
-- **`main_window.py`** contains most of the UI setup, thread management, and menu actions.  
-- **`recording_manager.py`** implements the `RecordingManager` that handles synchronized CSV+TIFF writing.  
-- **`path_helpers.py`** provides `get_next_fill_folder()` that creates date/FillN folders under `PRIM_ROOT`.
-
----
-
-## Arduino Firmware (PRIM_v3_01)
-
-- The Arduino sketch (PRIM_v3_01.ino) reads a pressure transducer via an ADS ADC, averages samples, and prints lines over serial at 115200 baud in the format:  
   ```
-  <frame_index>, <elapsed_time_s>, <pressure_value>
-  ```  
-- Every `startup.timeDelay` milliseconds, the Arduino pulses its `CamTrig` pin to trigger exactly one camera frame (hardware trigger).  
-- It also toggles `PumpTrig` HIGH/LOW to control an external pump via a relay or transistor.
+  frame_index, elapsed_time_s, pressure_value
+  ```
+* Operates with precise timing via `micros()` and `millis()`.
+
+---
+
+## Example Output
+
+**recording_YYYY-MM-DD_HH-MM-SS_pressure.csv**
+
+```
+frame_index, elapsed_time_s, pressure_value
+1, 0.1000, 15.32
+2, 0.2000, 15.47
+3, 0.3000, 15.45
+...
+```
+
+**recording_YYYY-MM-DD_HH-MM-SS_video.tif**
+
+* Grayscale TIFF
+* 1 frame per Arduino trigger
+* Metadata optionally includes pressure + timestamp
 
 ---
 
 ## Troubleshooting
 
-1. **Camera Not Listed**  
-   - Ensure the GenTL Producer for your DMK camera is installed.  
-   - Verify that `import imagingcontrol4` in Python works without errors.
-
-2. **No Serial Data**  
-   - Check Arduino COM port in Device Manager (Windows) or `/dev/tty.*` (macOS).  
-   - Confirm baud rate is set to 115200 in both Arduino code and `SerialThread`.
-
-3. **Slow or Dropped Frames**  
-   - Make sure USB 3.0 port is used for the DMK camera.  
-   - Lower resolution or frame rate if bandwidth is insufficient.
-
-4. **TIFF Cannot Open**  
-   - Ensure you have `tifffile` installed in Python.  
-   - Open the TIFF in ImageJ or Python to diagnostics page metadata.
+| Issue                | Fix                                         |
+| -------------------- | ------------------------------------------- |
+| Camera not listed    | Verify IC4 SDK + GenTL Producer installed   |
+| Serial shows no data | Check Arduino COM port and baud rate        |
+| TIFF won’t open      | Use ImageJ/Fiji or Python `tifffile`        |
+| Dropped frames       | Use USB 3.0 and reduce resolution if needed |
 
 ---
 
 ## License
 
-This project is licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+[https://creativecommons.org/licenses/by-nc-sa/4.0/](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 
