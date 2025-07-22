@@ -69,7 +69,7 @@ from utils.config import (
     PLOT_DEFAULT_Y_MIN,
     PLOT_DEFAULT_Y_MAX,
 )
-from utils.path_helpers import get_next_fill_folder
+from utils.path_helpers import get_next_fill_folder, resource_path
 from ui.canvas.qtcamera_widget import QtCameraWidget
 from ui.control_panels.camera_control_panel import CameraControlPanel
 from ui.control_panels.top_control_panel import TopControlPanel
@@ -159,7 +159,7 @@ class MainWindow(QMainWindow):
     # ─── UI Builders ────────────────────────────────────────────────────────
 
     def _init_paths_and_icons(self):
-        base = os.path.dirname(os.path.abspath(__file__))
+        base = resource_path()
         icon_dir = os.path.join(base, "ui", "icons")
         if not os.path.isdir(icon_dir):
             alt_icon_dir = os.path.join(

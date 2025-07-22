@@ -1,6 +1,7 @@
 # File: prim_app/ui/welcome_dialog.py
 
 import os
+from utils.path_helpers import resource_path
 from PyQt5.QtCore import Qt, QSettings
 from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtWidgets import (
@@ -136,7 +137,7 @@ class WelcomeDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _icon(self, name: str) -> QIcon:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
+        base_dir = resource_path("ui")
         icon_path = os.path.join(base_dir, "icons", name)
         return QIcon(icon_path) if os.path.exists(icon_path) else QIcon()
 
