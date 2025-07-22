@@ -12,6 +12,7 @@ from PyQt5.QtCore import Qt, QCoreApplication
 from PyQt5.QtGui import QIcon, QSurfaceFormat, QPalette, QColor
 import utils.config as config
 from utils.config import APP_NAME, APP_VERSION as CONFIG_APP_VERSION
+from utils.path_helpers import resource_path
 
 import matplotlib
 
@@ -161,7 +162,7 @@ def main_app_entry():
     )
 
     # ─── Load & Apply App Icon ─────────────────────────────────────────────
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = resource_path()
     icon_dir = os.path.join(base_dir, "ui", "icons")
     if not os.path.isdir(icon_dir):
         alt_icon_dir = os.path.join(

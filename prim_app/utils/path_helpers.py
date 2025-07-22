@@ -1,10 +1,24 @@
 # prim_app/utils/path_helpers.py
 
 import os
+import sys
 from datetime import date
 from pathlib import Path
 
 import utils.config as config
+
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def resource_path(*parts: str) -> str:
+    """Return absolute path to a bundled resource."""
+    base = (
+        os.path.join(sys._MEIPASS, "prim_app")
+        if getattr(sys, "_MEIPASS", None)
+        else BASE_DIR
+    )
+    return os.path.join(base, *parts)
 
 
 def get_next_fill_folder() -> str:
@@ -41,3 +55,4 @@ def get_next_fill_folder() -> str:
     Path(new_fill_path).mkdir(parents=True, exist_ok=True)
 
     return new_fill_path
+
