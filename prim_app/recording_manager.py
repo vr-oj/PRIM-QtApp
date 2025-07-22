@@ -47,6 +47,7 @@ class RecordingManager(QObject):
         self._samples_written = 0
         self._pending_samples = deque()
 
+
     @pyqtSlot()
     def start_recording(self):
         """Prepare file paths and wait for the first pressure sample."""
@@ -124,6 +125,7 @@ class RecordingManager(QObject):
                 self._last_device_time = t_device
                 self._samples_written += 1
                 self._pending_samples.append((frameIdx, t_device))
+
             except Exception as e:
                 print(
                     f"[RecordingManager] Error writing CSV row ({frameIdx}, {t_device}, {pressure}): {e}"
@@ -148,6 +150,7 @@ class RecordingManager(QObject):
                 self._frame_counter += 1
                 self._frames_written += 1
                 self._last_device_time = t_device
+
             except Exception as e:
                 failed_idx = max(0, self._frame_counter)
                 print(f"[RecordingManager] Error writing TIFF page for frame {failed_idx}: {e}")
@@ -197,6 +200,7 @@ class RecordingManager(QObject):
             and self._frames_written == self._samples_written
             and not self._pending_samples
         ):
+
             self.stop_recording()
 
     def _qimage_to_numpy(self, qimage):
