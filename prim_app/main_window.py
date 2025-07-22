@@ -8,6 +8,7 @@ import csv
 import json
 from datetime import datetime
 import imagingcontrol4 as ic4
+import subprocess
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -53,6 +54,7 @@ from utils.app_settings import (
     load_app_setting,
     SETTING_LAST_CAMERA_INDEX,
     SETTING_RESULTS_DIR,
+    SETTING_OPEN_FOLDER_PROMPT,
 )
 import utils.config as config
 from utils.config import (
@@ -92,6 +94,10 @@ class MainWindow(QMainWindow):
         self._serial_active = False
         self._recorder_thread = None
         self._recorder_worker = None
+        self._current_fill_folder = None
+        self._open_folder_prompt = load_app_setting(
+            SETTING_OPEN_FOLDER_PROMPT, True
+        )
 
         # Camera‐related
         self.device_combo = None
@@ -935,6 +941,7 @@ class MainWindow(QMainWindow):
         writing there.
         """
         outdir = get_next_fill_folder()
+        self._current_fill_folder = outdir
 
         fill_folder_name = os.path.basename(outdir)
 
@@ -1024,6 +1031,7 @@ class MainWindow(QMainWindow):
             self._recorder_worker = None
             # If you need to update button states right away:
             self._refresh_recording_button_states()
+            self._maybe_prompt_open_folder()
 
         # Connect the worker’s finished → cleanup slot
         self._recorder_worker.finished.connect(_cleanup_recorder)
@@ -1188,3 +1196,38 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         log.info("All threads cleaned up. Proceeding with close.")
         super().closeEvent(event)
+
+    def _maybe_prompt_open_folder(self):
+        """Ask to open the last recording folder when recording stops."""
+        if not self._current_fill_folder:
+            return
+
+        if not self._open_folder_prompt:
+            return
+
+        checkbox = QCheckBox("Never ask again")
+        mbox = QMessageBox(
+            QMessageBox.Question,
+            "Open Results Folder",
+            "Open the folder where the files were saved?",
+            QMessageBox.Yes | QMessageBox.No,
+            self,
+        )
+        mbox.setCheckBox(checkbox)
+        choice = mbox.exec_()
+
+        if checkbox.isChecked():
+            self._open_folder_prompt = False
+            save_app_setting(SETTING_OPEN_FOLDER_PROMPT, False)
+
+        if choice == QMessageBox.Yes:
+            path = self._current_fill_folder
+            try:
+                if sys.platform.startswith("win"):
+                    os.startfile(path)
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", path])
+                else:
+                    subprocess.Popen(["xdg-open", path])
+            except Exception as e:
+                log.error(f"Failed to open folder {path}: {e}")
