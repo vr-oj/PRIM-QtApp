@@ -237,7 +237,7 @@ def main_app_entry():
     log.info(f"Application event loop ended with exit code {exit_code}.")
 
     try:
-        ic4.Library.exit()
+        ic4.Library.shutdown()
     except Exception:
         pass
 

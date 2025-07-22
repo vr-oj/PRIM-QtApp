@@ -133,10 +133,16 @@ class CameraControlPanel(QWidget):
             # behaviour. Using the increment gives a much finer control for
             # properties like ExposureTime that support very small steps.
             step = 0.0
-            try:
-                step = to_ui(getattr(prop, "increment"))
-            except Exception:
-                step = 0.0
+            if hasattr(prop, "has_inc") and callable(getattr(prop, "has_inc")) and prop.has_inc():
+                try:
+                    step = to_ui(prop.get_inc())
+                except Exception:
+                    step = None
+            else:
+                try:
+                    step = to_ui(getattr(prop, "increment"))
+                except Exception:
+                    step = None
             if not step or step <= 0.0:
                 step = (max_val - min_val) / 100.0
 
