@@ -37,10 +37,13 @@ class RecordingManager(QObject):
         # Recording flags
         self.is_recording = False
         self._got_first_sample = False
+        self._stop_requested = False
 
-        # Frame counter and timer
+        # Counters for syncing
         self._frame_counter = 0
         self._last_device_time = 0
+        self._frames_written = 0
+        self._samples_written = 0
 
     @pyqtSlot()
     def start_recording(self):
@@ -68,6 +71,9 @@ class RecordingManager(QObject):
         self._got_first_sample = False
         self._frame_counter = 0
         self._last_device_time = 0
+        self._stop_requested = False
+        self._frames_written = 0
+        self._samples_written = 0
 
         print(
             f"[RecordingManager] Ready to record →\n  CSV will be: {self._csv_path}\n  TIFF will be: {self._tiff_path}"
@@ -112,10 +118,12 @@ class RecordingManager(QObject):
             try:
                 self.csv_writer.writerow([frameIdx, t_device, pressure])
                 self._last_device_time = t_device
+                self._samples_written += 1
             except Exception as e:
                 print(
                     f"[RecordingManager] Error writing CSV row ({frameIdx}, {t_device}, {pressure}): {e}"
                 )
+        self._check_stop_condition()
 
     @pyqtSlot(QImage, object)
     def append_frame(self, qimage, raw):
@@ -129,9 +137,11 @@ class RecordingManager(QObject):
                 metadata = {"frameIdx": self._frame_counter, "deviceTime": self._last_device_time}  # Embed device time for FPS tracking
                 self.tif_writer.write(arr, description=json.dumps(metadata))
                 self._frame_counter += 1
+                self._frames_written += 1
             except Exception as e:
                 failed_idx = max(0, self._frame_counter)
                 print(f"[RecordingManager] Error writing TIFF page for frame {failed_idx}: {e}")
+        self._check_stop_condition()
 
     @pyqtSlot()
     def stop_recording(self):
@@ -161,6 +171,19 @@ class RecordingManager(QObject):
 
         print("[RecordingManager] Recording stopped and files closed.")
         self.finished.emit()
+
+    @pyqtSlot()
+    def request_stop(self):
+        """Signal that recording should stop after the next synced frame."""
+        if not self.is_recording:
+            return
+        self._stop_requested = True
+        self._check_stop_condition()
+
+    def _check_stop_condition(self):
+        """Close files when a stop was requested and counts match."""
+        if self._stop_requested and self._frames_written == self._samples_written:
+            self.stop_recording()
 
     def _qimage_to_numpy(self, qimage):
         """Convert a ``QImage`` to a ``numpy.ndarray``.

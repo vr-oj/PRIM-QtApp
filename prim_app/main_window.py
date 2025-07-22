@@ -979,8 +979,9 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_stop_recording(self):
         """
-        Called when the user clicks ‘Stop Recording’.
-        Disconnects signals and tells the worker to stop.
+        Called when the user clicks ‘Stop Recording’. Sends the stop command
+        to the Arduino and requests the RecordingManager to finish once the
+        final sample and frame have been written.
         """
         # If there is no worker/thread, nothing to do.
         if not self._recorder_worker or not self._recorder_thread:
@@ -993,23 +994,21 @@ class MainWindow(QMainWindow):
         except Exception:
             log.exception("Failed to send stop command to Arduino")
 
-        # 1) Disconnect signals so no new data is queued
-        try:
-            self._serial_thread.data_ready.disconnect(
-                self._recorder_worker.append_pressure
-            )
-        except Exception:
-            pass
-
-        try:
-            self.camera_thread.frame_ready.disconnect(
-                self._recorder_worker.append_frame
-            )
-        except Exception:
-            pass
-
-        # 2) When the worker actually finishes, clean up our Python references.
+        # When the worker actually finishes, clean up our Python references and
+        # disconnect the data signals.
         def _cleanup_recorder():
+            try:
+                self._serial_thread.data_ready.disconnect(
+                    self._recorder_worker.append_pressure
+                )
+            except Exception:
+                pass
+            try:
+                self.camera_thread.frame_ready.disconnect(
+                    self._recorder_worker.append_frame
+                )
+            except Exception:
+                pass
             # At this point, worker has finished and thread has quit.
             # We can delete both and clear our Python handles:
             self._recorder_thread = None
@@ -1023,9 +1022,9 @@ class MainWindow(QMainWindow):
         self._recorder_worker.finished.connect(self._recorder_worker.deleteLater)
         self._recorder_thread.finished.connect(self._recorder_thread.deleteLater)
 
-        # 3) Tell the worker to stop (it will flush & close files, then emit ‘finished’)
+        # Tell the worker to stop after receiving the final packet
         QMetaObject.invokeMethod(
-            self._recorder_worker, "stop_recording", Qt.QueuedConnection
+            self._recorder_worker, "request_stop", Qt.QueuedConnection
         )
 
         # Notify CameraControlPanel that recording has stopped
@@ -1060,13 +1059,13 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         log.info("MainWindow closeEvent triggered.")
 
-        # 1) If RecordingManager is still running, request stop_recording() and wait.
+        # 1) If RecordingManager is still running, request a graceful stop and wait.
         if self._recorder_worker and self._recorder_thread:
             if self._recorder_thread.isRunning():
                 log.info("Stopping RecordingManager...")
                 # Ask the worker to stop via queued call
                 QMetaObject.invokeMethod(
-                    self._recorder_worker, "stop_recording", Qt.QueuedConnection
+                    self._recorder_worker, "request_stop", Qt.QueuedConnection
                 )
                 # Wait up to 3 seconds for it to finish
                 if not self._recorder_thread.wait(3000):
