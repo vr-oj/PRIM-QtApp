@@ -834,6 +834,13 @@ class MainWindow(QMainWindow):
                 self._serial_thread.stop()
             except Exception as e:
                 log.error(f"Error while stopping SerialThread: {e}")
+            try:
+                if self._serial_thread is not None:
+                    self._serial_thread.finished.disconnect(
+                        self._handle_serial_thread_finished
+                    )
+            except TypeError:
+                pass
 
             # Immediately flip QAction back to “Connect PRIM Device”
             self.connect_serial_action.setIcon(self.icon_connect)
@@ -875,7 +882,7 @@ class MainWindow(QMainWindow):
         log.info("SerialThread finished signal received.")
         sender = self.sender()
 
-        if self._serial_thread is sender:
+        if self._serial_thread is not None and sender == self._serial_thread:
             # Clean up the thread object
             self._serial_thread.deleteLater()
             self._serial_thread = None
@@ -997,18 +1004,20 @@ class MainWindow(QMainWindow):
         # When the worker actually finishes, clean up our Python references and
         # disconnect the data signals.
         def _cleanup_recorder():
-            try:
-                self._serial_thread.data_ready.disconnect(
-                    self._recorder_worker.append_pressure
-                )
-            except Exception:
-                pass
-            try:
-                self.camera_thread.frame_ready.disconnect(
-                    self._recorder_worker.append_frame
-                )
-            except Exception:
-                pass
+            if self._serial_thread is not None:
+                try:
+                    self._serial_thread.data_ready.disconnect(
+                        self._recorder_worker.append_pressure
+                    )
+                except TypeError:
+                    pass
+            if self.camera_thread is not None:
+                try:
+                    self.camera_thread.frame_ready.disconnect(
+                        self._recorder_worker.append_frame
+                    )
+                except TypeError:
+                    pass
             # At this point, worker has finished and thread has quit.
             # We can delete both and clear our Python handles:
             self._recorder_thread = None
@@ -1107,7 +1116,15 @@ class MainWindow(QMainWindow):
                             self._serial_thread.terminate()
                         except Exception:
                             pass
-                            self._serial_thread.wait(500)
+                        self._serial_thread.wait(500)
+
+                try:
+                    self._serial_thread.finished.disconnect(
+                        self._handle_serial_thread_finished
+                    )
+                except TypeError:
+                    pass
+
             except RuntimeError:
                 # The QThread object might already be deleted; ignore
                 pass
@@ -1147,6 +1164,23 @@ class MainWindow(QMainWindow):
         # 4) Clear UI elements that might hold references
         try:
             self.device_combo.clear()
+        except Exception:
+            pass
+
+        # Explicitly release IC4-related objects before shutting down the library
+        try:
+            if hasattr(self, "camera_thread") and self.camera_thread:
+                if hasattr(self.camera_thread, "grabber"):
+                    del self.camera_thread.grabber
+                if hasattr(self.camera_thread, "_sink"):
+                    del self.camera_thread._sink
+                if hasattr(self.camera_thread, "_device_info"):
+                    del self.camera_thread._device_info
+        except Exception:
+            pass
+        try:
+            from imagingcontrol4.library import Library
+            Library.shutdown()
         except Exception:
             pass
 
