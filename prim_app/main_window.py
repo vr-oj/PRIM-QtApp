@@ -471,6 +471,11 @@ class MainWindow(QMainWindow):
             # Reset UI
             self.btn_start_camera.setText("Start Camera")
             self.camera_control_panel.setEnabled(False)
+            try:
+                self.camera_control_panel.stop_auto_update()
+                self.camera_control_panel.grabber = None
+            except Exception:
+                pass
             self.lbl_cam_connection.setText("Disconnected")
             self.lbl_cam_frame.setText("0")
             self.lbl_cam_resolution.setText("N/A")

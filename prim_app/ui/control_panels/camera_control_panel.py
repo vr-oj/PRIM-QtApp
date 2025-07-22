@@ -111,6 +111,15 @@ class CameraControlPanel(QWidget):
         self.pf_combo.currentIndexChanged.connect(self._on_pf_changed)
         self.layout.addRow(self.pf_label, self.pf_combo)
 
+    def stop_auto_update(self):
+        """Stop polling camera properties."""
+        self._auto_update_timer.stop()
+
+    def start_auto_update(self):
+        """Start polling camera properties if not already active."""
+        if not self._auto_update_timer.isActive():
+            self._auto_update_timer.start()
+
     def set_recording_state(self, recording):
         self.is_recording = recording
         log.debug(f"CameraControlPanel: is_recording set to {self.is_recording}")
@@ -314,7 +323,7 @@ class CameraControlPanel(QWidget):
             )
 
     def _refresh_auto_values(self):
-        if not self.grabber:
+        if not self.grabber or not getattr(self.grabber, "is_device_open", False):
             return
         if self.ae_checkbox.isChecked():
             try:
