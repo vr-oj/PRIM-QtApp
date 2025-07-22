@@ -6,6 +6,7 @@ import csv
 import json
 import shutil
 import numpy as np
+from collections import deque
 import tifffile
 from PyQt5.QtCore import QObject, pyqtSlot, pyqtSignal
 from PyQt5.QtGui import QImage
@@ -44,6 +45,8 @@ class RecordingManager(QObject):
         self._last_device_time = 0
         self._frames_written = 0
         self._samples_written = 0
+        self._pending_samples = deque()
+
 
     @pyqtSlot()
     def start_recording(self):
@@ -70,10 +73,12 @@ class RecordingManager(QObject):
         self.is_recording = True
         self._got_first_sample = False
         self._frame_counter = 0
+        self._pending_samples.clear()
         self._last_device_time = 0
         self._stop_requested = False
         self._frames_written = 0
         self._samples_written = 0
+        self._pending_samples.clear()
 
         print(
             f"[RecordingManager] Ready to record →\n  CSV will be: {self._csv_path}\n  TIFF will be: {self._tiff_path}"
@@ -119,6 +124,8 @@ class RecordingManager(QObject):
                 self.csv_writer.writerow([frameIdx, t_device, pressure])
                 self._last_device_time = t_device
                 self._samples_written += 1
+                self._pending_samples.append((frameIdx, t_device))
+
             except Exception as e:
                 print(
                     f"[RecordingManager] Error writing CSV row ({frameIdx}, {t_device}, {pressure}): {e}"
@@ -131,13 +138,19 @@ class RecordingManager(QObject):
         if not self.is_recording or not self._got_first_sample:
             return
 
+        if not self._pending_samples:
+            return  # No matching pressure sample yet
+
         if self.tif_writer:
             try:
                 arr = self._qimage_to_numpy(qimage)
-                metadata = {"frameIdx": self._frame_counter, "deviceTime": self._last_device_time}  # Embed device time for FPS tracking
+                frameIdx, t_device = self._pending_samples.popleft()
+                metadata = {"frameIdx": frameIdx, "deviceTime": t_device}
                 self.tif_writer.write(arr, description=json.dumps(metadata))
                 self._frame_counter += 1
                 self._frames_written += 1
+                self._last_device_time = t_device
+
             except Exception as e:
                 failed_idx = max(0, self._frame_counter)
                 print(f"[RecordingManager] Error writing TIFF page for frame {failed_idx}: {e}")
@@ -182,7 +195,12 @@ class RecordingManager(QObject):
 
     def _check_stop_condition(self):
         """Close files when a stop was requested and counts match."""
-        if self._stop_requested and self._frames_written == self._samples_written:
+        if (
+            self._stop_requested
+            and self._frames_written == self._samples_written
+            and not self._pending_samples
+        ):
+
             self.stop_recording()
 
     def _qimage_to_numpy(self, qimage):
