@@ -103,3 +103,26 @@ QPushButton#exportPlotButton {
 QPushButton#exportPlotButton:hover {
     background-color: #3e7fd6;
 }
+/* Dialog and message box styles */
+QDialog, QMessageBox {
+    background-color: #3a3a3a;
+    color: #ffffff;
+}
+QDialog QLabel, QMessageBox QLabel {
+    color: #ffffff;
+}
+QDialog QPushButton, QMessageBox QPushButton {
+    background-color: #777777;
+    color: #ffffff;
+    border: 1px solid #999999;
+    border-radius: 4px;
+    padding: 5px 10px;
+}
+QDialog QPushButton:hover, QMessageBox QPushButton:hover {
+    background-color: #999999;
+    border: 1px solid #bbbbbb;
+}
+QDialog QPushButton:disabled, QMessageBox QPushButton:disabled {
+    background-color: #5a5a5a;
+    color: #999999;
+}
