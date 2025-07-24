@@ -1,7 +1,7 @@
 import logging
 import math
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QWidget,
     QFormLayout,
@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QSlider,
     QHBoxLayout,
+    QVBoxLayout,
 )
 
 from imagingcontrol4 import IC4Exception
@@ -24,16 +25,22 @@ class CameraControlPanel(QWidget):
         self.grabber = None
         self.is_recording = False
         self._exp_scale = 1
+        self._exp_unit_factor = 1000.0  # property is in µs, display in ms
         self._gain_scale = 1
+
+        self._auto_update_timer = QTimer(self)
+        self._auto_update_timer.setInterval(500)
+        self._auto_update_timer.timeout.connect(self._refresh_auto_values)
+        self._auto_update_timer.start()
 
         self.layout = QFormLayout(self)
         self.layout.setContentsMargins(4, 4, 4, 4)
         self.layout.setSpacing(6)
 
-        self.exposure_label = QLabel("Exposure (µs):")
+        self.exposure_label = QLabel("Exposure (ms):")
         self.exposure_spin = QDoubleSpinBox()
-        self.exposure_spin.setDecimals(1)
-        self.exposure_spin.setSuffix(" µs")
+        self.exposure_spin.setDecimals(2)
+        self.exposure_spin.setSuffix(" ms")
         self.exposure_spin.setEnabled(False)
         self.exposure_spin.valueChanged.connect(self._on_exposure_changed)
 
@@ -43,12 +50,23 @@ class CameraControlPanel(QWidget):
             lambda v: self.exposure_spin.setValue(v / self._exp_scale)
         )
 
-        exp_row = QWidget()
-        exp_layout = QHBoxLayout(exp_row)
-        exp_layout.setContentsMargins(0, 0, 0, 0)
-        exp_layout.addWidget(self.exposure_slider)
-        exp_layout.addWidget(self.exposure_spin)
-        self.layout.addRow(self.exposure_label, exp_row)
+        exp_row_layout = QHBoxLayout()
+        exp_row_layout.setContentsMargins(0, 0, 0, 0)
+        exp_row_layout.setSpacing(4)
+        exp_row_layout.addWidget(self.exposure_slider, 3)
+        exp_row_layout.addWidget(self.exposure_spin, 1)
+
+        self.ae_checkbox = QCheckBox("Auto Exposure")
+        self.ae_checkbox.setEnabled(False)
+        self.ae_checkbox.stateChanged.connect(self._on_auto_exposure_toggled)
+
+        exp_container = QWidget()
+        exp_container_layout = QVBoxLayout(exp_container)
+        exp_container_layout.setContentsMargins(0, 0, 0, 0)
+        exp_container_layout.setSpacing(2)
+        exp_container_layout.addLayout(exp_row_layout)
+        exp_container_layout.addWidget(self.ae_checkbox)
+        self.layout.addRow(self.exposure_label, exp_container)
 
         self.gain_label = QLabel("Gain:")
         self.gain_spin = QDoubleSpinBox()
@@ -62,22 +80,23 @@ class CameraControlPanel(QWidget):
             lambda v: self.gain_spin.setValue(v / self._gain_scale)
         )
 
-        gain_row = QWidget()
-        gain_layout = QHBoxLayout(gain_row)
-        gain_layout.setContentsMargins(0, 0, 0, 0)
-        gain_layout.addWidget(self.gain_slider)
-        gain_layout.addWidget(self.gain_spin)
-        self.layout.addRow(self.gain_label, gain_row)
-
-        self.ae_checkbox = QCheckBox("Auto Exposure")
-        self.ae_checkbox.setEnabled(False)
-        self.ae_checkbox.stateChanged.connect(self._on_auto_exposure_toggled)
-        self.layout.addRow(self.ae_checkbox)
+        gain_row_layout = QHBoxLayout()
+        gain_row_layout.setContentsMargins(0, 0, 0, 0)
+        gain_row_layout.setSpacing(4)
+        gain_row_layout.addWidget(self.gain_slider, 3)
+        gain_row_layout.addWidget(self.gain_spin, 1)
 
         self.ag_checkbox = QCheckBox("Auto Gain")
         self.ag_checkbox.setEnabled(False)
         self.ag_checkbox.stateChanged.connect(self._on_auto_gain_toggled)
-        self.layout.addRow(self.ag_checkbox)
+
+        gain_container = QWidget()
+        gain_container_layout = QVBoxLayout(gain_container)
+        gain_container_layout.setContentsMargins(0, 0, 0, 0)
+        gain_container_layout.setSpacing(2)
+        gain_container_layout.addLayout(gain_row_layout)
+        gain_container_layout.addWidget(self.ag_checkbox)
+        self.layout.addRow(self.gain_label, gain_container)
 
         self.framerate_label = QLabel("Frame Rate (fps):")
         self.framerate_spin = QDoubleSpinBox()
@@ -92,11 +111,20 @@ class CameraControlPanel(QWidget):
         self.pf_combo.currentIndexChanged.connect(self._on_pf_changed)
         self.layout.addRow(self.pf_label, self.pf_combo)
 
+    def stop_auto_update(self):
+        """Stop polling camera properties."""
+        self._auto_update_timer.stop()
+
+    def start_auto_update(self):
+        """Start polling camera properties if not already active."""
+        if not self._auto_update_timer.isActive():
+            self._auto_update_timer.start()
+
     def set_recording_state(self, recording):
         self.is_recording = recording
         log.debug(f"CameraControlPanel: is_recording set to {self.is_recording}")
 
-    def _setup_float_control(self, prop_id, spinbox, decimals=2, slider=None):
+    def _setup_float_control(self, prop_id, spinbox, decimals=2, slider=None, to_ui=lambda x: x):
         log.info(f"CameraControlPanel: Looking for property {prop_id}")
 
         try:
@@ -105,23 +133,37 @@ class CameraControlPanel(QWidget):
                 log.warning(f"CameraControlPanel: Property {prop_id} not found.")
                 return 1
 
-            min_val = prop.minimum
-            max_val = prop.maximum
-            cur_val = prop.value
-            step = 0.1  # Default fallback
+            min_val = to_ui(prop.minimum)
+            max_val = to_ui(prop.maximum)
+            cur_val = to_ui(prop.value)
 
-            try:
-                step = prop.increment
-                if step <= 0:
-                    raise ValueError()
-            except Exception:
+            # Try to use the property's increment if available; fall back to
+            # dividing the range into 100 steps which was the previous
+            # behaviour. Using the increment gives a much finer control for
+            # properties like ExposureTime that support very small steps.
+            step = 0.0
+            if hasattr(prop, "has_inc") and callable(getattr(prop, "has_inc")) and prop.has_inc():
+                try:
+                    step = to_ui(prop.get_inc())
+                except Exception:
+                    step = None
+            else:
+                try:
+                    step = to_ui(getattr(prop, "increment"))
+                except Exception:
+                    step = None
+            if not step or step <= 0.0:
                 step = (max_val - min_val) / 100.0
 
             spinbox.setRange(min_val, max_val)
             spinbox.setSingleStep(step)
 
             if step < 1.0:
-                decimals = max(decimals, int(-math.floor(math.log10(step))) + 1)
+                # Ensure enough decimal places to represent the step size but
+                # avoid artificially increasing the precision. The old formula
+                # added one extra decimal place which caused "0.01" steps to
+                # display three decimals.
+                decimals = max(decimals, int(-math.log10(step)))
             spinbox.setDecimals(min(decimals, 6))
 
             spinbox.setValue(cur_val)
@@ -157,7 +199,11 @@ class CameraControlPanel(QWidget):
             return
 
         self._exp_scale = self._setup_float_control(
-            "ExposureTime", self.exposure_spin, decimals=1, slider=self.exposure_slider
+            "ExposureTime",
+            self.exposure_spin,
+            decimals=2,
+            slider=self.exposure_slider,
+            to_ui=lambda v: v / self._exp_unit_factor,
         )
         self._gain_scale = self._setup_float_control(
             "Gain", self.gain_spin, decimals=2, slider=self.gain_slider
@@ -205,7 +251,7 @@ class CameraControlPanel(QWidget):
             return
         try:
             node = self.grabber.device_property_map.find_float("ExposureTime")
-            node.value = float(new_val)  # ✅ CORRECT WAY TO SET
+            node.value = float(new_val) * self._exp_unit_factor
             log.debug(f"ExposureTime set to {node.value} µs")
             self.exposure_slider.blockSignals(True)
             self.exposure_slider.setValue(int(float(new_val) * self._exp_scale))
@@ -235,6 +281,7 @@ class CameraControlPanel(QWidget):
         try:
             node = self.grabber.device_property_map.find_enumeration("ExposureAuto")
             node.value = "Continuous" if state == Qt.Checked else "Off"
+            self._refresh_auto_values()
         except Exception as e:
             log.error(f"CameraControlPanel: failed to set ExposureAuto: {e}")
 
@@ -245,6 +292,7 @@ class CameraControlPanel(QWidget):
         try:
             node = self.grabber.device_property_map.find_enumeration("GainAuto")
             node.value = "Continuous" if state == Qt.Checked else "Off"
+            self._refresh_auto_values()
         except Exception as e:
             log.error(f"CameraControlPanel: failed to set GainAuto: {e}")
 
@@ -273,4 +321,32 @@ class CameraControlPanel(QWidget):
             log.error(
                 f"CameraControlPanel: failed to set PixelFormat = {self.pf_combo.currentText()}: {e}"
             )
+
+    def _refresh_auto_values(self):
+        if not self.grabber or not getattr(self.grabber, "is_device_open", False):
+            return
+        if self.ae_checkbox.isChecked():
+            try:
+                node = self.grabber.device_property_map.find_float("ExposureTime")
+                val_ms = node.value / self._exp_unit_factor
+                self.exposure_spin.blockSignals(True)
+                self.exposure_slider.blockSignals(True)
+                self.exposure_spin.setValue(val_ms)
+                self.exposure_slider.setValue(int(val_ms * self._exp_scale))
+                self.exposure_spin.blockSignals(False)
+                self.exposure_slider.blockSignals(False)
+            except Exception as e:
+                log.debug(f"CameraControlPanel: refresh auto exposure failed: {e}")
+        if self.ag_checkbox.isChecked():
+            try:
+                node = self.grabber.device_property_map.find_float("Gain")
+                val = node.value
+                self.gain_spin.blockSignals(True)
+                self.gain_slider.blockSignals(True)
+                self.gain_spin.setValue(val)
+                self.gain_slider.setValue(int(val * self._gain_scale))
+                self.gain_spin.blockSignals(False)
+                self.gain_slider.blockSignals(False)
+            except Exception as e:
+                log.debug(f"CameraControlPanel: refresh auto gain failed: {e}")
 

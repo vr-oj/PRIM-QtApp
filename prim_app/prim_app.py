@@ -12,6 +12,7 @@ from PyQt5.QtCore import Qt, QCoreApplication
 from PyQt5.QtGui import QIcon, QSurfaceFormat, QPalette, QColor
 import utils.config as config
 from utils.config import APP_NAME, APP_VERSION as CONFIG_APP_VERSION
+from utils.path_helpers import resource_path
 
 import matplotlib
 
@@ -23,7 +24,7 @@ logging.getLogger("fontTools").setLevel(logging.WARNING)
 # Configure Python-level logging
 # ------------------------------
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s - %(levelname)s [%(name)s:%(lineno)d] - %(message)s",
 )
 log = logging.getLogger(__name__)
@@ -161,7 +162,7 @@ def main_app_entry():
     )
 
     # ─── Load & Apply App Icon ─────────────────────────────────────────────
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = resource_path()
     icon_dir = os.path.join(base_dir, "ui", "icons")
     if not os.path.isdir(icon_dir):
         alt_icon_dir = os.path.join(
@@ -203,14 +204,16 @@ def main_app_entry():
     sys.excepthook = custom_exception_handler
 
     # ─── Load Application QSS (if present) ────────────────────────────────
-    style_path = os.path.join(base_dir, "style.qss")
+    style_path = os.path.join(base_dir, "ui", "style.qss")
     if os.path.exists(style_path):
-        qss = load_processed_qss(style_path)
-        if qss:
-            app.setStyleSheet(qss)
+        try:
+            with open(style_path, "r") as f:
+                app.setStyleSheet(f.read())
             log.info(f"Applied stylesheet from: {style_path}")
-        else:
-            log.warning(f"Stylesheet was empty or failed to load: {style_path}")
+        except Exception as e:
+            log.warning(
+                f"Failed to load stylesheet {style_path}: {e}. Using default 'Fusion' style."
+            )
             app.setStyle(QStyleFactory.create("Fusion"))
     else:
         log.info("No style.qss found. Using default 'Fusion' style.")
@@ -218,17 +221,22 @@ def main_app_entry():
 
     # ─── Import & Launch MainWindow ───────────────────────────────────────
     from main_window import MainWindow
+    from ui.welcome_dialog import WelcomeDialog
 
     main_win = MainWindow()
     display_version = CONFIG_APP_VERSION or "Unknown"
     main_win.setWindowTitle(f"{APP_NAME} v{display_version}")
     main_win.show()
 
+    welcome = WelcomeDialog(parent=main_win)
+    if not getattr(welcome, "_skip", False):
+        welcome.exec_()
+
     exit_code = app.exec_()
     log.info(f"Application event loop ended with exit code {exit_code}.")
 
     try:
-        ic4.Library.exit()
+        ic4.Library.shutdown()
     except Exception:
         pass
 

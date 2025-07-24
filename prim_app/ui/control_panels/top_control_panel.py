@@ -8,17 +8,14 @@ from PyQt5.QtWidgets import (
     QLabel,
     QPushButton,
 )
-from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import pyqtSignal
 
-from .plot_control_panel import PlotControlPanel
 
 log = logging.getLogger(__name__)
 
 
 class TopControlPanel(QWidget):
-    """
-    Composite panel combining camera controls, device status, and plot controls.
-    """
+    """PRIM device status panel."""
 
     parameter_changed = pyqtSignal(str, object)
     zero_requested = pyqtSignal()
@@ -50,6 +47,7 @@ class TopControlPanel(QWidget):
         self.zero_btn.setEnabled(False)
         self.zero_btn.clicked.connect(self.zero_requested.emit)
         status_layout.addRow(self.zero_btn)
+
 
         layout.addWidget(status_box, 1)
 

@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSlot
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+import matplotlib as mpl
 
 from utils.config import PLOT_DEFAULT_Y_MIN, PLOT_DEFAULT_Y_MAX
 
@@ -25,6 +26,19 @@ log = logging.getLogger(__name__)
 class PressurePlotWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        mpl.rcParams.update(
+            {
+                "font.size": 11,
+                "axes.edgecolor": "#333333",
+                "axes.labelweight": "bold",
+                "axes.labelsize": 12,
+                "axes.linewidth": 1.5,
+                "xtick.color": "#333333",
+                "ytick.color": "#333333",
+                "figure.facecolor": "#ffffff",
+                "savefig.facecolor": "#ffffff",
+            }
+        )
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

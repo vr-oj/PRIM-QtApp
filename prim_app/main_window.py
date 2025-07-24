@@ -8,14 +8,13 @@ import csv
 import json
 from datetime import datetime
 import imagingcontrol4 as ic4
+import subprocess
 
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
     QWidget,
-    QHBoxLayout,
     QVBoxLayout,
-    QSplitter,
     QFormLayout,
     QDockWidget,
     QTextEdit,
@@ -55,6 +54,7 @@ from utils.app_settings import (
     load_app_setting,
     SETTING_LAST_CAMERA_INDEX,
     SETTING_RESULTS_DIR,
+    SETTING_OPEN_FOLDER_PROMPT,
 )
 import utils.config as config
 from utils.config import (
@@ -69,11 +69,12 @@ from utils.config import (
     PLOT_DEFAULT_Y_MIN,
     PLOT_DEFAULT_Y_MAX,
 )
-from utils.path_helpers import get_next_fill_folder
+from utils.path_helpers import get_next_fill_folder, resource_path
 from ui.canvas.qtcamera_widget import QtCameraWidget
 from ui.control_panels.camera_control_panel import CameraControlPanel
 from ui.control_panels.top_control_panel import TopControlPanel
 from ui.control_panels.plot_control_panel import PlotControlPanel
+from ui.control_panels.pump_control_panel import PumpControlPanel
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
 
 from threads.serial_thread import SerialThread
@@ -93,6 +94,8 @@ class MainWindow(QMainWindow):
         self._serial_active = False
         self._recorder_thread = None
         self._recorder_worker = None
+        self._current_fill_folder = None
+        self._open_folder_prompt = load_app_setting(SETTING_OPEN_FOLDER_PROMPT, True)
 
         # Camera‐related
         self.device_combo = None
@@ -101,13 +104,16 @@ class MainWindow(QMainWindow):
         self.camera_widget = None
         self.camera_control_panel = None
         self.camera_tabs = None
-        self.camera_thread = None  # SDKCameraThread instance
+        self.camera_thread = None
 
         # Plot controls
         self.plot_control_panel = None
 
         # Top control (Arduino status)
         self.top_ctrl = None
+
+        # Pump control panel
+        self.pump_panel = None
 
         # Plotting
         self.pressure_plot_widget = None
@@ -120,18 +126,14 @@ class MainWindow(QMainWindow):
         # ─── CREATE THE RECORDER THREAD + WORKER ─────────────────────────────────
         # 1) Instantiate the thread object:
         self._recorder_thread = QThread(self)
-
         dummy_output_dir = ""  # replace with a default or override later
         self._recorder_worker = RecordingManager(dummy_output_dir)
-
-        # 3) Move the worker into the new thread:
+        # 2) Move the worker into the new thread:
         self._recorder_worker.moveToThread(self._recorder_thread)
-
-        # 4) Connect the worker’s finished signal → thread.quit() and cleanup:
+        # 3) Connect the worker’s finished signal → thread.quit() and cleanup:
         self._recorder_worker.finished.connect(self._recorder_thread.quit)
         self._recorder_worker.finished.connect(self._recorder_worker.deleteLater)
         self._recorder_thread.finished.connect(self._recorder_thread.deleteLater)
-
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
@@ -145,14 +147,13 @@ class MainWindow(QMainWindow):
         self._set_initial_control_states()
 
         self.setWindowTitle(f"{APP_NAME} - v{APP_VERSION}")
-        QTimer.singleShot(50, self._set_initial_splitter_sizes)
         log.info("MainWindow initialized.")
         self.showMaximized()
 
     # ─── UI Builders ────────────────────────────────────────────────────────
 
     def _init_paths_and_icons(self):
-        base = os.path.dirname(os.path.abspath(__file__))
+        base = resource_path()
         icon_dir = os.path.join(base, "ui", "icons")
         if not os.path.isdir(icon_dir):
             alt_icon_dir = os.path.join(
@@ -198,8 +199,9 @@ class MainWindow(QMainWindow):
 
     def _build_central_widget_layout(self):
         """
-        Top row: [Camera Info/Controls tabs] [TopControlPanel] [PlotControlPanel]
-        Bottom row: [QtCameraWidget (live)] | [PressurePlotWidget (live plot)]
+        Top row: control ribbon with Camera | PRIM Device | Syringe Pump | Plot
+        Controls. Bottom row: [QtCameraWidget (live)] | [PressurePlotWidget
+        (live plot)]
         """
         self.camera_widget = QtCameraWidget(self)
 
@@ -208,17 +210,17 @@ class MainWindow(QMainWindow):
         main_vlay.setContentsMargins(4, 4, 4, 4)
         main_vlay.setSpacing(6)
 
-        # ─── Top Row ──────────────────────────────────────────────────────
+        # ─── Top Row (Control Ribbon) ─────────────────────────────────────
         top_row_widget = QWidget()
         top_row_lay = QHBoxLayout(top_row_widget)
         top_row_lay.setContentsMargins(0, 0, 0, 0)
         top_row_lay.setSpacing(10)
 
-        # Camera Control Tabs (Info & Controls)
+        # Camera Control Tabs (Camera & Controls)
         self.camera_tabs = QTabWidget()
         self.camera_tabs.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
 
-        # Info Tab
+        # Camera Info Tab
         info_tab = QWidget()
         info_layout = QFormLayout(info_tab)
         info_layout.setContentsMargins(6, 6, 6, 6)
@@ -246,7 +248,7 @@ class MainWindow(QMainWindow):
         self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
         info_layout.addRow("", self.btn_start_camera)
 
-        self.camera_tabs.addTab(info_tab, "Info")
+        self.camera_tabs.addTab(info_tab, "Camera")
 
         # Controls Tab
         controls_tab = QWidget()
@@ -261,38 +263,48 @@ class MainWindow(QMainWindow):
 
         self.camera_tabs.addTab(controls_tab, "Controls")
 
-        top_row_lay.addWidget(self.camera_tabs, stretch=2)
+        cam_group = QGroupBox("Camera")
+        cam_layout = QVBoxLayout(cam_group)
+        cam_layout.setContentsMargins(3, 3, 3, 3)
+        cam_layout.setSpacing(4)
+        cam_layout.addWidget(self.camera_tabs)
+        top_row_lay.addWidget(cam_group, stretch=2)
 
-        # TopControlPanel (center)
+        # PRIM Device panel
         self.top_ctrl = TopControlPanel(self)
         self.top_ctrl.zero_requested.connect(self._on_zero_prim)
         top_row_lay.addWidget(self.top_ctrl, stretch=2)
 
-        # PlotControlPanel (right)
+        # Syringe Pump panel
+        self.pump_panel = PumpControlPanel(self)
+        self.pump_panel.pump_start_requested.connect(self._on_start_pump)
+        self.pump_panel.pump_stop_requested.connect(self._on_stop_pump)
+        top_row_lay.addWidget(self.pump_panel, stretch=2)
+
+        # Plot controls panel
         self.plot_control_panel = PlotControlPanel(self)
         top_row_lay.addWidget(self.plot_control_panel, stretch=2)
 
         main_vlay.addWidget(top_row_widget, stretch=0)
 
         # ─── Bottom Row ───────────────────────────────────────────────────
-        self.bottom_split = QSplitter(Qt.Horizontal)
-        self.bottom_split.setChildrenCollapsible(False)
+        bottom_row_widget = QWidget()
+        bottom_row_layout = QHBoxLayout(bottom_row_widget)
+        bottom_row_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_row_layout.setSpacing(6)
 
         # Left: live viewfinder
         self.camera_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.bottom_split.addWidget(self.camera_widget)
+        bottom_row_layout.addWidget(self.camera_widget, stretch=1)
 
         # Right: live plot
         self.pressure_plot_widget = PressurePlotWidget(self)
         self.pressure_plot_widget.setSizePolicy(
             QSizePolicy.Expanding, QSizePolicy.Expanding
         )
-        self.bottom_split.addWidget(self.pressure_plot_widget)
+        bottom_row_layout.addWidget(self.pressure_plot_widget, stretch=1)
 
-        self.bottom_split.setStretchFactor(0, 1)
-        self.bottom_split.setStretchFactor(1, 1)
-
-        main_vlay.addWidget(self.bottom_split, stretch=1)
+        main_vlay.addWidget(bottom_row_widget, stretch=1)
 
         # ─── Wire Up PlotControlPanel → PressurePlotWidget ────────────────
         if hasattr(self.pressure_plot_widget, "set_auto_scale_x"):
@@ -435,7 +447,7 @@ class MainWindow(QMainWindow):
             # 3) On any camera error, pop up a dialog and tear everything down
             self.camera_thread.error.connect(self._on_camera_error)
 
-            # Show “Connecting…” in the Info tab
+            # Show “Connecting…” in the Camera tab
             self.lbl_cam_connection.setText("Connecting…")
             self.lbl_cam_frame.setText("0")
             self.lbl_cam_resolution.setText("N/A")
@@ -453,6 +465,11 @@ class MainWindow(QMainWindow):
             # Reset UI
             self.btn_start_camera.setText("Start Camera")
             self.camera_control_panel.setEnabled(False)
+            try:
+                self.camera_control_panel.stop_auto_update()
+                self.camera_control_panel.grabber = None
+            except Exception:
+                pass
             self.lbl_cam_connection.setText("Disconnected")
             self.lbl_cam_frame.setText("0")
             self.lbl_cam_resolution.setText("N/A")
@@ -481,7 +498,7 @@ class MainWindow(QMainWindow):
     @pyqtSlot(QImage, object)
     def _update_camera_info(self, image: QImage, raw):
         """
-        (Optional) Keep updating frame count & resolution in the “Info” tab
+        (Optional) Keep updating frame count & resolution in the “Camera” tab
         every time a new frame arrives.  If you want to hook this up, simply:
             self.camera_thread.frame_ready.connect(self._update_camera_info)
         """
@@ -677,13 +694,33 @@ class MainWindow(QMainWindow):
         except Exception:
             log.exception("Failed to send zero command to Arduino")
 
-    def _set_initial_splitter_sizes(self):
-        if self.bottom_split:
-            w = self.bottom_split.width()
-            if w > 0:
-                self.bottom_split.setSizes([int(w * 0.6), int(w * 0.4)])
+    @pyqtSlot()
+    def _on_start_pump(self):
+        """Send command to start the syringe pump without recording."""
+        try:
+            if self._serial_thread and self._serial_thread.isRunning():
+                self._serial_thread.send_command("L")
+                self.statusBar().showMessage("Pump start command sent.", 3000)
             else:
-                QTimer.singleShot(100, self._set_initial_splitter_sizes)
+                self.statusBar().showMessage(
+                    "PRIM device not connected; cannot start pump.", 3000
+                )
+        except Exception:
+            log.exception("Failed to send start pump command")
+
+    @pyqtSlot()
+    def _on_stop_pump(self):
+        """Send command to stop the syringe pump."""
+        try:
+            if self._serial_thread and self._serial_thread.isRunning():
+                self._serial_thread.send_command("O")
+                self.statusBar().showMessage("Pump stop command sent.", 3000)
+            else:
+                self.statusBar().showMessage(
+                    "PRIM device not connected; cannot stop pump.", 3000
+                )
+        except Exception:
+            log.exception("Failed to send stop pump command")
 
     def _set_initial_control_states(self):
         if hasattr(self, "start_recording_action"):
@@ -726,9 +763,7 @@ class MainWindow(QMainWindow):
             results_dir = os.path.join(new_dir, "PRIMAcquisition Results")
             set_results_dir(results_dir)
             save_app_setting(SETTING_RESULTS_DIR, results_dir)
-            self.statusBar().showMessage(
-                f"Results folder set to {results_dir}", 5000
-            )
+            self.statusBar().showMessage(f"Results folder set to {results_dir}", 5000)
 
     def _show_about_dialog(self):
         QMessageBox.information(self, f"About {APP_NAME}", ABOUT_TEXT)
@@ -802,6 +837,13 @@ class MainWindow(QMainWindow):
                 self._serial_thread.stop()
             except Exception as e:
                 log.error(f"Error while stopping SerialThread: {e}")
+            try:
+                if self._serial_thread is not None:
+                    self._serial_thread.finished.disconnect(
+                        self._handle_serial_thread_finished
+                    )
+            except TypeError:
+                pass
 
             # Immediately flip QAction back to “Connect PRIM Device”
             self.connect_serial_action.setIcon(self.icon_connect)
@@ -825,6 +867,8 @@ class MainWindow(QMainWindow):
             "connected" in status.lower() or "opened serial port" in status.lower()
         )
         self.top_ctrl.update_connection_status(status, connected_flag)
+        if hasattr(self, "pump_panel"):
+            self.pump_panel.update_connection_status(connected_flag)
 
         self._refresh_recording_button_states()
 
@@ -841,7 +885,7 @@ class MainWindow(QMainWindow):
         log.info("SerialThread finished signal received.")
         sender = self.sender()
 
-        if self._serial_thread is sender:
+        if self._serial_thread is not None and sender == self._serial_thread:
             # Clean up the thread object
             self._serial_thread.deleteLater()
             self._serial_thread = None
@@ -894,6 +938,7 @@ class MainWindow(QMainWindow):
         writing there.
         """
         outdir = get_next_fill_folder()
+        self._current_fill_folder = outdir
 
         fill_folder_name = os.path.basename(outdir)
 
@@ -911,9 +956,7 @@ class MainWindow(QMainWindow):
 
         # When the worker reports that it is ready for acquisition, send the
         # start command to the Arduino.
-        self._recorder_worker.ready_for_acquisition.connect(
-            self._on_recorder_ready
-        )
+        self._recorder_worker.ready_for_acquisition.connect(self._on_recorder_ready)
 
         # 8) Hook camera + serial into the worker:
         self._serial_thread.data_ready.connect(self._recorder_worker.append_pressure)
@@ -945,8 +988,9 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_stop_recording(self):
         """
-        Called when the user clicks ‘Stop Recording’.
-        Disconnects signals and tells the worker to stop.
+        Called when the user clicks ‘Stop Recording’. Sends the stop command
+        to the Arduino and requests the RecordingManager to finish once the
+        final sample and frame have been written.
         """
         # If there is no worker/thread, nothing to do.
         if not self._recorder_worker or not self._recorder_thread:
@@ -959,29 +1003,30 @@ class MainWindow(QMainWindow):
         except Exception:
             log.exception("Failed to send stop command to Arduino")
 
-        # 1) Disconnect signals so no new data is queued
-        try:
-            self._serial_thread.data_ready.disconnect(
-                self._recorder_worker.append_pressure
-            )
-        except Exception:
-            pass
-
-        try:
-            self.camera_thread.frame_ready.disconnect(
-                self._recorder_worker.append_frame
-            )
-        except Exception:
-            pass
-
-        # 2) When the worker actually finishes, clean up our Python references.
+        # When the worker actually finishes, clean up our Python references and
+        # disconnect the data signals.
         def _cleanup_recorder():
+            if self._serial_thread is not None:
+                try:
+                    self._serial_thread.data_ready.disconnect(
+                        self._recorder_worker.append_pressure
+                    )
+                except TypeError:
+                    pass
+            if self.camera_thread is not None:
+                try:
+                    self.camera_thread.frame_ready.disconnect(
+                        self._recorder_worker.append_frame
+                    )
+                except TypeError:
+                    pass
             # At this point, worker has finished and thread has quit.
             # We can delete both and clear our Python handles:
             self._recorder_thread = None
             self._recorder_worker = None
             # If you need to update button states right away:
             self._refresh_recording_button_states()
+            self._maybe_prompt_open_folder()
 
         # Connect the worker’s finished → cleanup slot
         self._recorder_worker.finished.connect(_cleanup_recorder)
@@ -989,9 +1034,9 @@ class MainWindow(QMainWindow):
         self._recorder_worker.finished.connect(self._recorder_worker.deleteLater)
         self._recorder_thread.finished.connect(self._recorder_thread.deleteLater)
 
-        # 3) Tell the worker to stop (it will flush & close files, then emit ‘finished’)
+        # Tell the worker to stop after receiving the final packet
         QMetaObject.invokeMethod(
-            self._recorder_worker, "stop_recording", Qt.QueuedConnection
+            self._recorder_worker, "request_stop", Qt.QueuedConnection
         )
 
         # Notify CameraControlPanel that recording has stopped
@@ -1026,13 +1071,13 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         log.info("MainWindow closeEvent triggered.")
 
-        # 1) If RecordingManager is still running, request stop_recording() and wait.
+        # 1) If RecordingManager is still running, request a graceful stop and wait.
         if self._recorder_worker and self._recorder_thread:
             if self._recorder_thread.isRunning():
                 log.info("Stopping RecordingManager...")
                 # Ask the worker to stop via queued call
                 QMetaObject.invokeMethod(
-                    self._recorder_worker, "stop_recording", Qt.QueuedConnection
+                    self._recorder_worker, "request_stop", Qt.QueuedConnection
                 )
                 # Wait up to 3 seconds for it to finish
                 if not self._recorder_thread.wait(3000):
@@ -1074,7 +1119,15 @@ class MainWindow(QMainWindow):
                             self._serial_thread.terminate()
                         except Exception:
                             pass
-                            self._serial_thread.wait(500)
+                        self._serial_thread.wait(500)
+
+                try:
+                    self._serial_thread.finished.disconnect(
+                        self._handle_serial_thread_finished
+                    )
+                except TypeError:
+                    pass
+
             except RuntimeError:
                 # The QThread object might already be deleted; ignore
                 pass
@@ -1117,7 +1170,60 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        # Explicitly release IC4-related objects before shutting down the library
+        try:
+            if hasattr(self, "camera_thread") and self.camera_thread:
+                if hasattr(self.camera_thread, "grabber"):
+                    del self.camera_thread.grabber
+                if hasattr(self.camera_thread, "_sink"):
+                    del self.camera_thread._sink
+                if hasattr(self.camera_thread, "_device_info"):
+                    del self.camera_thread._device_info
+        except Exception:
+            pass
+        try:
+            from imagingcontrol4.library import Library
+
+            Library.shutdown()
+        except Exception:
+            pass
+
         # 5) Process any remaining events, then call the base implementation
         QApplication.processEvents()
         log.info("All threads cleaned up. Proceeding with close.")
         super().closeEvent(event)
+
+    def _maybe_prompt_open_folder(self):
+        """Ask to open the last recording folder when recording stops."""
+        if not self._current_fill_folder:
+            return
+
+        if not self._open_folder_prompt:
+            return
+
+        checkbox = QCheckBox("Never ask again")
+        mbox = QMessageBox(
+            QMessageBox.Question,
+            "Open Results Folder",
+            "Open the folder where the files were saved?",
+            QMessageBox.Yes | QMessageBox.No,
+            self,
+        )
+        mbox.setCheckBox(checkbox)
+        choice = mbox.exec_()
+
+        if checkbox.isChecked():
+            self._open_folder_prompt = False
+            save_app_setting(SETTING_OPEN_FOLDER_PROMPT, False)
+
+        if choice == QMessageBox.Yes:
+            path = self._current_fill_folder
+            try:
+                if sys.platform.startswith("win"):
+                    os.startfile(path)
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", path])
+                else:
+                    subprocess.Popen(["xdg-open", path])
+            except Exception as e:
+                log.error(f"Failed to open folder {path}: {e}")
