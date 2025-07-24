@@ -891,9 +891,11 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str)
     def _handle_serial_error(self, msg: str):
         log.error(f"Serial error: {msg}")
-        # Show it in the status bar so user sees it
-        self.statusBar().showMessage(f"Serial Error: {msg}", 6000)
         hint = "Check the cable and selected port, then try reconnecting."
+        # Display brief guidance in the status bar as well
+        self.statusBar().showMessage(
+            f"Serial Error: {msg} — {hint}", 8000
+        )
         self._show_error_dialog("Serial Connection Error", f"{msg}\n\n{hint}")
         # Also re-evaluate whether the recording buttons are enabled
         self._refresh_recording_button_states()
@@ -901,8 +903,10 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str)
     def _handle_recorder_error(self, msg: str):
         log.error(f"Recording error: {msg}")
-        self.statusBar().showMessage(f"Recording Error: {msg}", 6000)
         hint = "Check disk space and file permissions."
+        self.statusBar().showMessage(
+            f"Recording Error: {msg} — {hint}", 8000
+        )
         self._show_error_dialog("Recording Error", f"{msg}\n\n{hint}")
 
     @pyqtSlot()
