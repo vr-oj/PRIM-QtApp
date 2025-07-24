@@ -159,6 +159,19 @@ class SerialThread(QThread):
                     log.exception(f"[SerialThread] Unexpected error in read loop: {e}")
                     self.msleep(100)
 
+                # ---- Idle timeout watchdog ---------------------------------
+                if (
+                    self._got_first_packet
+                    and self._last_data_time is not None
+                    and (time.time() - self._last_data_time) > IDLE_TIMEOUT_S
+                ):
+                    msg = (
+                        f"No data from Arduino for {time.time() - self._last_data_time:.1f}s"
+                    )
+                    log.error(f"[SerialThread] {msg}")
+                    self.error_occurred.emit(msg)
+                    self._stop_requested = True
+
 
         # 3) Clean up on exit
         if self.ser:
