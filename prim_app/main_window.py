@@ -95,9 +95,7 @@ class MainWindow(QMainWindow):
         self._recorder_thread = None
         self._recorder_worker = None
         self._current_fill_folder = None
-        self._open_folder_prompt = load_app_setting(
-            SETTING_OPEN_FOLDER_PROMPT, True
-        )
+        self._open_folder_prompt = load_app_setting(SETTING_OPEN_FOLDER_PROMPT, True)
 
         # Camera‐related
         self.device_combo = None
@@ -106,7 +104,7 @@ class MainWindow(QMainWindow):
         self.camera_widget = None
         self.camera_control_panel = None
         self.camera_tabs = None
-        self.camera_thread = None  # SDKCameraThread instance
+        self.camera_thread = None
 
         # Plot controls
         self.plot_control_panel = None
@@ -128,18 +126,14 @@ class MainWindow(QMainWindow):
         # ─── CREATE THE RECORDER THREAD + WORKER ─────────────────────────────────
         # 1) Instantiate the thread object:
         self._recorder_thread = QThread(self)
-
         dummy_output_dir = ""  # replace with a default or override later
         self._recorder_worker = RecordingManager(dummy_output_dir)
-
-        # 3) Move the worker into the new thread:
+        # 2) Move the worker into the new thread:
         self._recorder_worker.moveToThread(self._recorder_thread)
-
-        # 4) Connect the worker’s finished signal → thread.quit() and cleanup:
+        # 3) Connect the worker’s finished signal → thread.quit() and cleanup:
         self._recorder_worker.finished.connect(self._recorder_thread.quit)
         self._recorder_worker.finished.connect(self._recorder_worker.deleteLater)
         self._recorder_thread.finished.connect(self._recorder_thread.deleteLater)
-
 
         self._init_paths_and_icons()
         self._build_console_log_dock()
@@ -769,9 +763,7 @@ class MainWindow(QMainWindow):
             results_dir = os.path.join(new_dir, "PRIMAcquisition Results")
             set_results_dir(results_dir)
             save_app_setting(SETTING_RESULTS_DIR, results_dir)
-            self.statusBar().showMessage(
-                f"Results folder set to {results_dir}", 5000
-            )
+            self.statusBar().showMessage(f"Results folder set to {results_dir}", 5000)
 
     def _show_about_dialog(self):
         QMessageBox.information(self, f"About {APP_NAME}", ABOUT_TEXT)
@@ -964,9 +956,7 @@ class MainWindow(QMainWindow):
 
         # When the worker reports that it is ready for acquisition, send the
         # start command to the Arduino.
-        self._recorder_worker.ready_for_acquisition.connect(
-            self._on_recorder_ready
-        )
+        self._recorder_worker.ready_for_acquisition.connect(self._on_recorder_ready)
 
         # 8) Hook camera + serial into the worker:
         self._serial_thread.data_ready.connect(self._recorder_worker.append_pressure)
@@ -1193,6 +1183,7 @@ class MainWindow(QMainWindow):
             pass
         try:
             from imagingcontrol4.library import Library
+
             Library.shutdown()
         except Exception:
             pass

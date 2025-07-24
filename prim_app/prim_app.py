@@ -204,7 +204,6 @@ def main_app_entry():
     sys.excepthook = custom_exception_handler
 
     # ─── Load Application QSS (if present) ────────────────────────────────
-    # Look for style.qss within the ui directory
     style_path = os.path.join(base_dir, "ui", "style.qss")
     if os.path.exists(style_path):
         try:
@@ -229,7 +228,6 @@ def main_app_entry():
     main_win.setWindowTitle(f"{APP_NAME} v{display_version}")
     main_win.show()
 
-    # Show welcome dialog on startup (respect user's "Don't show again" choice)
     welcome = WelcomeDialog(parent=main_win)
     if not getattr(welcome, "_skip", False):
         welcome.exec_()
