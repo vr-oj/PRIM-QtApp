@@ -81,7 +81,6 @@ from threads.serial_thread import SerialThread
 from threads.sdk_camera_thread import SDKCameraThread
 from recording_manager import RecordingManager
 from utils.utils import list_serial_ports
-from tiff_converter import convert_tiff_with_pressure_metadata
 
 log = logging.getLogger(__name__)
 
@@ -577,12 +576,6 @@ class MainWindow(QMainWindow):
             "Set &Results Folder…", self, triggered=self._choose_results_dir
         )
         fm.addAction(choose_dir_act)
-        convert_act = QAction(
-            "Convert Old TIFF (Add Pressure)",
-            self,
-            triggered=lambda: convert_tiff_with_pressure_metadata(self),
-        )
-        fm.addAction(convert_act)
         fm.addSeparator()
         exit_act = QAction(
             "&Exit", self, shortcut=QKeySequence.Quit, triggered=self.close
