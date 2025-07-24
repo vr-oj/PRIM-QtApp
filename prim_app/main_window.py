@@ -181,6 +181,7 @@ class MainWindow(QMainWindow):
         self.icon_recording_active = get_icon("recording_active.svg")
         self.icon_connect = get_icon("plug.svg")
         self.icon_disconnect = get_icon("plug_disconnect.svg")
+        self.icon_refresh = get_icon("sync.svg")
 
     def _build_console_log_dock(self):
         self.dock_console = QDockWidget("Console Log", self)
@@ -362,6 +363,26 @@ class MainWindow(QMainWindow):
         for dev in device_list:
             display_str = f"{dev.model_name}  (S/N: {dev.serial})"
             self.device_combo.addItem(display_str, dev)
+
+    def _refresh_serial_port_list(self):
+        ports = list_serial_ports()
+        self.serial_port_combobox.clear()
+        if ports:
+            for p_dev, p_desc in ports:
+                self.serial_port_combobox.addItem(
+                    f"{os.path.basename(p_dev)} ({p_desc})", QVariant(p_dev)
+                )
+            self.serial_port_combobox.setEnabled(True)
+        else:
+            self.serial_port_combobox.addItem("No Serial Ports Found", QVariant())
+            self.serial_port_combobox.setEnabled(False)
+
+    @pyqtSlot()
+    def _refresh_device_lists(self):
+        """Re-enumerate cameras and serial ports."""
+        self._populate_device_list()
+        self._refresh_serial_port_list()
+        self.statusBar().showMessage("Device lists refreshed", 3000)
 
     @pyqtSlot(int)
     def _on_device_selected(self, index):
@@ -617,6 +638,15 @@ class MainWindow(QMainWindow):
         tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.addToolBar(Qt.TopToolBarArea, tb)
 
+        # Refresh device lists
+        self.refresh_action = QAction(
+            self.icon_refresh,
+            "&Refresh Devices",
+            self,
+            triggered=self._refresh_device_lists,
+        )
+        tb.addAction(self.refresh_action)
+
         # Serial port connect/disconnect
         self.connect_serial_action = QAction(
             self.icon_connect,
@@ -629,15 +659,7 @@ class MainWindow(QMainWindow):
         self.serial_port_combobox = QComboBox()
         self.serial_port_combobox.setToolTip("Select Serial Port")
         self.serial_port_combobox.setMinimumWidth(200)
-        ports = list_serial_ports()
-        if ports:
-            for p_dev, p_desc in ports:
-                self.serial_port_combobox.addItem(
-                    f"{os.path.basename(p_dev)} ({p_desc})", QVariant(p_dev)
-                )
-        else:
-            self.serial_port_combobox.addItem("No Serial Ports Found", QVariant())
-            self.serial_port_combobox.setEnabled(False)
+        self._refresh_serial_port_list()
         tb.addWidget(self.serial_port_combobox)
         tb.addSeparator()
 
