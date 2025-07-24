@@ -88,6 +88,7 @@ Result: **pixel-perfect and time-accurate alignment** of pressure + video frames
 
    * Required for DMK camera support.
    * Ensure GenTL Producer is installed and camera enumerates via IC4.
+   * https://www.theimagingsource.com/en-us/support/download/
 
 ---
 
