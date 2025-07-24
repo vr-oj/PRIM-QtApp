@@ -522,7 +522,10 @@ class MainWindow(QMainWindow):
         Show any camera‐related IC4 errors in a dialog, then reset UI to “off” state.
         """
         log.error(f"Camera error occurred ({code}): {msg}")
-        QMessageBox.critical(self, "Camera Error", msg)
+        hint = "Please check the camera connection or restart the device."
+        self._show_error_dialog(
+            "Camera Error", f"{msg}\n\n{hint}", details=f"Code: {code}"
+        )
 
         # If the thread is still running, stop it
         if self.camera_thread and self.camera_thread.isRunning():
@@ -765,6 +768,19 @@ class MainWindow(QMainWindow):
             save_app_setting(SETTING_RESULTS_DIR, results_dir)
             self.statusBar().showMessage(f"Results folder set to {results_dir}", 5000)
 
+    def _show_error_dialog(self, title: str, message: str, details: str = None):
+        """Display a critical error dialog with optional details."""
+        dlg = QMessageBox(
+            QMessageBox.Critical,
+            title,
+            message,
+            QMessageBox.Ok,
+            self,
+        )
+        if details:
+            dlg.setDetailedText(details)
+        dlg.exec_()
+
     def _show_about_dialog(self):
         QMessageBox.information(self, f"About {APP_NAME}", ABOUT_TEXT)
 
@@ -877,8 +893,17 @@ class MainWindow(QMainWindow):
         log.error(f"Serial error: {msg}")
         # Show it in the status bar so user sees it
         self.statusBar().showMessage(f"Serial Error: {msg}", 6000)
+        hint = "Check the cable and selected port, then try reconnecting."
+        self._show_error_dialog("Serial Connection Error", f"{msg}\n\n{hint}")
         # Also re-evaluate whether the recording buttons are enabled
         self._refresh_recording_button_states()
+
+    @pyqtSlot(str)
+    def _handle_recorder_error(self, msg: str):
+        log.error(f"Recording error: {msg}")
+        self.statusBar().showMessage(f"Recording Error: {msg}", 6000)
+        hint = "Check disk space and file permissions."
+        self._show_error_dialog("Recording Error", f"{msg}\n\n{hint}")
 
     @pyqtSlot()
     def _handle_serial_thread_finished(self):
@@ -957,6 +982,7 @@ class MainWindow(QMainWindow):
         # When the worker reports that it is ready for acquisition, send the
         # start command to the Arduino.
         self._recorder_worker.ready_for_acquisition.connect(self._on_recorder_ready)
+        self._recorder_worker.error_occurred.connect(self._handle_recorder_error)
 
         # 8) Hook camera + serial into the worker:
         self._serial_thread.data_ready.connect(self._recorder_worker.append_pressure)
