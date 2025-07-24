@@ -228,6 +228,19 @@ class RecordingManager(QObject):
             log.error(f"Error closing CSV: {e}")
             self.error_occurred.emit(f"Error closing CSV: {e}")
 
+        # After TIFF and CSV are saved, generate the optional ROI overlay ZIP
+        try:
+            from utils.generate_roi_overlay import generate_overlay_zip
+
+            if self._csv_path and os.path.exists(self._csv_path):
+                generate_overlay_zip(
+                    self._csv_path,
+                    font_size=18,
+                    position="Bottom-Right",
+                )
+        except Exception as e:
+            log.error(f"Failed to generate ROI overlay ZIP: {e}")
+
         if self.log_file:
             try:
                 self.log_file.write("Recording stopped\n")
