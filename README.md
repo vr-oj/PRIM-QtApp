@@ -35,6 +35,7 @@ PRIM_ROOT/YYYY-MM-DD/FillN/
 ```
 - Files are automatically named and saved in time-stamped subfolders.
 - Environment variable `PRIM_RESULTS_DIR` overrides default save location.
+- Built-in converter can add pressure metadata to older TIFFs using the saved CSV.
 
 ---
 
@@ -151,7 +152,7 @@ frame_index, elapsed_time_s, pressure_value
 
 * Grayscale TIFF
 * 1 frame per Arduino trigger
-* Metadata optionally includes pressure + timestamp
+* Each frame now stores `Pressure=XX.X mmHg` in its metadata
 * Summary JSON and a session log are saved alongside the files
 
 ---
