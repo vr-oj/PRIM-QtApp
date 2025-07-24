@@ -670,7 +670,11 @@ class MainWindow(QMainWindow):
 
     def _build_status_bar(self):
         sb = self.statusBar()
+        self.serial_status_label = QLabel("Serial: Disconnected")
+        self.recording_status_label = QLabel("Not Recording")
         self.app_session_time_label = QLabel("Session: 00:00:00")
+        sb.addPermanentWidget(self.serial_status_label)
+        sb.addPermanentWidget(self.recording_status_label)
         sb.addPermanentWidget(self.app_session_time_label)
         self._app_session_seconds = 0
         self._app_session_timer = QTimer(self)
@@ -900,6 +904,7 @@ class MainWindow(QMainWindow):
     def _handle_serial_status_change(self, status: str):
         log.info(f"Serial status: {status}")
         self.statusBar().showMessage(f"PRIM Device: {status}", 4000)
+        self.serial_status_label.setText(f"Serial: {status}")
 
         connected_flag = (
             "connected" in status.lower() or "opened serial port" in status.lower()
@@ -918,6 +923,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Serial Error: {msg} — {hint}", 8000
         )
+        self.serial_status_label.setText("Serial: Error")
         self._show_error_dialog("Serial Connection Error", f"{msg}\n\n{hint}")
         # Also re-evaluate whether the recording buttons are enabled
         self._refresh_recording_button_states()
@@ -929,6 +935,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Recording Error: {msg} — {hint}", 8000
         )
+        self.recording_status_label.setText("Not Recording")
         self._show_error_dialog("Recording Error", f"{msg}\n\n{hint}")
 
     @pyqtSlot()
@@ -1026,6 +1033,7 @@ class MainWindow(QMainWindow):
 
         # 10) Update UI buttons (disable “Start” / enable “Stop”):
         self._refresh_recording_button_states()
+        self.recording_status_label.setText(f"Recording → {fill_folder_name}")
         log.info(f"Recording started in {fill_folder_name}.")
 
     @pyqtSlot()
@@ -1100,6 +1108,7 @@ class MainWindow(QMainWindow):
 
         # 4) Immediately update button states (the actual cleanup will happen in _cleanup_recorder)
         self._refresh_recording_button_states()
+        self.recording_status_label.setText("Not Recording")
         log.info("Stop recording requested.")
 
     def _refresh_recording_button_states(self):

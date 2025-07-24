@@ -152,6 +152,7 @@ frame_index, elapsed_time_s, pressure_value
 * Grayscale TIFF
 * 1 frame per Arduino trigger
 * Metadata optionally includes pressure + timestamp
+* Summary JSON and a session log are saved alongside the files
 
 ---
 
