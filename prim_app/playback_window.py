@@ -47,6 +47,7 @@ class PlaybackWindow(QMainWindow):
         self.fps_spin.valueChanged.connect(self.update_fps)
 
         self.export_btn = QPushButton("💾 Export Overlay TIFF")
+        self.snapshot_btn = QPushButton("🖼 Export Frame PNG")
 
         btn_layout = QHBoxLayout()
         btn_layout.setContentsMargins(4, 4, 4, 4)
@@ -56,6 +57,7 @@ class PlaybackWindow(QMainWindow):
         btn_layout.addWidget(QLabel("FPS:"))
         btn_layout.addWidget(self.fps_spin)
         btn_layout.addStretch(1)
+        btn_layout.addWidget(self.snapshot_btn)
         btn_layout.addWidget(self.export_btn)
 
         layout = QVBoxLayout()
@@ -72,6 +74,7 @@ class PlaybackWindow(QMainWindow):
         self.play_btn.clicked.connect(self._toggle_play)
         self.slider.valueChanged.connect(self.set_frame)
         self.export_btn.clicked.connect(self.export_overlay)
+        self.snapshot_btn.clicked.connect(self.export_snapshot)
 
         if tiff_path and csv_path:
             self.load_files(tiff_path, csv_path)
@@ -191,6 +194,26 @@ class PlaybackWindow(QMainWindow):
         imwrite(out_path, np.array(overlaid_frames), photometric="minisblack")
         QApplication.restoreOverrideCursor()
         self.statusBar().showMessage(f"Saved: {os.path.basename(out_path)}", 3000)
+
+    def export_snapshot(self):
+        if not self.frames:
+            return
+        out_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Frame PNG",
+            "",
+            "PNG files (*.png);;TIFF files (*.tif *.tiff)",
+        )
+        if not out_path:
+            return
+        frame = self.frames[self.current_frame]
+        pressure = self.pressures[min(self.current_frame, len(self.pressures) - 1)]
+        overlaid = self.overlay_frame(frame, pressure)
+        Image.fromarray(overlaid).save(out_path)
+        self.statusBar().showMessage(
+            f"Snapshot saved: {os.path.basename(out_path)}",
+            3000,
+        )
 
 
 if __name__ == "__main__":
