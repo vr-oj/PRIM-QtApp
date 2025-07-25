@@ -152,8 +152,7 @@ frame_index, elapsed_time_s, pressure_value
 * Grayscale TIFF
 * 1 frame per Arduino trigger
 * Metadata optionally includes pressure + timestamp
-* An ROI overlay ZIP (`*_overlays.zip`) is generated after recording once the
-  CSV and TIFF files are closed.
+* An ROI overlay ZIP (`*_overlays.zip`) is generated after recording
 
 ### Fiji Auto‑Load Macro
 
