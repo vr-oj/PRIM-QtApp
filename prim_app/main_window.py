@@ -81,6 +81,7 @@ from threads.serial_thread import SerialThread
 from threads.sdk_camera_thread import SDKCameraThread
 from recording_manager import RecordingManager
 from utils.utils import list_serial_ports
+from playback_window import PlaybackWindow
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +97,7 @@ class MainWindow(QMainWindow):
         self._recorder_worker = None
         self._current_fill_folder = None
         self._open_folder_prompt = load_app_setting(SETTING_OPEN_FOLDER_PROMPT, True)
+        self._last_recording_paths = {"tiff": None, "csv": None}
 
         # Camera‐related
         self.device_combo = None
@@ -182,6 +184,7 @@ class MainWindow(QMainWindow):
         self.icon_connect = get_icon("plug.svg")
         self.icon_disconnect = get_icon("plug_disconnect.svg")
         self.icon_refresh = get_icon("sync.svg")
+        self.icon_playback = get_icon("image.svg")
 
     def _build_console_log_dock(self):
         self.dock_console = QDockWidget("Console Log", self)
@@ -572,6 +575,10 @@ class MainWindow(QMainWindow):
         exp_img_act = QAction("Export Plot &Image…", self)
         exp_img_act.triggered.connect(self.pressure_plot_widget.export_as_image)
         fm.addAction(exp_img_act)
+        playback_act = QAction(
+            "Playback Last &Recording…", self, triggered=self.open_playback_window
+        )
+        fm.addAction(playback_act)
         choose_dir_act = QAction(
             "Set &Results Folder…", self, triggered=self._choose_results_dir
         )
@@ -667,6 +674,14 @@ class MainWindow(QMainWindow):
             tb.addAction(self.start_recording_action)
         if hasattr(self, "stop_recording_action"):
             tb.addAction(self.stop_recording_action)
+        self.playback_action = QAction(
+            self.icon_playback,
+            "Playback",
+            self,
+            triggered=self.open_playback_window,
+            enabled=False,
+        )
+        tb.addAction(self.playback_action)
 
     def _build_status_bar(self):
         sb = self.statusBar()
@@ -997,6 +1012,9 @@ class MainWindow(QMainWindow):
         """
         outdir = get_next_fill_folder()
         self._current_fill_folder = outdir
+        self._last_recording_paths = {"tiff": None, "csv": None}
+        if hasattr(self, "playback_action"):
+            self.playback_action.setEnabled(False)
 
         fill_folder_name = os.path.basename(outdir)
 
@@ -1085,6 +1103,14 @@ class MainWindow(QMainWindow):
                 except TypeError:
                     pass
             # At this point, worker has finished and thread has quit.
+            self._last_recording_paths["tiff"] = getattr(
+                self._recorder_worker, "_tiff_path", None
+            )
+            self._last_recording_paths["csv"] = getattr(
+                self._recorder_worker, "_csv_path", None
+            )
+            if hasattr(self, "playback_action"):
+                self.playback_action.setEnabled(True)
             # We can delete both and clear our Python handles:
             self._recorder_thread = None
             self._recorder_worker = None
@@ -1292,3 +1318,13 @@ class MainWindow(QMainWindow):
                     subprocess.Popen(["xdg-open", path])
             except Exception as e:
                 log.error(f"Failed to open folder {path}: {e}")
+
+    def open_playback_window(self):
+        """Open a PlaybackWindow with the last recording, or prompt for files."""
+        tiff_path = self._last_recording_paths.get("tiff")
+        csv_path = self._last_recording_paths.get("csv")
+        if tiff_path and csv_path and (not os.path.exists(tiff_path) or not os.path.exists(csv_path)):
+            tiff_path = csv_path = None
+
+        self.playback_window = PlaybackWindow(tiff_path, csv_path, parent=self)
+        self.playback_window.show()
