@@ -184,7 +184,7 @@ class PlaybackWindow(QMainWindow):
         painter = QPainter(qimg)
         painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
 
-        scale_factor = disp_h
+        scale_factor = disp_h / 500
         font_size = int(self.font_spin.value() * scale_factor)
         font = QFont("Arial", font_size)
         painter.setFont(font)
