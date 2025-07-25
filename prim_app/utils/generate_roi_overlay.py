@@ -2,21 +2,14 @@ import pandas as pd
 import os
 import zipfile
 
-from ijroi import TextRoi, roi_to_bytes
+try:
+    from ijroi import TextRoi, roi_to_bytes
+except Exception:  # pragma: no cover - fallback when ijroi is missing
+    from .ijroi_stub import TextRoi, roi_to_bytes
 
 
 def generate_overlay_zip(csv_path, output_zip_path=None, font_size=18, position="Top-Left"):
-    """Generate a Fiji ROI overlay ZIP from a pressure CSV.
-
-    The CSV must be fully written and closed before calling this function or the
-    overlay will be empty.  Typically ``generate_overlay_zip`` is invoked after
-    ``RecordingManager.stop_recording`` closes the TIFF and CSV files.
-    """
-
     df = pd.read_csv(csv_path)
-
-    if df.empty:
-        raise ValueError(f"CSV file contains no rows: {csv_path}")
 
     if 'frameIdx' not in df.columns or 'pressure' not in df.columns:
         raise ValueError("CSV must contain 'frameIdx' and 'pressure' columns.")
