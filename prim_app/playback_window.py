@@ -57,7 +57,7 @@ class PlaybackWindow(QMainWindow):
 
         self.font_spin = QSpinBox()
         self.font_spin.setRange(10, 200)
-        self.font_spin.setValue(40)
+        self.font_spin.setValue(10)
         self.font_spin.valueChanged.connect(self.regenerate_frames)
 
         self.export_btn = QPushButton("💾 Export Overlay TIFF")
