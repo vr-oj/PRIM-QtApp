@@ -30,12 +30,7 @@ def generate_overlay_zip(csv_path, output_zip_path=None, font_size=18, position=
 
             x, y = x_offset, y_offset
 
-            # Fiji's ROI format only stores the slice number as a 16-bit value
-            # which caps the index at 65535.  Clamp the frame to avoid struct
-            # packing errors when a recording exceeds this limit.
-            position = min(frame, 65535)
-
-            roi = create_text_roi(name, x, y, str(pressure), font_size, position)
+            roi = create_text_roi(name, x, y, str(pressure), font_size, frame)
             zf.writestr(name, roi)
 
     print(f"✅ ROI ZIP saved: {output_zip_path}")
