@@ -160,17 +160,31 @@ class PlaybackWindow(QMainWindow):
             return
         frame = self.frames[self.current_frame]
         pressure = self.pressures[min(self.current_frame, len(self.pressures) - 1)]
-        font_scale = self.font_spin.value()
-        overlaid = self.overlay_frame(frame, pressure, font_scale)
 
-        h, w = overlaid.shape
+        # Resize frame to the QLabel dimensions
+        pix_w, pix_h = self.label.width(), self.label.height()
+        img = Image.fromarray(frame).resize((pix_w, pix_h))
+        draw = ImageDraw.Draw(img)
+
+        # Scale font relative to the displayed size
+        font_size = int(self.font_spin.value() * (pix_h / 500))
+        try:
+            font = ImageFont.truetype("Arial.ttf", font_size)
+        except Exception:
+            font = ImageFont.load_default()
+
+        text = f"{pressure:.2f} mmHg"
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_h = bbox[3] - bbox[1]
+        x, y = 10, pix_h - text_h - 10
+
+        draw.text((x, y), text, fill=255, font=font, stroke_width=2, stroke_fill=0)
+
+        np_img = np.array(img)
         qimg = QImage(
-            overlaid.data, w, h, overlaid.strides[0], QImage.Format_Grayscale8
+            np_img.data, pix_w, pix_h, np_img.strides[0], QImage.Format_Grayscale8
         )
-        pix = QPixmap.fromImage(qimg).scaled(
-            self.label.width(), self.label.height(), Qt.KeepAspectRatio
-        )
-        self.label.setPixmap(pix)
+        self.label.setPixmap(QPixmap.fromImage(qimg))
         if self.slider.maximum() != len(self.frames) - 1:
             self.slider.setRange(0, max(0, len(self.frames) - 1))
         self.slider.blockSignals(True)
