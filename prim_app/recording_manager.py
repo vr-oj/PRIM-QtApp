@@ -26,9 +26,10 @@ class RecordingManager(QObject):
     finished = pyqtSignal()
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, output_dir, parent=None):
+    def __init__(self, output_dir, overlay_mode="No Overlay", parent=None):
         super().__init__(parent)
         self.output_dir = output_dir
+        self.overlay_mode = overlay_mode
 
         # Paths (populated in ``start_recording``)
         self._csv_path = None
@@ -209,6 +210,17 @@ class RecordingManager(QObject):
                 )
         except Exception as e:
             log.error(f"Failed to generate ROI overlay ZIP: {e}")
+
+        # Additional overlay modes
+        try:
+            if self.overlay_mode == "Metadata Overlay (Fiji editable)":
+                from utils.overlay_helpers import embed_metadata
+                embed_metadata(self._tiff_path, self._csv_path)
+            elif self.overlay_mode == "Burned-in Overlay":
+                from utils.overlay_helpers import burn_overlay
+                burn_overlay(self._tiff_path, self._csv_path)
+        except Exception as e:
+            log.error(f"Failed to generate overlay: {e}")
 
         # No session log or summary JSON is generated
 

@@ -55,6 +55,7 @@ from utils.app_settings import (
     SETTING_LAST_CAMERA_INDEX,
     SETTING_RESULTS_DIR,
     SETTING_OPEN_FOLDER_PROMPT,
+    SETTING_OVERLAY_MODE,
 )
 import utils.config as config
 from utils.config import (
@@ -96,6 +97,7 @@ class MainWindow(QMainWindow):
         self._recorder_worker = None
         self._current_fill_folder = None
         self._open_folder_prompt = load_app_setting(SETTING_OPEN_FOLDER_PROMPT, True)
+        self._overlay_mode = load_app_setting(SETTING_OVERLAY_MODE, "No Overlay")
 
         # Camera‐related
         self.device_combo = None
@@ -127,7 +129,7 @@ class MainWindow(QMainWindow):
         # 1) Instantiate the thread object:
         self._recorder_thread = QThread(self)
         dummy_output_dir = ""  # replace with a default or override later
-        self._recorder_worker = RecordingManager(dummy_output_dir)
+        self._recorder_worker = RecordingManager(dummy_output_dir, overlay_mode=self._overlay_mode)
         # 2) Move the worker into the new thread:
         self._recorder_worker.moveToThread(self._recorder_thread)
         # 3) Connect the worker’s finished signal → thread.quit() and cleanup:
@@ -248,6 +250,16 @@ class MainWindow(QMainWindow):
         self.btn_start_camera = QPushButton("Start Camera")
         self.btn_start_camera.clicked.connect(self._on_start_stop_camera)
         info_layout.addRow("", self.btn_start_camera)
+
+        self.overlay_mode_combo = QComboBox()
+        self.overlay_mode_combo.addItems([
+            "No Overlay",
+            "Metadata Overlay (Fiji editable)",
+            "Burned-in Overlay",
+        ])
+        self.overlay_mode_combo.setCurrentText(self._overlay_mode)
+        self.overlay_mode_combo.currentTextChanged.connect(self._on_overlay_mode_changed)
+        info_layout.addRow("Overlay Mode:", self.overlay_mode_combo)
 
         self.camera_tabs.addTab(info_tab, "Camera")
 
@@ -751,6 +763,12 @@ class MainWindow(QMainWindow):
         except Exception:
             log.exception("Failed to send stop pump command")
 
+    @pyqtSlot(str)
+    def _on_overlay_mode_changed(self, text: str):
+        """Persist overlay mode selection."""
+        self._overlay_mode = text
+        save_app_setting(SETTING_OVERLAY_MODE, text)
+
     def _set_initial_control_states(self):
         if hasattr(self, "start_recording_action"):
             self.start_recording_action.setEnabled(False)
@@ -1002,7 +1020,7 @@ class MainWindow(QMainWindow):
 
         # Create the recording thread + worker exactly as before:
         self._recorder_thread = QThread(self)
-        self._recorder_worker = RecordingManager(output_dir=outdir)
+        self._recorder_worker = RecordingManager(output_dir=outdir, overlay_mode=self._overlay_mode)
         self._recorder_worker.moveToThread(self._recorder_thread)
 
         # 7) Wire up thread start → worker.start_recording()

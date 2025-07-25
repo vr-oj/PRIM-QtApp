@@ -152,8 +152,15 @@ frame_index, elapsed_time_s, pressure_value
 * Grayscale TIFF
 * 1 frame per Arduino trigger
 * Metadata optionally includes pressure + timestamp
-* An ROI overlay ZIP (`*_overlays.zip`) is generated after recording once the
-  CSV and TIFF files are closed.
+* Selectable overlay modes:
+  * **No Overlay** – just the raw TIFF and CSV.
+  * **Metadata Overlay (Fiji editable)** – saves `*_metadata.tif` with per-frame
+    pressure stored in the ImageDescription tag so the provided Fiji macro can
+    add text labels.
+  * **Burned-in Overlay** – saves `*_overlay.tif` with pressure text drawn onto
+    each frame.
+* An ROI overlay ZIP (`*_overlays.zip`) is always generated after recording for
+  easy viewing in Fiji.
 
 ### Fiji Auto‑Load Macro
 
@@ -161,6 +168,10 @@ Copy `fiji_macros/PRIM_auto_load_overlays.py` into Fiji’s
 `plugins/Auto_Run/` folder.  When you open a PRIM `.tif`, the macro
 checks for a sibling `*_overlays.zip` and loads it automatically into
 the ROI Manager so you can toggle or edit the labels.
+
+For metadata overlays, copy `fiji_macros/PRIM_auto_overlay_pressure.ijm` into
+the same folder. Any TIFF saved with `Pressure=...` in the ImageDescription tag
+will be opened with text labels automatically added to each frame.
 
 ---
 
