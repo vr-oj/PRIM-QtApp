@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox
 from PIL import Image, ImageDraw, ImageFont
 
 
-def draw_text_overlay(frame, text, position=(10, 20), font_size=60):
+def draw_text_overlay(frame, text, position=(10, 20), font_size=80):
     """Draw text on a grayscale frame using PIL"""
     img = Image.fromarray(frame)
     draw = ImageDraw.Draw(img)
