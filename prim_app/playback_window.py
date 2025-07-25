@@ -36,7 +36,7 @@ class PlaybackWindow(QMainWindow):
 
         # ─── Widgets ──────────────────────────────────────────────────────
         self.label = QLabel(alignment=Qt.AlignCenter)
-        self.play_btn = QPushButton("\u25B6 Play")
+        self.play_btn = QPushButton("\u25b6 Play")
         self.play_btn.setCheckable(True)
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setEnabled(False)
@@ -138,7 +138,9 @@ class PlaybackWindow(QMainWindow):
             font = ImageFont.load_default()
 
         text = f"{pressure:.2f} mmHg"
-        text_w, text_h = draw.textsize(text, font=font)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
 
         x = 20
         y = frame.shape[0] - text_h - 20
@@ -162,7 +164,9 @@ class PlaybackWindow(QMainWindow):
         overlaid = self.overlay_frame(frame, pressure, font_scale)
 
         h, w = overlaid.shape
-        qimg = QImage(overlaid.data, w, h, overlaid.strides[0], QImage.Format_Grayscale8)
+        qimg = QImage(
+            overlaid.data, w, h, overlaid.strides[0], QImage.Format_Grayscale8
+        )
         pix = QPixmap.fromImage(qimg).scaled(
             self.label.width(), self.label.height(), Qt.KeepAspectRatio
         )
@@ -176,10 +180,10 @@ class PlaybackWindow(QMainWindow):
     # ─── Controls ─────────────────────────────────────────────────────────
     def _toggle_play(self, checked):
         if checked:
-            self.play_btn.setText("\u23F8 Pause")
+            self.play_btn.setText("\u23f8 Pause")
             self.timer.start(int(1000 / self.fps_spin.value()))
         else:
-            self.play_btn.setText("\u25B6 Play")
+            self.play_btn.setText("\u25b6 Play")
             self.timer.stop()
 
     def next_frame(self):
@@ -208,7 +212,8 @@ class PlaybackWindow(QMainWindow):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         font_scale = self.font_spin.value()
         overlaid_frames = [
-            self.overlay_frame(f, p, font_scale) for f, p in zip(self.frames, self.pressures)
+            self.overlay_frame(f, p, font_scale)
+            for f, p in zip(self.frames, self.pressures)
         ]
         imwrite(out_path, np.array(overlaid_frames), photometric="minisblack")
         QApplication.restoreOverrideCursor()
