@@ -32,12 +32,19 @@ class SerialThread(QThread):
         self._got_first_packet = False  # Have we seen at least one valid line?
         self._last_data_time = None  # Timestamp (time.time()) of last valid packet
         self._stop_requested = False
+        self._idle_timeout_enabled = True  # watchdog for streaming silence
 
 
         # For sending commands (not used here, but kept for future)
         self.command_queue = queue.Queue()
         self.mutex = QMutex()
         self.wait_condition = QWaitCondition()
+
+    def set_idle_timeout_enabled(self, enabled: bool):
+        """Toggle the idle-timeout watchdog used during streaming."""
+        self._idle_timeout_enabled = bool(enabled)
+        self._got_first_packet = False
+        self._last_data_time = None
 
     def run(self):
         """Main loop for reading from the PRIM device.
@@ -161,7 +168,8 @@ class SerialThread(QThread):
 
                 # ---- Idle timeout watchdog ---------------------------------
                 if (
-                    self._got_first_packet
+                    self._idle_timeout_enabled
+                    and self._got_first_packet
                     and self._last_data_time is not None
                     and (time.time() - self._last_data_time) > IDLE_TIMEOUT_S
                 ):

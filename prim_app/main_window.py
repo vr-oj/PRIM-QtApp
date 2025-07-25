@@ -1042,6 +1042,8 @@ class MainWindow(QMainWindow):
         try:
             if self._serial_thread:
                 self._serial_thread.send_command("G")
+                if hasattr(self._serial_thread, "set_idle_timeout_enabled"):
+                    self._serial_thread.set_idle_timeout_enabled(True)
         except Exception:
             log.exception("Failed to send start command to Arduino")
 
@@ -1060,6 +1062,8 @@ class MainWindow(QMainWindow):
         try:
             if self._serial_thread:
                 self._serial_thread.send_command("S")
+                if hasattr(self._serial_thread, "set_idle_timeout_enabled"):
+                    self._serial_thread.set_idle_timeout_enabled(False)
         except Exception:
             log.exception("Failed to send stop command to Arduino")
 
