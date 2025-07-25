@@ -167,7 +167,7 @@ class PlaybackWindow(QMainWindow):
         draw = ImageDraw.Draw(img)
 
         # Scale font relative to the displayed size
-        scale_factor = pix_h / 200  # Larger base scaling
+        scale_factor = pix_h / 200 * 3
         font_size = int(self.font_spin.value() * scale_factor)
         try:
             font = ImageFont.truetype("Arial.ttf", font_size)
