@@ -46,6 +46,11 @@ class PlaybackWindow(QMainWindow):
         self.fps_spin.setValue(10)
         self.fps_spin.valueChanged.connect(self.update_fps)
 
+        self.font_spin = QSpinBox()
+        self.font_spin.setRange(10, 200)
+        self.font_spin.setValue(40)
+        self.font_spin.valueChanged.connect(self.show_frame)
+
         self.export_btn = QPushButton("💾 Export Overlay TIFF")
         self.snapshot_btn = QPushButton("🖼 Export Frame PNG")
 
@@ -56,6 +61,8 @@ class PlaybackWindow(QMainWindow):
         btn_layout.addWidget(self.slider, stretch=1)
         btn_layout.addWidget(QLabel("FPS:"))
         btn_layout.addWidget(self.fps_spin)
+        btn_layout.addWidget(QLabel("Font:"))
+        btn_layout.addWidget(self.font_spin)
         btn_layout.addStretch(1)
         btn_layout.addWidget(self.snapshot_btn)
         btn_layout.addWidget(self.export_btn)
@@ -119,11 +126,11 @@ class PlaybackWindow(QMainWindow):
         self.show_frame()
 
     # ─── Overlay Helpers ─────────────────────────────────────────────────-
-    def overlay_frame(self, frame, pressure):
+    def overlay_frame(self, frame, pressure, font_size):
         img = Image.fromarray(frame)
         draw = ImageDraw.Draw(img)
         try:
-            font = ImageFont.truetype("Arial.ttf", 20)
+            font = ImageFont.truetype("Arial.ttf", font_size)
         except Exception:
             font = ImageFont.load_default()
         draw.text(
@@ -141,7 +148,8 @@ class PlaybackWindow(QMainWindow):
             return
         frame = self.frames[self.current_frame]
         pressure = self.pressures[min(self.current_frame, len(self.pressures) - 1)]
-        overlaid = self.overlay_frame(frame, pressure)
+        font_size = self.font_spin.value()
+        overlaid = self.overlay_frame(frame, pressure, font_size)
 
         h, w = overlaid.shape
         qimg = QImage(overlaid.data, w, h, overlaid.strides[0], QImage.Format_Grayscale8)
@@ -188,8 +196,9 @@ class PlaybackWindow(QMainWindow):
             return
         self.statusBar().showMessage("Exporting overlay...")
         QApplication.setOverrideCursor(Qt.WaitCursor)
+        font_size = self.font_spin.value()
         overlaid_frames = [
-            self.overlay_frame(f, p) for f, p in zip(self.frames, self.pressures)
+            self.overlay_frame(f, p, font_size) for f, p in zip(self.frames, self.pressures)
         ]
         imwrite(out_path, np.array(overlaid_frames), photometric="minisblack")
         QApplication.restoreOverrideCursor()
@@ -208,7 +217,8 @@ class PlaybackWindow(QMainWindow):
             return
         frame = self.frames[self.current_frame]
         pressure = self.pressures[min(self.current_frame, len(self.pressures) - 1)]
-        overlaid = self.overlay_frame(frame, pressure)
+        font_size = self.font_spin.value()
+        overlaid = self.overlay_frame(frame, pressure, font_size)
         Image.fromarray(overlaid).save(out_path)
         self.statusBar().showMessage(
             f"Snapshot saved: {os.path.basename(out_path)}",
