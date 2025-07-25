@@ -38,12 +38,8 @@ class RecordingManager(QObject):
         self.csv_file = None
         self.csv_writer = None
         self.tif_writer = None
-        self.log_file = None
 
-        # Summary/log info
-        self._log_path = None
-        self._summary_path = None
-        self._errors = []
+        # Internal info
         self._first_frame_shape = None
 
         # Recording flags
@@ -80,18 +76,7 @@ class RecordingManager(QObject):
         
         self._csv_path = os.path.join(self.output_dir, f"{base_name}_pressure.csv")
         self._tiff_path = os.path.join(self.output_dir, f"{base_name}_video.tif")
-        self._log_path = os.path.join(self.output_dir, f"{base_name}.log")
-        self._summary_path = os.path.join(self.output_dir, f"{base_name}_summary.json")
-        self._errors.clear()
         self._first_frame_shape = None
-
-        try:
-            self.log_file = open(self._log_path, "w", newline="")
-            self.log_file.write("Recording started\n")
-            self.log_file.flush()
-        except Exception as e:
-            log.error(f"Failed to open log file: {e}")
-            self.log_file = None
 
         self.is_recording = True
         self._got_first_sample = False
@@ -126,10 +111,6 @@ class RecordingManager(QObject):
                 self.csv_writer.writerow(["frameIdx", "deviceTime", "pressure"])
             except Exception as e:
                 log.error(f"Failed to open CSV: {e}")
-                self._errors.append(str(e))
-                if self.log_file:
-                    self.log_file.write(f"CSV open error: {e}\n")
-                    self.log_file.flush()
                 self.error_occurred.emit(f"Failed to open CSV file: {e}")
                 self.is_recording = False
                 return
@@ -137,10 +118,6 @@ class RecordingManager(QObject):
                 self.tif_writer = tifffile.TiffWriter(self._tiff_path, bigtiff=True)
             except Exception as e:
                 log.error(f"Failed to open TIFF: {e}")
-                self._errors.append(str(e))
-                if self.log_file:
-                    self.log_file.write(f"TIFF open error: {e}\n")
-                    self.log_file.flush()
                 self.error_occurred.emit(f"Failed to open TIFF file: {e}")
                 if self.csv_file:
                     self.csv_file.close()
@@ -163,10 +140,6 @@ class RecordingManager(QObject):
                 log.error(
                     f"Error writing CSV row ({frameIdx}, {t_device}, {pressure}): {e}"
                 )
-                self._errors.append(str(e))
-                if self.log_file:
-                    self.log_file.write(f"CSV write error: {e}\n")
-                    self.log_file.flush()
                 self.error_occurred.emit(f"Error writing CSV: {e}")
         self._check_stop_condition()
 
@@ -196,10 +169,6 @@ class RecordingManager(QObject):
                 log.error(
                     f"Error writing TIFF page for frame {failed_idx}: {e}"
                 )
-                self._errors.append(str(e))
-                if self.log_file:
-                    self.log_file.write(f"TIFF write error: {e}\n")
-                    self.log_file.flush()
                 self.error_occurred.emit(f"Error writing video frame: {e}")
         self._check_stop_condition()
 
@@ -228,46 +197,7 @@ class RecordingManager(QObject):
             log.error(f"Error closing CSV: {e}")
             self.error_occurred.emit(f"Error closing CSV: {e}")
 
-        # After TIFF and CSV are saved, generate the optional ROI overlay ZIP
-        try:
-            from utils.generate_roi_overlay import generate_overlay_zip
-
-            if self._csv_path and os.path.exists(self._csv_path):
-                generate_overlay_zip(
-                    self._csv_path,
-                    font_size=18,
-                    position="Bottom-Right",
-                )
-        except Exception as e:
-            log.error(f"Failed to generate ROI overlay ZIP: {e}")
-
-        if self.log_file:
-            try:
-                self.log_file.write("Recording stopped\n")
-                self.log_file.flush()
-                self.log_file.close()
-            except Exception:
-                pass
-            self.log_file = None
-
-        # Write summary JSON
-        try:
-            summary = {
-                "date": time.strftime("%Y-%m-%d"),
-                "duration_s": float(self._last_device_time),
-                "frames": int(self._frames_written),
-                "camera_resolution": (
-                    f"{self._first_frame_shape[1]}x{self._first_frame_shape[0]}"
-                    if self._first_frame_shape is not None
-                    else "unknown"
-                ),
-                "recording_path": self.output_dir,
-                "errors": self._errors,
-            }
-            with open(self._summary_path, "w") as sf:
-                json.dump(summary, sf, indent=2)
-        except Exception as e:
-            log.error(f"Failed to write summary file: {e}")
+        # Optional overlays, logs, and summary are no longer generated
 
         self._got_first_sample = False
         self._frame_counter = 0
