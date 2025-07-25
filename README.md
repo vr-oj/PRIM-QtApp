@@ -51,7 +51,7 @@ PRIMAcquisition uses a **hardware-triggered acquisition model**:
 Each cycle:
 1. Arduino triggers a camera frame via digital HIGH → LOW on `CamTrig`.
 2. Arduino immediately sends pressure data and timestamp via serial.
-3. App receives both the frame and serial line, logs them together.
+3. App receives both the frame and serial line, saves them together.
 
 Result: **pixel-perfect and time-accurate alignment** of pressure + video frames.
 
@@ -152,7 +152,7 @@ frame_index, elapsed_time_s, pressure_value
 * Grayscale TIFF
 * 1 frame per Arduino trigger
 * Metadata optionally includes pressure + timestamp
-* Summary JSON and a session log are saved alongside the files
+* Only the CSV and TIFF files are saved when a recording stops
 
 ---
 
