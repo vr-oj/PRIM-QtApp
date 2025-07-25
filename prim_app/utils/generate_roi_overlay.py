@@ -1,7 +1,11 @@
 import pandas as pd
 import os
-import struct
 import zipfile
+
+try:
+    from ijroi import TextRoi, roi_to_bytes
+except Exception:  # pragma: no cover - fallback when ijroi is missing
+    from .ijroi_stub import TextRoi, roi_to_bytes
 
 
 def generate_overlay_zip(csv_path, output_zip_path=None, font_size=18, position="Top-Left"):
@@ -22,62 +26,19 @@ def generate_overlay_zip(csv_path, output_zip_path=None, font_size=18, position=
     }
     x_offset, y_offset = corner_offsets.get(position, (10, 10))
 
-    with zipfile.ZipFile(output_zip_path, 'w') as zf:
+    with zipfile.ZipFile(output_zip_path, "w") as zf:
         for _, row in df.iterrows():
-            frame = int(row['frameIdx'])
-            pressure = row['pressure']
+            frame = int(row["frameIdx"])
+            pressure = row["pressure"]
             name = f"frame{frame:05d}.roi"
 
             x, y = x_offset, y_offset
 
             # Fiji's ROI format only stores the slice number as a 16-bit value
-            # which caps the index at 65535.  Clamp the frame to avoid struct
-            # packing errors when a recording exceeds this limit.
-            position = min(frame, 65535)
+            position_idx = min(frame, 65535)
 
-            roi = create_text_roi(name, x, y, str(pressure), font_size, position)
-            zf.writestr(name, roi)
+            roi = TextRoi(x, y, str(pressure), font_size=font_size, position=position_idx, name=name)
+            zf.writestr(name, roi_to_bytes(roi))
 
     print(f"✅ ROI ZIP saved: {output_zip_path}")
     return output_zip_path
-
-
-def create_text_roi(name, x, y, text, font_size, position):
-    HEADER_SIZE = 64
-    VERSION = 227
-    ROI_TYPE_TEXT = 128
-    FONT_NAME = "Helvetica"
-
-    roi_data = bytearray(HEADER_SIZE)
-
-    def put_short(index, value):
-        struct.pack_into(">H", roi_data, index, value)
-
-    def put_int(index, value):
-        struct.pack_into(">I", roi_data, index, value)
-
-    # Header (magic 'Iout')
-    put_short(0, 0x494a)  # 'IJ'
-    put_short(2, VERSION)
-
-    # Type and basic bounds
-    roi_data[6] = ROI_TYPE_TEXT
-    put_short(8, y)
-    put_short(10, x)
-    put_short(12, y + 10)
-    put_short(14, x + 10)
-    put_short(16, 1)
-
-    # Set position (slice number, 1-based)
-    put_int(56, position)
-
-    # Extended header with text and font info
-    text_bytes = text.encode('utf-16-be')
-    font_bytes = FONT_NAME.encode('utf-16-be')
-
-    text_block = bytearray()
-    text_block += struct.pack(">I", len(text_bytes)) + text_bytes
-    text_block += struct.pack(">I", len(font_bytes)) + font_bytes
-    text_block += struct.pack(">i", font_size)
-
-    return roi_data + text_block
