@@ -152,14 +152,7 @@ frame_index, elapsed_time_s, pressure_value
 * Grayscale TIFF
 * 1 frame per Arduino trigger
 * Metadata optionally includes pressure + timestamp
-* An ROI overlay ZIP (`*_overlays.zip`) is generated after recording
-
-### Fiji Auto‑Load Macro
-
-Copy `fiji_macros/PRIM_auto_load_overlays.py` into Fiji’s
-`plugins/Auto_Run/` folder.  When you open a PRIM `.tif`, the macro
-checks for a sibling `*_overlays.zip` and loads it automatically into
-the ROI Manager so you can toggle or edit the labels.
+* An ROI overlay ZIP is generated after recording
 
 ---
 
