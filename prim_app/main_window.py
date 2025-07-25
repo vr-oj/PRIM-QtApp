@@ -576,7 +576,7 @@ class MainWindow(QMainWindow):
         exp_img_act.triggered.connect(self.pressure_plot_widget.export_as_image)
         fm.addAction(exp_img_act)
         playback_act = QAction(
-            "Playback Last &Recording…", self, triggered=self.open_playback_window
+            "Open &Playback…", self, triggered=lambda: self.open_playback_window(True)
         )
         fm.addAction(playback_act)
         choose_dir_act = QAction(
@@ -1319,11 +1319,15 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 log.error(f"Failed to open folder {path}: {e}")
 
-    def open_playback_window(self):
-        """Open a PlaybackWindow with the last recording, or prompt for files."""
+    def open_playback_window(self, ask_user=False):
+        """Open a :class:`PlaybackWindow` with the last recording or ask for files."""
         tiff_path = self._last_recording_paths.get("tiff")
         csv_path = self._last_recording_paths.get("csv")
-        if tiff_path and csv_path and (not os.path.exists(tiff_path) or not os.path.exists(csv_path)):
+        if ask_user:
+            tiff_path = csv_path = None
+        elif tiff_path and csv_path and (
+            not os.path.exists(tiff_path) or not os.path.exists(csv_path)
+        ):
             tiff_path = csv_path = None
 
         self.playback_window = PlaybackWindow(tiff_path, csv_path, parent=self)
