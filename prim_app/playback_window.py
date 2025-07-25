@@ -161,13 +161,16 @@ class PlaybackWindow(QMainWindow):
         frame = self.frames[self.current_frame]
         pressure = self.pressures[min(self.current_frame, len(self.pressures) - 1)]
 
-        # Resize frame to the QLabel dimensions
-        pix_w, pix_h = self.label.width(), self.label.height()
-        img = Image.fromarray(frame).resize((pix_w, pix_h))
+        label_w, label_h = self.label.width(), self.label.height()
+        frame_h, frame_w = frame.shape
+        scale = min(label_w / frame_w, label_h / frame_h)
+        disp_w, disp_h = max(1, int(frame_w * scale)), max(1, int(frame_h * scale))
+
+        img = Image.fromarray(frame).resize((disp_w, disp_h))
         draw = ImageDraw.Draw(img)
 
         # Scale font relative to the displayed size
-        scale_factor = pix_h / 200 * 3
+        scale_factor = disp_h / 200 * 3
         font_size = int(self.font_spin.value() * scale_factor)
         try:
             font = ImageFont.truetype("Arial.ttf", font_size)
@@ -177,13 +180,13 @@ class PlaybackWindow(QMainWindow):
         text = f"{pressure:.2f} mmHg"
         bbox = draw.textbbox((0, 0), text, font=font)
         text_h = bbox[3] - bbox[1]
-        x, y = 10, pix_h - text_h - 10
+        x, y = 10, disp_h - text_h - 10
 
         draw.text((x, y), text, fill=255, font=font, stroke_width=2, stroke_fill=0)
 
         np_img = np.array(img)
         qimg = QImage(
-            np_img.data, pix_w, pix_h, np_img.strides[0], QImage.Format_Grayscale8
+            np_img.data, disp_w, disp_h, np_img.strides[0], QImage.Format_Grayscale8
         )
         self.label.setPixmap(QPixmap.fromImage(qimg))
         if self.slider.maximum() != len(self.frames) - 1:
@@ -254,6 +257,10 @@ class PlaybackWindow(QMainWindow):
             f"Snapshot saved: {os.path.basename(out_path)}",
             3000,
         )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.show_frame()
 
 
 if __name__ == "__main__":
