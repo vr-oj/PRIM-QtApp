@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
     QWidget,
     QFileDialog,
     QSpinBox,
+    QSlider,
 )
 from tifffile import TiffFile, imwrite
 from PIL import Image, ImageDraw, ImageFont
@@ -36,12 +37,12 @@ class PlaybackWindow(QMainWindow):
         # ─── Widgets ──────────────────────────────────────────────────────
         self.label = QLabel(alignment=Qt.AlignCenter)
         self.play_btn = QPushButton("\u25B6 Play")
-        self.pause_btn = QPushButton("\u23F8 Pause")
-        self.prev_btn = QPushButton("\u23EE Prev")
-        self.next_btn = QPushButton("\u23ED Next")
+        self.play_btn.setCheckable(True)
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setEnabled(False)
 
         self.fps_spin = QSpinBox()
-        self.fps_spin.setRange(1, 60)
+        self.fps_spin.setRange(1, 1000)
         self.fps_spin.setValue(10)
         self.fps_spin.valueChanged.connect(self.update_fps)
 
@@ -51,9 +52,7 @@ class PlaybackWindow(QMainWindow):
         btn_layout.setContentsMargins(4, 4, 4, 4)
         btn_layout.setSpacing(6)
         btn_layout.addWidget(self.play_btn)
-        btn_layout.addWidget(self.pause_btn)
-        btn_layout.addWidget(self.prev_btn)
-        btn_layout.addWidget(self.next_btn)
+        btn_layout.addWidget(self.slider, stretch=1)
         btn_layout.addWidget(QLabel("FPS:"))
         btn_layout.addWidget(self.fps_spin)
         btn_layout.addStretch(1)
@@ -70,10 +69,8 @@ class PlaybackWindow(QMainWindow):
         self.setCentralWidget(container)
 
         # ─── Signals ──────────────────────────────────────────────────────
-        self.play_btn.clicked.connect(self.play)
-        self.pause_btn.clicked.connect(self.pause)
-        self.prev_btn.clicked.connect(self.prev_frame)
-        self.next_btn.clicked.connect(self.next_frame)
+        self.play_btn.clicked.connect(self._toggle_play)
+        self.slider.valueChanged.connect(self.set_frame)
         self.export_btn.clicked.connect(self.export_overlay)
 
         if tiff_path and csv_path:
@@ -96,6 +93,8 @@ class PlaybackWindow(QMainWindow):
         self.load_files(tiff, csv_path)
 
     def load_files(self, tiff_path, csv_path):
+        self.statusBar().showMessage("Loading files...")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             with TiffFile(tiff_path) as tif:
                 self.frames = [page.asarray() for page in tif.pages]
@@ -109,7 +108,11 @@ class PlaybackWindow(QMainWindow):
         except Exception:
             self.pressures = []
 
+        QApplication.restoreOverrideCursor()
+        self.statusBar().clearMessage()
+
         self.current_frame = 0
+        self.slider.setEnabled(bool(self.frames))
         self.show_frame()
 
     # ─── Overlay Helpers ─────────────────────────────────────────────────-
@@ -120,7 +123,14 @@ class PlaybackWindow(QMainWindow):
             font = ImageFont.truetype("Arial.ttf", 20)
         except Exception:
             font = ImageFont.load_default()
-        draw.text((10, 20), f"{pressure:.2f} mmHg", fill=255, font=font)
+        draw.text(
+            (10, 20),
+            f"{pressure:.2f} mmHg",
+            fill=255,
+            font=font,
+            stroke_width=2,
+            stroke_fill=0,
+        )
         return np.array(img)
 
     def show_frame(self):
@@ -136,13 +146,20 @@ class PlaybackWindow(QMainWindow):
             self.label.width(), self.label.height(), Qt.KeepAspectRatio
         )
         self.label.setPixmap(pix)
+        if self.slider.maximum() != len(self.frames) - 1:
+            self.slider.setRange(0, max(0, len(self.frames) - 1))
+        self.slider.blockSignals(True)
+        self.slider.setValue(self.current_frame)
+        self.slider.blockSignals(False)
 
     # ─── Controls ─────────────────────────────────────────────────────────
-    def play(self):
-        self.timer.start(int(1000 / self.fps_spin.value()))
-
-    def pause(self):
-        self.timer.stop()
+    def _toggle_play(self, checked):
+        if checked:
+            self.play_btn.setText("\u23F8 Pause")
+            self.timer.start(int(1000 / self.fps_spin.value()))
+        else:
+            self.play_btn.setText("\u25B6 Play")
+            self.timer.stop()
 
     def next_frame(self):
         if not self.frames:
@@ -150,10 +167,10 @@ class PlaybackWindow(QMainWindow):
         self.current_frame = (self.current_frame + 1) % len(self.frames)
         self.show_frame()
 
-    def prev_frame(self):
+    def set_frame(self, idx):
         if not self.frames:
             return
-        self.current_frame = (self.current_frame - 1) % len(self.frames)
+        self.current_frame = max(0, min(idx, len(self.frames) - 1))
         self.show_frame()
 
     def update_fps(self):
@@ -166,10 +183,14 @@ class PlaybackWindow(QMainWindow):
         )
         if not out_path:
             return
+        self.statusBar().showMessage("Exporting overlay...")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         overlaid_frames = [
             self.overlay_frame(f, p) for f, p in zip(self.frames, self.pressures)
         ]
         imwrite(out_path, np.array(overlaid_frames), photometric="minisblack")
+        QApplication.restoreOverrideCursor()
+        self.statusBar().showMessage(f"Saved: {os.path.basename(out_path)}", 3000)
 
 
 if __name__ == "__main__":
