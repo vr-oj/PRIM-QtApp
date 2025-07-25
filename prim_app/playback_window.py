@@ -38,6 +38,7 @@ class PlaybackWindow(QMainWindow):
 
         self.frames = []
         self.pressures = []
+        self.pre_rendered_frames = []
         self.current_frame = 0
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.next_frame)
@@ -57,7 +58,7 @@ class PlaybackWindow(QMainWindow):
         self.font_spin = QSpinBox()
         self.font_spin.setRange(10, 200)
         self.font_spin.setValue(40)
-        self.font_spin.valueChanged.connect(self.show_frame)
+        self.font_spin.valueChanged.connect(self.regenerate_frames)
 
         self.export_btn = QPushButton("💾 Export Overlay TIFF")
         self.snapshot_btn = QPushButton("🖼 Export Frame PNG")
@@ -131,6 +132,7 @@ class PlaybackWindow(QMainWindow):
 
         self.current_frame = 0
         self.slider.setEnabled(bool(self.frames))
+        self.pre_render_frames()
         self.show_frame()
 
     # ─── Overlay Helpers ─────────────────────────────────────────────────-
@@ -164,16 +166,13 @@ class PlaybackWindow(QMainWindow):
         arr = np.frombuffer(ptr, np.uint8).reshape((h, w))
         return arr.copy()
 
-    def show_frame(self):
-        if not self.frames:
-            return
-        frame = self.frames[self.current_frame]
-        pressure = self.pressures[min(self.current_frame, len(self.pressures) - 1)]
-
-        label_w, label_h = self.label.width(), self.label.height()
+    def render_pixmap(self, frame, pressure):
+        """Return a :class:`QPixmap` of ``frame`` scaled and annotated."""
+        label_w, label_h = max(1, self.label.width()), max(1, self.label.height())
         frame_h, frame_w = frame.shape
         scale = min(label_w / frame_w, label_h / frame_h)
-        disp_w, disp_h = max(1, int(frame_w * scale)), max(1, int(frame_h * scale))
+        disp_w = max(1, int(frame_w * scale))
+        disp_h = max(1, int(frame_h * scale))
 
         qimg = QImage(
             frame.data, frame_w, frame_h, frame.strides[0], QImage.Format_Grayscale8
@@ -201,7 +200,28 @@ class PlaybackWindow(QMainWindow):
         painter.fillPath(path, Qt.white)
         painter.end()
 
-        self.label.setPixmap(QPixmap.fromImage(qimg))
+        return QPixmap.fromImage(qimg)
+
+    def pre_render_frames(self):
+        """Pre-render all frames into ``self.pre_rendered_frames``."""
+        self.pre_rendered_frames = []
+        if not self.frames:
+            return
+        pressures = self.pressures or [0] * len(self.frames)
+        for idx, frame in enumerate(self.frames):
+            pressure = pressures[min(idx, len(pressures) - 1)]
+            pix = self.render_pixmap(frame, pressure)
+            self.pre_rendered_frames.append(pix)
+
+    def regenerate_frames(self):
+        """Re-render frames and update the current display."""
+        self.pre_render_frames()
+        self.show_frame()
+
+    def show_frame(self):
+        if not self.pre_rendered_frames:
+            return
+        self.label.setPixmap(self.pre_rendered_frames[self.current_frame])
         if self.slider.maximum() != len(self.frames) - 1:
             self.slider.setRange(0, max(0, len(self.frames) - 1))
         self.slider.blockSignals(True)
@@ -273,7 +293,7 @@ class PlaybackWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.show_frame()
+        self.regenerate_frames()
 
 
 if __name__ == "__main__":
