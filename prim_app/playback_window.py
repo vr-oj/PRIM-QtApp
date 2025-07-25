@@ -120,7 +120,7 @@ class PlaybackWindow(QMainWindow):
         img = Image.fromarray(frame)
         draw = ImageDraw.Draw(img)
         try:
-            font = ImageFont.truetype("Arial.ttf", 120)
+            font = ImageFont.truetype("Arial.ttf", 20)
         except Exception:
             font = ImageFont.load_default()
         draw.text(
