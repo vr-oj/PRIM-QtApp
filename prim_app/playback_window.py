@@ -129,10 +129,14 @@ class PlaybackWindow(QMainWindow):
     def overlay_frame(self, frame, pressure, font_size):
         img = Image.fromarray(frame)
         draw = ImageDraw.Draw(img)
+
+        # Scale the text size relative to the image height
+        scaled_font_size = int((font_size / 100) * img.height)
         try:
-            font = ImageFont.truetype("Arial.ttf", font_size)
+            font = ImageFont.truetype("Arial.ttf", scaled_font_size)
         except Exception:
             font = ImageFont.load_default()
+
         draw.text(
             (10, 20),
             f"{pressure:.2f} mmHg",
