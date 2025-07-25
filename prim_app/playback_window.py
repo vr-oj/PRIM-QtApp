@@ -137,7 +137,9 @@ class PlaybackWindow(QMainWindow):
     def overlay_frame(self, frame, pressure, font_scale):
         """Return a numpy array of ``frame`` with pressure text drawn using Qt."""
         h, w = frame.shape
-        qimg = QImage(frame.data, w, h, frame.strides[0], QImage.Format_Grayscale8).copy()
+        qimg = QImage(
+            frame.data, w, h, frame.strides[0], QImage.Format_Grayscale8
+        ).copy()
         painter = QPainter(qimg)
         painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
 
@@ -173,14 +175,16 @@ class PlaybackWindow(QMainWindow):
         scale = min(label_w / frame_w, label_h / frame_h)
         disp_w, disp_h = max(1, int(frame_w * scale)), max(1, int(frame_h * scale))
 
-        qimg = QImage(frame.data, frame_w, frame_h, frame.strides[0], QImage.Format_Grayscale8)
+        qimg = QImage(
+            frame.data, frame_w, frame_h, frame.strides[0], QImage.Format_Grayscale8
+        )
         qimg = qimg.scaled(disp_w, disp_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         qimg = qimg.convertToFormat(QImage.Format_Grayscale8)
 
         painter = QPainter(qimg)
         painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
 
-        scale_factor = disp_h / 200 * 3
+        scale_factor = disp_h / 200
         font_size = int(self.font_spin.value() * scale_factor)
         font = QFont("Arial", font_size)
         painter.setFont(font)
