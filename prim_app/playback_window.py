@@ -2,7 +2,7 @@ import sys
 import os
 import csv
 import numpy as np
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QThread, QObject, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import (
     QPixmap,
     QImage,
@@ -23,9 +23,47 @@ from PyQt5.QtWidgets import (
     QFileDialog,
     QSpinBox,
     QSlider,
+    QProgressBar,
 )
 from tifffile import TiffFile, imwrite
 from PIL import Image
+
+
+class PlaybackLoader(QObject):
+    """Worker object to load TIFF and CSV data in a separate thread."""
+
+    progress = pyqtSignal(int, int)
+    finished = pyqtSignal(list, list)
+    error = pyqtSignal(str)
+
+    def __init__(self, tiff_path, csv_path, parent=None):
+        super().__init__(parent)
+        self.tiff_path = tiff_path
+        self.csv_path = csv_path
+
+    @pyqtSlot()
+    def run(self):
+        frames = []
+        try:
+            with TiffFile(self.tiff_path) as tif:
+                total = len(tif.pages)
+                for idx, page in enumerate(tif.pages):
+                    frames.append(page.asarray())
+                    self.progress.emit(idx + 1, total)
+        except Exception as e:
+            self.error.emit(str(e))
+            self.finished.emit([], [])
+            return
+
+        pressures = []
+        try:
+            with open(self.csv_path, "r", newline="") as f:
+                reader = csv.DictReader(f)
+                pressures = [float(row.get("pressure", 0)) for row in reader]
+        except Exception as e:
+            self.error.emit(str(e))
+
+        self.finished.emit(frames, pressures)
 
 
 class PlaybackWindow(QMainWindow):
@@ -39,12 +77,17 @@ class PlaybackWindow(QMainWindow):
         self.frames = []
         self.pressures = []
         self.pre_rendered_frames = []
+        self.loader_thread = None
+        self.loader = None
         self.current_frame = 0
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.next_frame)
 
         # ─── Widgets ──────────────────────────────────────────────────────
         self.label = QLabel(alignment=Qt.AlignCenter)
+        self.progress = QProgressBar()
+        self.progress.setTextVisible(False)
+        self.progress.setVisible(False)
         self.play_btn = QPushButton("\u25b6 Play")
         self.play_btn.setCheckable(True)
         self.slider = QSlider(Qt.Horizontal)
@@ -80,6 +123,7 @@ class PlaybackWindow(QMainWindow):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
         layout.addWidget(self.label, stretch=1)
+        layout.addWidget(self.progress)
         layout.addLayout(btn_layout)
 
         container = QWidget()
@@ -112,28 +156,42 @@ class PlaybackWindow(QMainWindow):
         self.load_files(tiff, csv_path)
 
     def load_files(self, tiff_path, csv_path):
+        # Show progress bar and start worker thread to avoid blocking UI
+        self.progress.setVisible(True)
+        self.progress.setValue(0)
         self.statusBar().showMessage("Loading files...")
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            with TiffFile(tiff_path) as tif:
-                self.frames = [page.asarray() for page in tif.pages]
-        except Exception:
-            self.frames = []
 
-        try:
-            with open(csv_path, "r", newline="") as f:
-                reader = csv.DictReader(f)
-                self.pressures = [float(row.get("pressure", 0)) for row in reader]
-        except Exception:
-            self.pressures = []
+        self.loader_thread = QThread(self)
+        self.loader = PlaybackLoader(tiff_path, csv_path)
+        self.loader.moveToThread(self.loader_thread)
+        self.loader_thread.started.connect(self.loader.run)
+        self.loader.progress.connect(self._update_progress)
+        self.loader.finished.connect(self._files_loaded)
+        self.loader.error.connect(self._show_error)
+        self.loader.finished.connect(self.loader_thread.quit)
+        self.loader_thread.finished.connect(self.loader.deleteLater)
+        self.loader_thread.finished.connect(self.loader_thread.deleteLater)
+        self.loader_thread.start()
 
+    def _update_progress(self, current, total):
+        self.progress.setMaximum(total)
+        self.progress.setValue(current)
+
+    def _files_loaded(self, frames, pressures):
         QApplication.restoreOverrideCursor()
         self.statusBar().clearMessage()
+        self.progress.setVisible(False)
 
+        self.frames = frames
+        self.pressures = pressures
         self.current_frame = 0
         self.slider.setEnabled(bool(self.frames))
         self.pre_render_frames()
         self.show_frame()
+
+    def _show_error(self, msg):
+        self.statusBar().showMessage(msg, 5000)
 
     # ─── Overlay Helpers ─────────────────────────────────────────────────-
     def overlay_frame(self, frame, pressure, font_scale):
