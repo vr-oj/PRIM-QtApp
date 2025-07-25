@@ -14,6 +14,7 @@
 - **Perfect sync** is maintained:
   - Each TIFF frame corresponds to exactly one Arduino trigger.
   - Each pressure value corresponds to exactly one recorded frame.
+  - The matching pressure value is stored in each TIFF frame's metadata.
 
 ### 📈 Live Pressure Plotting
 - Receives pressure readings from Arduino (115200 baud).
@@ -151,7 +152,7 @@ frame_index, elapsed_time_s, pressure_value
 
 * Grayscale TIFF
 * 1 frame per Arduino trigger
-* Metadata optionally includes pressure + timestamp
+* Metadata includes frame index, elapsed time, and pressure for each frame
 * Only the CSV and TIFF files are saved when a recording stops
 
 ---

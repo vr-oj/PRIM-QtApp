@@ -134,7 +134,8 @@ class RecordingManager(QObject):
                 self.csv_writer.writerow([frameIdx, t_device, pressure])
                 self._last_device_time = t_device
                 self._samples_written += 1
-                self._pending_samples.append((frameIdx, t_device))
+                # Include pressure so the frame metadata contains the full row
+                self._pending_samples.append((frameIdx, t_device, pressure))
 
             except Exception as e:
                 log.error(
@@ -157,8 +158,12 @@ class RecordingManager(QObject):
                 arr = self._qimage_to_numpy(qimage)
                 if self._first_frame_shape is None:
                     self._first_frame_shape = arr.shape
-                frameIdx, t_device = self._pending_samples.popleft()
-                metadata = {"frameIdx": frameIdx, "deviceTime": t_device}
+                frameIdx, t_device, pressure = self._pending_samples.popleft()
+                metadata = {
+                    "frameIdx": frameIdx,
+                    "deviceTime": t_device,
+                    "pressure": pressure,
+                }
                 self.tif_writer.write(arr, description=json.dumps(metadata))
                 self._frame_counter += 1
                 self._frames_written += 1
