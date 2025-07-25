@@ -3,7 +3,15 @@ import os
 import csv
 import numpy as np
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtGui import (
+    QPixmap,
+    QImage,
+    QPainter,
+    QFont,
+    QFontMetrics,
+    QPainterPath,
+    QPen,
+)
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -17,7 +25,7 @@ from PyQt5.QtWidgets import (
     QSlider,
 )
 from tifffile import TiffFile, imwrite
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 
 class PlaybackWindow(QMainWindow):
@@ -127,33 +135,32 @@ class PlaybackWindow(QMainWindow):
 
     # ─── Overlay Helpers ─────────────────────────────────────────────────-
     def overlay_frame(self, frame, pressure, font_scale):
-        img = Image.fromarray(frame)
-        draw = ImageDraw.Draw(img)
+        """Return a numpy array of ``frame`` with pressure text drawn using Qt."""
+        h, w = frame.shape
+        qimg = QImage(frame.data, w, h, frame.strides[0], QImage.Format_Grayscale8).copy()
+        painter = QPainter(qimg)
+        painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
 
-        # Determine font size relative to the frame height
-        target_font_size = int(frame.shape[0] * (font_scale / 100))
-        try:
-            font = ImageFont.truetype("Arial.ttf", target_font_size)
-        except Exception:
-            font = ImageFont.load_default()
+        target_font_size = int(h * (font_scale / 100))
+        font = QFont("Arial", target_font_size)
+        painter.setFont(font)
 
         text = f"{pressure:.2f} mmHg"
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
-
+        metrics = QFontMetrics(font)
         x = 20
-        y = frame.shape[0] - text_h - 20
+        y = h - metrics.descent() - 20
 
-        draw.text(
-            (x, y),
-            text,
-            fill=255,
-            font=font,
-            stroke_width=2,
-            stroke_fill=0,
-        )
-        return np.array(img)
+        path = QPainterPath()
+        path.addText(x, y, font, text)
+        painter.setPen(QPen(Qt.black, 2))
+        painter.drawPath(path)
+        painter.fillPath(path, Qt.white)
+        painter.end()
+
+        ptr = qimg.bits()
+        ptr.setsize(qimg.byteCount())
+        arr = np.frombuffer(ptr, np.uint8).reshape((h, w))
+        return arr.copy()
 
     def show_frame(self):
         if not self.frames:
@@ -166,28 +173,30 @@ class PlaybackWindow(QMainWindow):
         scale = min(label_w / frame_w, label_h / frame_h)
         disp_w, disp_h = max(1, int(frame_w * scale)), max(1, int(frame_h * scale))
 
-        img = Image.fromarray(frame).resize((disp_w, disp_h))
-        draw = ImageDraw.Draw(img)
+        qimg = QImage(frame.data, frame_w, frame_h, frame.strides[0], QImage.Format_Grayscale8)
+        qimg = qimg.scaled(disp_w, disp_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        qimg = qimg.convertToFormat(QImage.Format_Grayscale8)
 
-        # Scale font relative to the displayed size
+        painter = QPainter(qimg)
+        painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+
         scale_factor = disp_h / 200 * 3
         font_size = int(self.font_spin.value() * scale_factor)
-        try:
-            font = ImageFont.truetype("Arial.ttf", font_size)
-        except Exception:
-            font = ImageFont.load_default()
+        font = QFont("Arial", font_size)
+        painter.setFont(font)
 
         text = f"{pressure:.2f} mmHg"
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_h = bbox[3] - bbox[1]
-        x, y = 10, disp_h - text_h - 10
+        metrics = QFontMetrics(font)
+        x = 10
+        y = disp_h - metrics.descent() - 10
 
-        draw.text((x, y), text, fill=255, font=font, stroke_width=2, stroke_fill=0)
+        path = QPainterPath()
+        path.addText(x, y, font, text)
+        painter.setPen(QPen(Qt.black, 2))
+        painter.drawPath(path)
+        painter.fillPath(path, Qt.white)
+        painter.end()
 
-        np_img = np.array(img)
-        qimg = QImage(
-            np_img.data, disp_w, disp_h, np_img.strides[0], QImage.Format_Grayscale8
-        )
         self.label.setPixmap(QPixmap.fromImage(qimg))
         if self.slider.maximum() != len(self.frames) - 1:
             self.slider.setRange(0, max(0, len(self.frames) - 1))
