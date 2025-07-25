@@ -36,7 +36,7 @@ PRIM_ROOT/YYYY-MM-DD/FillN/
 ```
 - Files are automatically named and saved in time-stamped subfolders.
 - Environment variable `PRIM_RESULTS_DIR` overrides default save location.
-- After recording you can open **Playback** to view the TIFF with pressure overlay and export an annotated copy.
+- After recording you can open **Playback** to view the TIFF with pressure overlay, export an annotated copy, or save a single-frame snapshot.
 
 ---
 
