@@ -45,7 +45,8 @@ from PyQt5.QtCore import (
     QThread,
     QMetaObject,
 )
-from PyQt5.QtGui import QIcon, QKeySequence, QImage
+from PyQt5.QtGui import QIcon, QKeySequence, QImage, QDesktopServices
+from PyQt5.QtCore import QUrl
 
 import prim_app
 
@@ -632,6 +633,10 @@ class MainWindow(QMainWindow):
         pm.addAction(reset_zoom_act)
 
         hm = mb.addMenu("&Help")
+        welcome_act = QAction("&Show Welcome", self, triggered=self._show_welcome_dialog)
+        hm.addAction(welcome_act)
+        readme_act = QAction("&Open User Guide", self, triggered=self._open_readme)
+        hm.addAction(readme_act)
         about_act = QAction(
             f"&About {APP_NAME}", self, triggered=self._show_about_dialog
         )
@@ -824,6 +829,15 @@ class MainWindow(QMainWindow):
 
     def _show_about_dialog(self):
         QMessageBox.information(self, f"About {APP_NAME}", ABOUT_TEXT)
+
+    def _show_welcome_dialog(self):
+        from ui.welcome_dialog import WelcomeDialog
+        dlg = WelcomeDialog(parent=self, force_show=True)
+        dlg.exec_()
+
+    def _open_readme(self):
+        path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "README.md"))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     # ─── Toggle Serial Connection ────────────────────────────────────────────
     def _toggle_serial_connection(self):
