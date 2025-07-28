@@ -82,6 +82,7 @@ class FrameRenderer(QObject):
         self.font_value = font_value
         self.draw_overlay = draw_overlay
         self._abort = False
+        self.total_frames = len(frames)
 
     def stop(self):
         self._abort = True
@@ -94,13 +95,13 @@ class FrameRenderer(QObject):
             if self._abort:
                 return
             pressure = self.pressures[min(idx, len(self.pressures) - 1)]
-            img = self.render_image(frame, pressure)
+            img = self.render_image(idx, frame, pressure)
             images.append(img)
             self.progress.emit(idx + 1, total)
         if not self._abort:
             self.finished.emit(images)
 
-    def render_image(self, frame, pressure):
+    def render_image(self, idx, frame, pressure):
         frame_h, frame_w = frame.shape
         scale = min(self.label_w / frame_w, self.label_h / frame_h)
         disp_w = max(1, int(frame_w * scale))
@@ -131,6 +132,16 @@ class FrameRenderer(QObject):
             painter.setPen(QPen(Qt.black, 2))
             painter.drawPath(path)
             painter.fillPath(path, Qt.white)
+
+            # frame count in top-left corner
+            frame_text = f"{idx + 1}/{self.total_frames}"
+            f_metrics = QFontMetrics(font)
+            fx = 10
+            fy = f_metrics.ascent() + 10
+            frame_path = QPainterPath()
+            frame_path.addText(fx, fy, font, frame_text)
+            painter.drawPath(frame_path)
+            painter.fillPath(frame_path, Qt.white)
         painter.end()
 
         return qimg.copy()
@@ -164,6 +175,7 @@ class PlaybackWindow(QMainWindow):
         self.play_btn.setCheckable(True)
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setEnabled(False)
+        self.frame_label = QLabel("0/0")
 
         self.fps_spin = QSpinBox()
         self.fps_spin.setRange(1, 1000)
@@ -187,6 +199,7 @@ class PlaybackWindow(QMainWindow):
         btn_layout.setSpacing(6)
         btn_layout.addWidget(self.play_btn)
         btn_layout.addWidget(self.slider, stretch=1)
+        btn_layout.addWidget(self.frame_label)
         btn_layout.addWidget(QLabel("FPS:"))
         btn_layout.addWidget(self.fps_spin)
         btn_layout.addWidget(QLabel("Font:"))
@@ -263,7 +276,7 @@ class PlaybackWindow(QMainWindow):
     def _on_frame_loaded(self, idx, frame, pressure):
         self.frames.append(frame)
         self.pressures.append(pressure)
-        pix = self.render_pixmap(frame, pressure)
+        pix = self.render_pixmap(frame, pressure, idx)
         self.pre_rendered_frames.append(pix)
         if idx == 0:
             self.current_frame = 0
@@ -287,8 +300,8 @@ class PlaybackWindow(QMainWindow):
         self.statusBar().showMessage(msg, 5000)
 
     # ─── Overlay Helpers ─────────────────────────────────────────────────-
-    def overlay_frame(self, frame, pressure, font_scale):
-        """Return a numpy array of ``frame`` with pressure text drawn using Qt."""
+    def overlay_frame(self, frame, pressure, font_scale, frame_idx=None, total_frames=None):
+        """Return a numpy array of ``frame`` with pressure text and frame count drawn using Qt."""
         h, w = frame.shape
         qimg = QImage(
             frame.data, w, h, frame.strides[0], QImage.Format_Grayscale8
@@ -310,6 +323,15 @@ class PlaybackWindow(QMainWindow):
         painter.setPen(QPen(Qt.black, 2))
         painter.drawPath(path)
         painter.fillPath(path, Qt.white)
+
+        if frame_idx is not None and total_frames is not None:
+            frame_text = f"{frame_idx + 1}/{total_frames}"
+            fx = 20
+            fy = metrics.ascent() + 20
+            fpath = QPainterPath()
+            fpath.addText(fx, fy, font, frame_text)
+            painter.drawPath(fpath)
+            painter.fillPath(fpath, Qt.white)
         painter.end()
 
         ptr = qimg.bits()
@@ -317,7 +339,7 @@ class PlaybackWindow(QMainWindow):
         arr = np.frombuffer(ptr, np.uint8).reshape((h, w))
         return arr.copy()
 
-    def render_pixmap(self, frame, pressure):
+    def render_pixmap(self, frame, pressure, frame_idx=None):
         """Return a :class:`QPixmap` of ``frame`` scaled and optionally annotated."""
         label_w, label_h = max(1, self.label.width()), max(1, self.label.height())
         frame_h, frame_w = frame.shape
@@ -350,6 +372,15 @@ class PlaybackWindow(QMainWindow):
             painter.setPen(QPen(Qt.black, 2))
             painter.drawPath(path)
             painter.fillPath(path, Qt.white)
+
+            if frame_idx is not None:
+                frame_text = f"{frame_idx + 1}/{len(self.frames)}"
+                fx = 10
+                fy = metrics.ascent() + 10
+                frame_path = QPainterPath()
+                frame_path.addText(fx, fy, font, frame_text)
+                painter.drawPath(frame_path)
+                painter.fillPath(frame_path, Qt.white)
         painter.end()
 
         return QPixmap.fromImage(qimg)
@@ -421,6 +452,7 @@ class PlaybackWindow(QMainWindow):
         self.slider.blockSignals(True)
         self.slider.setValue(self.current_frame)
         self.slider.blockSignals(False)
+        self.frame_label.setText(f"{self.current_frame + 1}/{len(self.frames)}")
 
     # ─── Controls ─────────────────────────────────────────────────────────
     def _toggle_play(self, checked):
@@ -456,9 +488,10 @@ class PlaybackWindow(QMainWindow):
         self.statusBar().showMessage("Exporting overlay...")
         QApplication.setOverrideCursor(Qt.WaitCursor)
         font_scale = self.font_spin.value()
+        total = len(self.frames)
         overlaid_frames = [
-            self.overlay_frame(f, p, font_scale)
-            for f, p in zip(self.frames, self.pressures)
+            self.overlay_frame(f, p, font_scale, idx, total)
+            for idx, (f, p) in enumerate(zip(self.frames, self.pressures))
         ]
         imwrite(out_path, np.array(overlaid_frames), photometric="minisblack")
         QApplication.restoreOverrideCursor()
@@ -478,7 +511,9 @@ class PlaybackWindow(QMainWindow):
         frame = self.frames[self.current_frame]
         pressure = self.pressures[min(self.current_frame, len(self.pressures) - 1)]
         font_scale = self.font_spin.value()
-        overlaid = self.overlay_frame(frame, pressure, font_scale)
+        overlaid = self.overlay_frame(
+            frame, pressure, font_scale, self.current_frame, len(self.frames)
+        )
         Image.fromarray(overlaid).save(out_path)
         self.statusBar().showMessage(
             f"Snapshot saved: {os.path.basename(out_path)}",
