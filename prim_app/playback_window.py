@@ -305,8 +305,22 @@ class PlaybackWindow(QMainWindow):
         self.statusBar().showMessage(msg, 5000)
 
     # ─── Overlay Helpers ─────────────────────────────────────────────────-
-    def overlay_frame(self, frame, pressure, font_scale, frame_idx=None, total_frames=None):
-        """Return a numpy array of ``frame`` with pressure text and frame count drawn using Qt."""
+    def overlay_frame(
+        self,
+        frame,
+        pressure,
+        base_font_size,
+        frame_idx=None,
+        total_frames=None,
+        preview_height=500,
+    ):
+        """Return ``frame`` with pressure text and frame count drawn.
+
+        ``base_font_size`` represents the font size used when the preview label
+        height is ``preview_height`` (defaults to 500). The font will be scaled
+        relative to the export frame height so the overlay appears consistent
+        between the on-screen preview and exported image.
+        """
         h, w = frame.shape
         qimg = QImage(
             frame.data, w, h, frame.strides[0], QImage.Format_Grayscale8
@@ -314,7 +328,8 @@ class PlaybackWindow(QMainWindow):
         painter = QPainter(qimg)
         painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
 
-        target_font_size = int(h * (font_scale / 100))
+        scale_factor = h / max(1, preview_height)
+        target_font_size = int(max(1, base_font_size * scale_factor))
         font = QFont("Arial", target_font_size)
         painter.setFont(font)
 
@@ -493,10 +508,18 @@ class PlaybackWindow(QMainWindow):
             return
         self.statusBar().showMessage("Exporting overlay...")
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        font_scale = self.font_spin.value()
+        base_font = self.font_spin.value()
+        preview_h = max(1, self.label.height())
         total = len(self.frames)
         overlaid_frames = [
-            self.overlay_frame(f, p, font_scale, idx, total)
+            self.overlay_frame(
+                f,
+                p,
+                base_font,
+                idx,
+                total,
+                preview_height=preview_h,
+            )
             for idx, (f, p) in enumerate(zip(self.frames, self.pressures))
         ]
         imwrite(out_path, np.array(overlaid_frames), photometric="minisblack")
@@ -516,9 +539,15 @@ class PlaybackWindow(QMainWindow):
             return
         frame = self.frames[self.current_frame]
         pressure = self.pressures[min(self.current_frame, len(self.pressures) - 1)]
-        font_scale = self.font_spin.value()
+        base_font = self.font_spin.value()
+        preview_h = max(1, self.label.height())
         overlaid = self.overlay_frame(
-            frame, pressure, font_scale, self.current_frame, len(self.frames)
+            frame,
+            pressure,
+            base_font,
+            self.current_frame,
+            len(self.frames),
+            preview_height=preview_h,
         )
         Image.fromarray(overlaid).save(out_path)
         self.statusBar().showMessage(
