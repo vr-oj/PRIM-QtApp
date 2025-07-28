@@ -24,6 +24,7 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QSlider,
     QProgressBar,
+    QCheckBox,
 )
 from tifffile import TiffFile, imwrite
 from PIL import Image
@@ -67,17 +68,18 @@ class PlaybackLoader(QObject):
 
 
 class FrameRenderer(QObject):
-    """Render frames with overlay in a background thread."""
+    """Render frames in a background thread, optionally drawing overlay."""
 
     progress = pyqtSignal(int, int)
     finished = pyqtSignal(list)
 
-    def __init__(self, frames, pressures, label_size, font_value, parent=None):
+    def __init__(self, frames, pressures, label_size, font_value, draw_overlay=True, parent=None):
         super().__init__(parent)
         self.frames = frames
         self.pressures = pressures
         self.label_w, self.label_h = label_size
         self.font_value = font_value
+        self.draw_overlay = draw_overlay
         self._abort = False
 
     def stop(self):
@@ -112,32 +114,33 @@ class FrameRenderer(QObject):
         painter = QPainter(qimg)
         painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
 
-        scale_factor = disp_h / 500
-        font_size = int(self.font_value * scale_factor)
-        font = QFont("Arial", font_size)
-        painter.setFont(font)
+        if self.draw_overlay:
+            scale_factor = disp_h / 500
+            font_size = int(self.font_value * scale_factor)
+            font = QFont("Arial", font_size)
+            painter.setFont(font)
 
-        text = f"{pressure:.2f} mmHg"
-        metrics = QFontMetrics(font)
-        x = 10
-        y = disp_h - metrics.descent() - 10
+            text = f"{pressure:.2f} mmHg"
+            metrics = QFontMetrics(font)
+            x = 10
+            y = disp_h - metrics.descent() - 10
 
-        path = QPainterPath()
-        path.addText(x, y, font, text)
-        painter.setPen(QPen(Qt.black, 2))
-        painter.drawPath(path)
-        painter.fillPath(path, Qt.white)
+            path = QPainterPath()
+            path.addText(x, y, font, text)
+            painter.setPen(QPen(Qt.black, 2))
+            painter.drawPath(path)
+            painter.fillPath(path, Qt.white)
         painter.end()
 
         return qimg.copy()
 
 
 class PlaybackWindow(QMainWindow):
-    """Display a TIFF stack with pressure overlay and playback controls."""
+    """Display a TIFF stack with optional pressure overlay and playback controls."""
 
     def __init__(self, tiff_path=None, csv_path=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Playback with Overlay")
+        self.setWindowTitle("Playback")
         self.resize(800, 600)
 
         self.frames = []
@@ -171,6 +174,10 @@ class PlaybackWindow(QMainWindow):
         self.font_spin.setValue(10)
         self.font_spin.valueChanged.connect(self.regenerate_frames)
 
+        self.overlay_cb = QCheckBox("Show Overlay")
+        self.overlay_cb.setChecked(True)
+        self.overlay_cb.toggled.connect(self.regenerate_frames)
+
         self.export_btn = QPushButton("💾 Export Overlay TIFF")
         self.snapshot_btn = QPushButton("🖼 Export Frame PNG")
 
@@ -183,6 +190,7 @@ class PlaybackWindow(QMainWindow):
         btn_layout.addWidget(self.fps_spin)
         btn_layout.addWidget(QLabel("Font:"))
         btn_layout.addWidget(self.font_spin)
+        btn_layout.addWidget(self.overlay_cb)
         btn_layout.addStretch(1)
         btn_layout.addWidget(self.snapshot_btn)
         btn_layout.addWidget(self.export_btn)
@@ -297,7 +305,7 @@ class PlaybackWindow(QMainWindow):
         return arr.copy()
 
     def render_pixmap(self, frame, pressure):
-        """Return a :class:`QPixmap` of ``frame`` scaled and annotated."""
+        """Return a :class:`QPixmap` of ``frame`` scaled and optionally annotated."""
         label_w, label_h = max(1, self.label.width()), max(1, self.label.height())
         frame_h, frame_w = frame.shape
         scale = min(label_w / frame_w, label_h / frame_h)
@@ -313,21 +321,22 @@ class PlaybackWindow(QMainWindow):
         painter = QPainter(qimg)
         painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
 
-        scale_factor = disp_h / 500
-        font_size = int(self.font_spin.value() * scale_factor)
-        font = QFont("Arial", font_size)
-        painter.setFont(font)
+        if self.overlay_cb.isChecked():
+            scale_factor = disp_h / 500
+            font_size = int(self.font_spin.value() * scale_factor)
+            font = QFont("Arial", font_size)
+            painter.setFont(font)
 
-        text = f"{pressure:.2f} mmHg"
-        metrics = QFontMetrics(font)
-        x = 10
-        y = disp_h - metrics.descent() - 10
+            text = f"{pressure:.2f} mmHg"
+            metrics = QFontMetrics(font)
+            x = 10
+            y = disp_h - metrics.descent() - 10
 
-        path = QPainterPath()
-        path.addText(x, y, font, text)
-        painter.setPen(QPen(Qt.black, 2))
-        painter.drawPath(path)
-        painter.fillPath(path, Qt.white)
+            path = QPainterPath()
+            path.addText(x, y, font, text)
+            painter.setPen(QPen(Qt.black, 2))
+            painter.drawPath(path)
+            painter.fillPath(path, Qt.white)
         painter.end()
 
         return QPixmap.fromImage(qimg)
@@ -364,6 +373,7 @@ class PlaybackWindow(QMainWindow):
             self.pressures or [0] * len(self.frames),
             label_size,
             font_value,
+            self.overlay_cb.isChecked(),
         )
         self.renderer.moveToThread(self.render_thread)
         self.render_thread.started.connect(self.renderer.run)
