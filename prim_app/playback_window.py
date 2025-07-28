@@ -337,10 +337,20 @@ class PlaybackWindow(QMainWindow):
         if not self.frames:
             return
 
-        if self.render_thread and self.render_thread.isRunning():
-            self.renderer.stop()
-            self.render_thread.quit()
-            self.render_thread.wait()
+        # If a previous rendering thread exists, ensure it has fully
+        # stopped before starting another. ``render_thread`` may already
+        # have been deleted via ``deleteLater`` so guard against calling
+        # methods on a dead QObject.
+        if self.render_thread:
+            try:
+                if self.render_thread.isRunning():
+                    self.renderer.stop()
+                    self.render_thread.quit()
+                    self.render_thread.wait()
+            except RuntimeError:
+                # The underlying C++ object was destroyed; reset refs.
+                self.render_thread = None
+                self.renderer = None
 
         self.progress.setVisible(True)
         self.progress.setValue(0)
@@ -373,6 +383,10 @@ class PlaybackWindow(QMainWindow):
         self.progress.setVisible(False)
         self.slider.setEnabled(True)
         self.play_btn.setEnabled(True)
+        # Rendering thread is finished; clear references so future checks
+        # don't try to access a deleted QObject.
+        self.render_thread = None
+        self.renderer = None
         self.show_frame()
 
     def show_frame(self):
