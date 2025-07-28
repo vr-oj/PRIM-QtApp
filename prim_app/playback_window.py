@@ -2,7 +2,15 @@ import sys
 import os
 import csv
 import numpy as np
-from PyQt5.QtCore import Qt, QTimer, QThread, QObject, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import (
+    Qt,
+    QTimer,
+    QThread,
+    QObject,
+    pyqtSignal,
+    pyqtSlot,
+    QRectF,
+)
 from PyQt5.QtGui import (
     QPixmap,
     QImage,
@@ -25,6 +33,10 @@ from PyQt5.QtWidgets import (
     QSlider,
     QProgressBar,
     QCheckBox,
+    QGraphicsView,
+    QGraphicsScene,
+    QGraphicsPixmapItem,
+    QGraphicsRectItem,
 )
 from tifffile import TiffFile, imwrite
 from PIL import Image
@@ -66,6 +78,81 @@ class PlaybackLoader(QObject):
             self.error.emit(str(e))
 
         self.finished.emit(total)
+
+
+class GraphicsImageView(QGraphicsView):
+    """Interactive view for displaying and selecting ROIs."""
+
+    roi_changed = pyqtSignal(QRectF)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setScene(QGraphicsScene(self))
+        self.pixmap_item = QGraphicsPixmapItem()
+        self.scene().addItem(self.pixmap_item)
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self._drawing_roi = False
+        self._roi_item = None
+        self._start_pos = None
+
+    def set_pixmap(self, pixmap: QPixmap):
+        self.pixmap_item.setPixmap(pixmap)
+        self.setSceneRect(QRectF(pixmap.rect()))
+        self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
+
+    def wheelEvent(self, event):
+        factor = 1.25 if event.angleDelta().y() > 0 else 0.8
+        self.scale(factor, factor)
+        event.accept()
+
+    # ─── ROI Handling ────────────────────────────────────────────────────
+    def enable_roi(self, enabled: bool):
+        self._drawing_roi = enabled
+        if not enabled:
+            self._start_pos = None
+
+    def clear_roi(self):
+        if self._roi_item:
+            self.scene().removeItem(self._roi_item)
+            self._roi_item = None
+
+    def get_roi_rect(self):
+        return self._roi_item.rect() if self._roi_item else None
+
+    def mousePressEvent(self, event):
+        if self._drawing_roi and event.button() == Qt.LeftButton:
+            self.clear_roi()
+            self._start_pos = self.mapToScene(event.pos())
+            self._roi_item = QGraphicsRectItem()
+            pen = QPen(Qt.red)
+            pen.setWidth(2)
+            self._roi_item.setPen(pen)
+            self.scene().addItem(self._roi_item)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drawing_roi and self._start_pos:
+            cur = self.mapToScene(event.pos())
+            rect = QRectF(self._start_pos, cur).normalized()
+            self._roi_item.setRect(rect)
+            self.roi_changed.emit(rect)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._drawing_roi and event.button() == Qt.LeftButton and self._start_pos:
+            cur = self.mapToScene(event.pos())
+            rect = QRectF(self._start_pos, cur).normalized()
+            self._roi_item.setRect(rect)
+            self.roi_changed.emit(rect)
+            self._start_pos = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class FrameRenderer(QObject):
@@ -167,7 +254,7 @@ class PlaybackWindow(QMainWindow):
         self.timer.timeout.connect(self.next_frame)
 
         # ─── Widgets ──────────────────────────────────────────────────────
-        self.label = QLabel(alignment=Qt.AlignCenter)
+        self.view = GraphicsImageView()
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
         self.progress.setVisible(False)
@@ -191,6 +278,11 @@ class PlaybackWindow(QMainWindow):
         self.overlay_cb.setChecked(True)
         self.overlay_cb.toggled.connect(self.regenerate_frames)
 
+        self.roi_btn = QPushButton("Draw ROI")
+        self.roi_btn.setCheckable(True)
+        self.zoom_roi_btn = QPushButton("Zoom ROI")
+        self.export_roi_btn = QPushButton("Export ROI PNG")
+
         self.export_btn = QPushButton("💾 Export Overlay TIFF")
         self.snapshot_btn = QPushButton("🖼 Export Frame PNG")
 
@@ -209,14 +301,17 @@ class PlaybackWindow(QMainWindow):
         options_layout.addWidget(QLabel("Font:"))
         options_layout.addWidget(self.font_spin)
         options_layout.addWidget(self.overlay_cb)
+        options_layout.addWidget(self.roi_btn)
+        options_layout.addWidget(self.zoom_roi_btn)
         options_layout.addStretch(1)
         options_layout.addWidget(self.snapshot_btn)
+        options_layout.addWidget(self.export_roi_btn)
         options_layout.addWidget(self.export_btn)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
-        layout.addWidget(self.label, stretch=1)
+        layout.addWidget(self.view, stretch=1)
         layout.addWidget(self.progress)
         layout.addLayout(controls_layout)
         layout.addLayout(options_layout)
@@ -230,6 +325,9 @@ class PlaybackWindow(QMainWindow):
         self.slider.valueChanged.connect(self.set_frame)
         self.export_btn.clicked.connect(self.export_overlay)
         self.snapshot_btn.clicked.connect(self.export_snapshot)
+        self.roi_btn.toggled.connect(self.toggle_roi_mode)
+        self.zoom_roi_btn.clicked.connect(self.zoom_to_roi)
+        self.export_roi_btn.clicked.connect(self.export_roi)
 
         if tiff_path and csv_path:
             self.load_files(tiff_path, csv_path)
@@ -361,7 +459,7 @@ class PlaybackWindow(QMainWindow):
 
     def render_pixmap(self, frame, pressure, frame_idx=None, total_frames=None):
         """Return a :class:`QPixmap` of ``frame`` scaled and optionally annotated."""
-        label_w, label_h = max(1, self.label.width()), max(1, self.label.height())
+        label_w, label_h = max(1, self.view.viewport().width()), max(1, self.view.viewport().height())
         frame_h, frame_w = frame.shape
         scale = min(label_w / frame_w, label_h / frame_h)
         disp_w = max(1, int(frame_w * scale))
@@ -429,7 +527,10 @@ class PlaybackWindow(QMainWindow):
         self.progress.setVisible(True)
         self.progress.setValue(0)
 
-        label_size = (max(1, self.label.width()), max(1, self.label.height()))
+        label_size = (
+            max(1, self.view.viewport().width()),
+            max(1, self.view.viewport().height()),
+        )
         font_value = self.font_spin.value()
 
         self.render_thread = QThread(self)
@@ -467,7 +568,7 @@ class PlaybackWindow(QMainWindow):
     def show_frame(self):
         if not self.pre_rendered_frames:
             return
-        self.label.setPixmap(self.pre_rendered_frames[self.current_frame])
+        self.view.set_pixmap(self.pre_rendered_frames[self.current_frame])
         if self.slider.maximum() != len(self.frames) - 1:
             self.slider.setRange(0, max(0, len(self.frames) - 1))
         self.slider.blockSignals(True)
@@ -509,7 +610,7 @@ class PlaybackWindow(QMainWindow):
         self.statusBar().showMessage("Exporting overlay...")
         QApplication.setOverrideCursor(Qt.WaitCursor)
         base_font = self.font_spin.value()
-        preview_h = max(1, self.label.height())
+        preview_h = max(1, self.view.viewport().height())
         total = len(self.frames)
         overlaid_frames = [
             self.overlay_frame(
@@ -540,7 +641,7 @@ class PlaybackWindow(QMainWindow):
         frame = self.frames[self.current_frame]
         pressure = self.pressures[min(self.current_frame, len(self.pressures) - 1)]
         base_font = self.font_spin.value()
-        preview_h = max(1, self.label.height())
+        preview_h = max(1, self.view.viewport().height())
         overlaid = self.overlay_frame(
             frame,
             pressure,
@@ -552,6 +653,54 @@ class PlaybackWindow(QMainWindow):
         Image.fromarray(overlaid).save(out_path)
         self.statusBar().showMessage(
             f"Snapshot saved: {os.path.basename(out_path)}",
+            3000,
+        )
+
+    # ─── ROI Helpers ─────────────────────────────────────────────────────
+    def toggle_roi_mode(self, checked: bool):
+        self.view.enable_roi(checked)
+
+    def zoom_to_roi(self):
+        rect = self.view.get_roi_rect()
+        if rect:
+            self.view.fitInView(rect, Qt.KeepAspectRatio)
+
+    def export_roi(self):
+        rect = self.view.get_roi_rect()
+        if rect is None or not self.frames:
+            self.statusBar().showMessage("Draw ROI first", 2000)
+            return
+        out_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save ROI PNG",
+            "",
+            "PNG files (*.png);;TIFF files (*.tif *.tiff)",
+        )
+        if not out_path:
+            return
+        frame = self.frames[self.current_frame]
+        pixmap = self.pre_rendered_frames[self.current_frame]
+        sx = frame.shape[1] / max(1, pixmap.width())
+        sy = frame.shape[0] / max(1, pixmap.height())
+        x = max(0, int(rect.x() * sx))
+        y = max(0, int(rect.y() * sy))
+        w = max(1, int(rect.width() * sx))
+        h = max(1, int(rect.height() * sy))
+        roi_frame = frame[y : y + h, x : x + w]
+        pressure = self.pressures[min(self.current_frame, len(self.pressures) - 1)]
+        base_font = self.font_spin.value()
+        preview_h = max(1, self.view.viewport().height())
+        overlaid = self.overlay_frame(
+            roi_frame,
+            pressure,
+            base_font,
+            self.current_frame,
+            len(self.frames),
+            preview_height=preview_h,
+        )
+        Image.fromarray(overlaid).save(out_path)
+        self.statusBar().showMessage(
+            f"ROI saved: {os.path.basename(out_path)}",
             3000,
         )
 
