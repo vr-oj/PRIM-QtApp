@@ -37,9 +37,60 @@ from PyQt5.QtWidgets import (
     QGraphicsScene,
     QGraphicsPixmapItem,
     QGraphicsRectItem,
+    QGraphicsItem,
 )
 from tifffile import TiffFile, imwrite
 from PIL import Image
+
+
+class OverlayItem(QGraphicsItem):
+    """Simple item for drawing overlay text."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.pressure_text = ""
+        self.frame_text = ""
+        self.font = QFont("Arial", 10)
+
+    def set_text(self, pressure_text, frame_text=None):
+        self.pressure_text = pressure_text
+        self.frame_text = frame_text or ""
+        self.update()
+
+    def set_font(self, font):
+        self.font = font
+        self.update()
+
+    def boundingRect(self):
+        if self.parentItem():
+            rect = self.parentItem().boundingRect()
+            return QRectF(0, 0, rect.width(), rect.height())
+        return QRectF()
+
+    def paint(self, painter, option, widget=None):
+        if not self.pressure_text and not self.frame_text:
+            return
+        painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+        painter.setFont(self.font)
+        metrics = QFontMetrics(self.font)
+        rect = self.boundingRect()
+
+        if self.pressure_text:
+            x = 10
+            y = rect.height() - metrics.descent() - 10
+            path = QPainterPath()
+            path.addText(x, y, self.font, self.pressure_text)
+            painter.setPen(QPen(Qt.black, 2))
+            painter.drawPath(path)
+            painter.fillPath(path, Qt.white)
+
+        if self.frame_text:
+            fx = 10
+            fy = metrics.ascent() + 10
+            fpath = QPainterPath()
+            fpath.addText(fx, fy, self.font, self.frame_text)
+            painter.drawPath(fpath)
+            painter.fillPath(fpath, Qt.white)
 
 
 class PlaybackLoader(QObject):
@@ -90,6 +141,8 @@ class GraphicsImageView(QGraphicsView):
         self.setScene(QGraphicsScene(self))
         self.pixmap_item = QGraphicsPixmapItem()
         self.scene().addItem(self.pixmap_item)
+        self.overlay_item = OverlayItem(self.pixmap_item)
+        self.overlay_item.setZValue(1)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self._drawing_roi = False
@@ -100,6 +153,12 @@ class GraphicsImageView(QGraphicsView):
         self.pixmap_item.setPixmap(pixmap)
         self.setSceneRect(QRectF(pixmap.rect()))
         self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
+
+    def update_overlay(self, pressure, frame_text, font_size, visible=True):
+        font = QFont("Arial", max(1, font_size))
+        self.overlay_item.set_font(font)
+        self.overlay_item.set_text(f"{pressure:.2f} mmHg", frame_text)
+        self.overlay_item.setVisible(visible)
 
     def wheelEvent(self, event):
         factor = 1.25 if event.angleDelta().y() > 0 else 0.8
@@ -272,11 +331,11 @@ class PlaybackWindow(QMainWindow):
         self.font_spin = QSpinBox()
         self.font_spin.setRange(10, 200)
         self.font_spin.setValue(10)
-        self.font_spin.valueChanged.connect(self.regenerate_frames)
+        self.font_spin.valueChanged.connect(self._update_overlay)
 
         self.overlay_cb = QCheckBox("Show Overlay")
         self.overlay_cb.setChecked(True)
-        self.overlay_cb.toggled.connect(self.regenerate_frames)
+        self.overlay_cb.toggled.connect(self._update_overlay)
 
         self.roi_btn = QPushButton("Draw ROI")
         self.roi_btn.setCheckable(True)
@@ -461,7 +520,7 @@ class PlaybackWindow(QMainWindow):
         return arr.copy()
 
     def render_pixmap(self, frame, pressure, frame_idx=None, total_frames=None):
-        """Return a :class:`QPixmap` of ``frame`` scaled and optionally annotated."""
+        """Return a scaled :class:`QPixmap` of ``frame``."""
         label_w, label_h = max(1, self.view.viewport().width()), max(1, self.view.viewport().height())
         frame_h, frame_w = frame.shape
         scale = min(label_w / frame_w, label_h / frame_h)
@@ -473,37 +532,6 @@ class PlaybackWindow(QMainWindow):
         )
         qimg = qimg.scaled(disp_w, disp_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         qimg = qimg.convertToFormat(QImage.Format_Grayscale8)
-
-        painter = QPainter(qimg)
-        painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
-
-        if self.overlay_cb.isChecked():
-            scale_factor = disp_h / 500
-            font_size = int(self.font_spin.value() * scale_factor)
-            font = QFont("Arial", font_size)
-            painter.setFont(font)
-
-            text = f"{pressure:.2f} mmHg"
-            metrics = QFontMetrics(font)
-            x = 10
-            y = disp_h - metrics.descent() - 10
-
-            path = QPainterPath()
-            path.addText(x, y, font, text)
-            painter.setPen(QPen(Qt.black, 2))
-            painter.drawPath(path)
-            painter.fillPath(path, Qt.white)
-
-            if frame_idx is not None:
-                total = total_frames if total_frames is not None else len(self.frames)
-                frame_text = f"{frame_idx + 1}/{total}"
-                fx = 10
-                fy = metrics.ascent() + 10
-                frame_path = QPainterPath()
-                frame_path.addText(fx, fy, font, frame_text)
-                painter.drawPath(frame_path)
-                painter.fillPath(frame_path, Qt.white)
-        painter.end()
 
         return QPixmap.fromImage(qimg)
 
@@ -542,7 +570,7 @@ class PlaybackWindow(QMainWindow):
             self.pressures or [0] * len(self.frames),
             label_size,
             font_value,
-            self.overlay_cb.isChecked(),
+            False,
         )
         self.renderer.moveToThread(self.render_thread)
         self.render_thread.started.connect(self.renderer.run)
@@ -571,13 +599,28 @@ class PlaybackWindow(QMainWindow):
     def show_frame(self):
         if not self.pre_rendered_frames:
             return
-        self.view.set_pixmap(self.pre_rendered_frames[self.current_frame])
+        pixmap = self.pre_rendered_frames[self.current_frame]
+        self.view.set_pixmap(pixmap)
         if self.slider.maximum() != len(self.frames) - 1:
             self.slider.setRange(0, max(0, len(self.frames) - 1))
         self.slider.blockSignals(True)
         self.slider.setValue(self.current_frame)
         self.slider.blockSignals(False)
         self.frame_label.setText(f"{self.current_frame + 1}/{len(self.frames)}")
+        pressure = self.pressures[min(self.current_frame, len(self.pressures) - 1)]
+        scale_factor = pixmap.height() / 500
+        font_size = int(self.font_spin.value() * scale_factor)
+        frame_text = f"{self.current_frame + 1}/{len(self.frames)}" if self.overlay_cb.isChecked() else ""
+        self.view.update_overlay(
+            pressure,
+            frame_text,
+            font_size,
+            self.overlay_cb.isChecked(),
+        )
+
+    def _update_overlay(self):
+        if self.pre_rendered_frames:
+            self.show_frame()
 
     # ─── Controls ─────────────────────────────────────────────────────────
     def _toggle_play(self, checked):
