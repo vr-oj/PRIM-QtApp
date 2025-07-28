@@ -14,6 +14,7 @@ data_files = [
     (os.path.join("prim_app", "ui", "icons", "*"), os.path.join("prim_app", "ui", "icons")),
     (os.path.join("prim_app", "ui", "style.qss"), os.path.join("prim_app", "ui")),
     (".primenv/Lib/site-packages/imagingcontrol4/*", "imagingcontrol4"),
+    (os.path.join("prim_app", "docs", "*"), os.path.join("prim_app", "docs")),
 ]
 
 a = Analysis(
