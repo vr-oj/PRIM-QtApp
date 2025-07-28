@@ -1,11 +1,12 @@
 # File: prim_app/ui/welcome_dialog.py
 
 import os
+import sys
+import subprocess
 from utils.path_helpers import resource_path
-from PyQt5.QtCore import Qt, QSettings, QUrl
-from PyQt5.QtGui import QFont, QDesktopServices
+from PyQt5.QtCore import Qt, QSettings
+from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
-    QApplication,
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
@@ -34,8 +35,19 @@ class WelcomeDialog(QDialog):
         self.setWindowTitle("\U0001F44B Welcome to PRIMAcquisition")
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.setMinimumSize(500, 420)
+        self.setStyleSheet(
+            """
+            QDialog {
+                background-color: #2b2b2b;
+                color: white;
+                border-radius: 10px;
+            }
+            """
+        )
 
         layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(15, 15, 15, 15)
 
         intro = QLabel(
             "PRIMAcquisition lets you record synchronized <b>pressure data and video</b> for your experiments.<br>"
@@ -44,23 +56,33 @@ class WelcomeDialog(QDialog):
         layout.addWidget(intro)
 
         steps = [
-            ("1️⃣", "🔌", "Connect PRIM Device", "Select the Arduino COM port and click Connect PRIM Device"),
-            ("2️⃣", "📷", "Set Up Camera", "Choose camera & resolution then click Start Camera"),
-            ("3️⃣", "🎚", "Adjust Exposure/Gain", "Use controls to fine-tune camera settings"),
-            ("4️⃣", "0️⃣", "Zero PRIM", "Make sure pressure is at zero"),
-            ("5️⃣", "⏺", "Start Recording", "Click Start Recording to begin acquisition"),
-            ("6️⃣", "⏹", "Stop Recording", "Click Stop Recording when finished"),
-            ("7️⃣", "▶", "Playback & Export", "Click Playback to review and export frames"),
+            ("plug.svg", "Connect PRIM Device", "Select Arduino COM port and click Connect"),
+            ("camera.svg", "Set Up Camera", "Choose camera & resolution then click Start Camera"),
+            ("settings.svg", "Adjust Exposure/Gain", "Use controls to fine-tune camera settings"),
+            ("sync.svg", "Zero PRIM", "Make sure pressure is at zero"),
+            ("record.svg", "Start Recording", "Click Start Recording to begin acquisition"),
+            ("stop.svg", "Stop Recording", "Click Stop Recording when finished"),
+            ("export.svg", "Playback & Export", "Click Playback to review and export frames"),
         ]
 
-        for num, emoji, title, desc in steps:
+        for icon, title, desc in steps:
             row = QHBoxLayout()
-            icon_lbl = QLabel(f"{num} {emoji}")
-            icon_lbl.setFixedWidth(60)
-            row.addWidget(icon_lbl, alignment=Qt.AlignTop)
-            text = QLabel(f"<b>{title}</b><br>{desc}")
-            text.setWordWrap(True)
-            row.addWidget(text)
+            icon_lbl = QLabel()
+            icon_path = resource_path("ui", "icons", icon)
+            icon_lbl.setPixmap(
+                QPixmap(icon_path).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            )
+            row.addWidget(icon_lbl)
+
+            text_col = QVBoxLayout()
+            title_lbl = QLabel(title)
+            title_lbl.setStyleSheet("font-size: 11pt; font-weight: bold;")
+            desc_lbl = QLabel(desc)
+            desc_lbl.setWordWrap(True)
+            desc_lbl.setStyleSheet("font-size: 9pt; color: #aaaaaa;")
+            text_col.addWidget(title_lbl)
+            text_col.addWidget(desc_lbl)
+            row.addLayout(text_col)
             layout.addLayout(row)
 
         self.checkbox = QCheckBox("Don't show this again")
@@ -69,10 +91,36 @@ class WelcomeDialog(QDialog):
 
         footer = QHBoxLayout()
         readme_btn = QPushButton("Read Full User Guide →")
-        readme_btn.clicked.connect(self._open_readme)
+        readme_btn.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #3a7bd5;
+                color: white;
+                border-radius: 5px;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background-color: #559de8;
+            }
+            """
+        )
+        readme_btn.clicked.connect(self._open_user_guide)
         footer.addWidget(readme_btn)
         footer.addStretch()
         start_btn = QPushButton("Start Using PRIMAcquisition")
+        start_btn.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #3a7bd5;
+                color: white;
+                border-radius: 5px;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background-color: #559de8;
+            }
+            """
+        )
         start_btn.clicked.connect(self.accept)
         footer.addWidget(start_btn)
         layout.addLayout(footer)
@@ -80,6 +128,14 @@ class WelcomeDialog(QDialog):
     def _toggle_show(self, state):
         self.settings.setValue("PRIMApp/ShowWelcome", state != Qt.Checked)
 
-    def _open_readme(self):
-        path = os.path.abspath(os.path.join(resource_path("..", "README.md")))
-        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+    def _open_user_guide(self):
+        pdf_path = os.path.join(
+            os.path.dirname(__file__), "docs", "PRIMAcquisition_UserGuide.pdf"
+        )
+        if os.path.exists(pdf_path):
+            if sys.platform == "win32":
+                os.startfile(pdf_path)
+            elif sys.platform == "darwin":
+                subprocess.call(["open", pdf_path])
+            else:
+                subprocess.call(["xdg-open", pdf_path])
