@@ -66,6 +66,72 @@ class PlaybackLoader(QObject):
         self.finished.emit(frames, pressures)
 
 
+class FrameRenderer(QObject):
+    """Render frames with overlay in a background thread."""
+
+    progress = pyqtSignal(int, int)
+    finished = pyqtSignal(list)
+
+    def __init__(self, frames, pressures, label_size, font_value, parent=None):
+        super().__init__(parent)
+        self.frames = frames
+        self.pressures = pressures
+        self.label_w, self.label_h = label_size
+        self.font_value = font_value
+        self._abort = False
+
+    def stop(self):
+        self._abort = True
+
+    @pyqtSlot()
+    def run(self):
+        images = []
+        total = len(self.frames)
+        for idx, frame in enumerate(self.frames):
+            if self._abort:
+                return
+            pressure = self.pressures[min(idx, len(self.pressures) - 1)]
+            img = self.render_image(frame, pressure)
+            images.append(img)
+            self.progress.emit(idx + 1, total)
+        if not self._abort:
+            self.finished.emit(images)
+
+    def render_image(self, frame, pressure):
+        frame_h, frame_w = frame.shape
+        scale = min(self.label_w / frame_w, self.label_h / frame_h)
+        disp_w = max(1, int(frame_w * scale))
+        disp_h = max(1, int(frame_h * scale))
+
+        qimg = QImage(
+            frame.data, frame_w, frame_h, frame.strides[0], QImage.Format_Grayscale8
+        )
+        qimg = qimg.scaled(disp_w, disp_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        qimg = qimg.convertToFormat(QImage.Format_Grayscale8)
+
+        painter = QPainter(qimg)
+        painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+
+        scale_factor = disp_h / 500
+        font_size = int(self.font_value * scale_factor)
+        font = QFont("Arial", font_size)
+        painter.setFont(font)
+
+        text = f"{pressure:.2f} mmHg"
+        metrics = QFontMetrics(font)
+        x = 10
+        y = disp_h - metrics.descent() - 10
+
+        path = QPainterPath()
+        path.addText(x, y, font, text)
+        painter.setPen(QPen(Qt.black, 2))
+        painter.drawPath(path)
+        painter.fillPath(path, Qt.white)
+        painter.end()
+
+        return qimg.copy()
+
+
 class PlaybackWindow(QMainWindow):
     """Display a TIFF stack with pressure overlay and playback controls."""
 
@@ -79,6 +145,8 @@ class PlaybackWindow(QMainWindow):
         self.pre_rendered_frames = []
         self.loader_thread = None
         self.loader = None
+        self.render_thread = None
+        self.renderer = None
         self.current_frame = 0
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.next_frame)
@@ -186,9 +254,13 @@ class PlaybackWindow(QMainWindow):
         self.frames = frames
         self.pressures = pressures
         self.current_frame = 0
-        self.slider.setEnabled(bool(self.frames))
-        self.pre_render_frames()
-        self.show_frame()
+        self.slider.setEnabled(False)
+        self.play_btn.setEnabled(False)
+        if self.frames:
+            first = self.render_pixmap(self.frames[0], self.pressures[0] if self.pressures else 0)
+            self.pre_rendered_frames = [first]
+            self.show_frame()
+        self.pre_render_frames_async()
 
     def _show_error(self, msg):
         self.statusBar().showMessage(msg, 5000)
@@ -260,20 +332,47 @@ class PlaybackWindow(QMainWindow):
 
         return QPixmap.fromImage(qimg)
 
-    def pre_render_frames(self):
-        """Pre-render all frames into ``self.pre_rendered_frames``."""
-        self.pre_rendered_frames = []
+    def pre_render_frames_async(self):
+        """Asynchronously pre-render frames for smooth playback."""
         if not self.frames:
             return
-        pressures = self.pressures or [0] * len(self.frames)
-        for idx, frame in enumerate(self.frames):
-            pressure = pressures[min(idx, len(pressures) - 1)]
-            pix = self.render_pixmap(frame, pressure)
-            self.pre_rendered_frames.append(pix)
+
+        if self.render_thread and self.render_thread.isRunning():
+            self.renderer.stop()
+            self.render_thread.quit()
+            self.render_thread.wait()
+
+        self.progress.setVisible(True)
+        self.progress.setValue(0)
+
+        label_size = (max(1, self.label.width()), max(1, self.label.height()))
+        font_value = self.font_spin.value()
+
+        self.render_thread = QThread(self)
+        self.renderer = FrameRenderer(
+            self.frames,
+            self.pressures or [0] * len(self.frames),
+            label_size,
+            font_value,
+        )
+        self.renderer.moveToThread(self.render_thread)
+        self.render_thread.started.connect(self.renderer.run)
+        self.renderer.progress.connect(self._update_progress)
+        self.renderer.finished.connect(self._rendering_finished)
+        self.renderer.finished.connect(self.render_thread.quit)
+        self.render_thread.finished.connect(self.renderer.deleteLater)
+        self.render_thread.finished.connect(self.render_thread.deleteLater)
+        self.render_thread.start()
 
     def regenerate_frames(self):
         """Re-render frames and update the current display."""
-        self.pre_render_frames()
+        self.pre_render_frames_async()
+
+    def _rendering_finished(self, images):
+        self.pre_rendered_frames = [QPixmap.fromImage(img) for img in images]
+        self.progress.setVisible(False)
+        self.slider.setEnabled(True)
+        self.play_btn.setEnabled(True)
         self.show_frame()
 
     def show_frame(self):
