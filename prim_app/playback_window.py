@@ -31,10 +31,11 @@ from PIL import Image
 
 
 class PlaybackLoader(QObject):
-    """Worker object to load TIFF and CSV data in a separate thread."""
+    """Load TIFF/CSV data and emit frames as they are read."""
 
     progress = pyqtSignal(int, int)
-    finished = pyqtSignal(list, list)
+    frame_loaded = pyqtSignal(int, np.ndarray, float)
+    finished = pyqtSignal(int)
     error = pyqtSignal(str)
 
     def __init__(self, tiff_path, csv_path, parent=None):
@@ -44,27 +45,27 @@ class PlaybackLoader(QObject):
 
     @pyqtSlot()
     def run(self):
-        frames = []
-        try:
-            with TiffFile(self.tiff_path) as tif:
-                total = len(tif.pages)
-                for idx, page in enumerate(tif.pages):
-                    frames.append(page.asarray())
-                    self.progress.emit(idx + 1, total)
-        except Exception as e:
-            self.error.emit(str(e))
-            self.finished.emit([], [])
-            return
-
-        pressures = []
         try:
             with open(self.csv_path, "r", newline="") as f:
                 reader = csv.DictReader(f)
                 pressures = [float(row.get("pressure", 0)) for row in reader]
         except Exception as e:
             self.error.emit(str(e))
+            pressures = []
 
-        self.finished.emit(frames, pressures)
+        total = 0
+        try:
+            with TiffFile(self.tiff_path) as tif:
+                total = len(tif.pages)
+                for idx, page in enumerate(tif.pages):
+                    frame = page.asarray()
+                    pressure = pressures[idx] if idx < len(pressures) else 0
+                    self.frame_loaded.emit(idx, frame, pressure)
+                    self.progress.emit(idx + 1, total)
+        except Exception as e:
+            self.error.emit(str(e))
+
+        self.finished.emit(total)
 
 
 class FrameRenderer(QObject):
@@ -238,12 +239,17 @@ class PlaybackWindow(QMainWindow):
         self.statusBar().showMessage("Loading files...")
         QApplication.setOverrideCursor(Qt.WaitCursor)
 
+        self.frames.clear()
+        self.pre_rendered_frames.clear()
+        self.pressures.clear()
+
         self.loader_thread = QThread(self)
         self.loader = PlaybackLoader(tiff_path, csv_path)
         self.loader.moveToThread(self.loader_thread)
         self.loader_thread.started.connect(self.loader.run)
         self.loader.progress.connect(self._update_progress)
-        self.loader.finished.connect(self._files_loaded)
+        self.loader.frame_loaded.connect(self._on_frame_loaded)
+        self.loader.finished.connect(self._loading_finished)
         self.loader.error.connect(self._show_error)
         self.loader.finished.connect(self.loader_thread.quit)
         self.loader_thread.finished.connect(self.loader.deleteLater)
@@ -254,21 +260,28 @@ class PlaybackWindow(QMainWindow):
         self.progress.setMaximum(total)
         self.progress.setValue(current)
 
-    def _files_loaded(self, frames, pressures):
+    def _on_frame_loaded(self, idx, frame, pressure):
+        self.frames.append(frame)
+        self.pressures.append(pressure)
+        pix = self.render_pixmap(frame, pressure)
+        self.pre_rendered_frames.append(pix)
+        if idx == 0:
+            self.current_frame = 0
+            self.slider.setEnabled(True)
+            self.play_btn.setEnabled(True)
+        if self.slider.maximum() != len(self.frames) - 1:
+            self.slider.setRange(0, max(0, len(self.frames) - 1))
+        if idx == 0:
+            self.show_frame()
+
+    def _loading_finished(self, _total_frames):
         QApplication.restoreOverrideCursor()
         self.statusBar().clearMessage()
         self.progress.setVisible(False)
-
-        self.frames = frames
-        self.pressures = pressures
-        self.current_frame = 0
-        self.slider.setEnabled(False)
-        self.play_btn.setEnabled(False)
-        if self.frames:
-            first = self.render_pixmap(self.frames[0], self.pressures[0] if self.pressures else 0)
-            self.pre_rendered_frames = [first]
+        if self.pre_rendered_frames:
             self.show_frame()
-        self.pre_render_frames_async()
+        self.slider.setEnabled(bool(self.frames))
+        self.play_btn.setEnabled(bool(self.frames))
 
     def _show_error(self, msg):
         self.statusBar().showMessage(msg, 5000)
