@@ -110,9 +110,8 @@ class WelcomeDialog(QDialog):
         self.settings.setValue("PRIMApp/ShowWelcome", state != Qt.Checked)
 
     def _open_user_guide(self):
-        pdf_path = os.path.join(
-            os.path.dirname(__file__), "docs", "PRIMAcquisition_UserGuide.pdf"
-        )
+        # Use resource_path so PyInstaller builds can locate the PDF
+        pdf_path = resource_path("docs", "PRIMAcquisition_UserGuide.pdf")
         if os.path.exists(pdf_path):
             if sys.platform == "win32":
                 os.startfile(pdf_path)
