@@ -1335,4 +1335,4 @@ class MainWindow(QMainWindow):
             tiff_path = csv_path = None
 
         self.playback_window = PlaybackWindow(tiff_path, csv_path, parent=self)
-        self.playback_window.show()
+        self.playback_window.showMaximized()
