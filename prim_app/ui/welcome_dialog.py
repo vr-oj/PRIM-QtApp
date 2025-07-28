@@ -3,7 +3,7 @@
 import os
 from utils.path_helpers import resource_path
 from PyQt5.QtCore import Qt, QSettings, QUrl
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QDesktopServices
 from PyQt5.QtWidgets import (
     QApplication,
     QDialog,
@@ -41,7 +41,18 @@ class WelcomeDialog(QDialog):
             "PRIMAcquisition lets you record synchronized <b>pressure data and video</b> for your experiments.<br>"
             "Follow these steps to get started quickly:"
         )
-    
+        layout.addWidget(intro)
+
+        steps = [
+            ("1️⃣", "🔌", "Connect PRIM Device", "Select the Arduino COM port and click Connect PRIM Device"),
+            ("2️⃣", "📷", "Set Up Camera", "Choose camera & resolution then click Start Camera"),
+            ("3️⃣", "🎚", "Adjust Exposure/Gain", "Use controls to fine-tune camera settings"),
+            ("4️⃣", "0️⃣", "Zero PRIM", "Make sure pressure is at zero"),
+            ("5️⃣", "⏺", "Start Recording", "Click Start Recording to begin acquisition"),
+            ("6️⃣", "⏹", "Stop Recording", "Click Stop Recording when finished"),
+            ("7️⃣", "▶", "Playback & Export", "Click Playback to review and export frames"),
+        ]
+
         for num, emoji, title, desc in steps:
             row = QHBoxLayout()
             icon_lbl = QLabel(f"{num} {emoji}")
