@@ -410,14 +410,14 @@ class PlaybackWindow(QMainWindow):
         base_font_size,
         frame_idx=None,
         total_frames=None,
-        preview_height=500,
+        preview_size=(500, 500),
     ):
         """Return ``frame`` with pressure text and frame count drawn.
 
         ``base_font_size`` represents the font size used when the preview label
-        height is ``preview_height`` (defaults to 500). The font will be scaled
-        relative to the export frame height so the overlay appears consistent
-        between the on-screen preview and exported image.
+        size is ``preview_size`` (defaults to ``(500, 500)``). The font will be
+        scaled relative to the export frame size so the overlay appears
+        consistent between the on-screen preview and exported image.
         """
         h, w = frame.shape
         qimg = QImage(
@@ -426,7 +426,10 @@ class PlaybackWindow(QMainWindow):
         painter = QPainter(qimg)
         painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
 
-        scale_factor = h / max(1, preview_height)
+        preview_w, preview_h = preview_size
+        scale = min(preview_w / max(1, w), preview_h / max(1, h))
+        disp_h = h * scale
+        scale_factor = disp_h / 500
         target_font_size = int(max(1, base_font_size * scale_factor))
         font = QFont("Arial", target_font_size)
         painter.setFont(font)
@@ -610,7 +613,10 @@ class PlaybackWindow(QMainWindow):
         self.statusBar().showMessage("Exporting overlay...")
         QApplication.setOverrideCursor(Qt.WaitCursor)
         base_font = self.font_spin.value()
-        preview_h = max(1, self.view.viewport().height())
+        preview_size = (
+            max(1, self.view.viewport().width()),
+            max(1, self.view.viewport().height()),
+        )
         total = len(self.frames)
         overlaid_frames = [
             self.overlay_frame(
@@ -619,7 +625,7 @@ class PlaybackWindow(QMainWindow):
                 base_font,
                 idx,
                 total,
-                preview_height=preview_h,
+                preview_size=preview_size,
             )
             for idx, (f, p) in enumerate(zip(self.frames, self.pressures))
         ]
@@ -641,14 +647,17 @@ class PlaybackWindow(QMainWindow):
         frame = self.frames[self.current_frame]
         pressure = self.pressures[min(self.current_frame, len(self.pressures) - 1)]
         base_font = self.font_spin.value()
-        preview_h = max(1, self.view.viewport().height())
+        preview_size = (
+            max(1, self.view.viewport().width()),
+            max(1, self.view.viewport().height()),
+        )
         overlaid = self.overlay_frame(
             frame,
             pressure,
             base_font,
             self.current_frame,
             len(self.frames),
-            preview_height=preview_h,
+            preview_size=preview_size,
         )
         Image.fromarray(overlaid).save(out_path)
         self.statusBar().showMessage(
@@ -689,14 +698,17 @@ class PlaybackWindow(QMainWindow):
         roi_frame = frame[y : y + h, x : x + w]
         pressure = self.pressures[min(self.current_frame, len(self.pressures) - 1)]
         base_font = self.font_spin.value()
-        preview_h = max(1, self.view.viewport().height())
+        preview_size = (
+            max(1, self.view.viewport().width()),
+            max(1, self.view.viewport().height()),
+        )
         overlaid = self.overlay_frame(
             roi_frame,
             pressure,
             base_font,
             self.current_frame,
             len(self.frames),
-            preview_height=preview_h,
+            preview_size=preview_size,
         )
         Image.fromarray(overlaid).save(out_path)
         self.statusBar().showMessage(
