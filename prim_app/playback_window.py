@@ -34,7 +34,7 @@ class PlaybackLoader(QObject):
     """Load TIFF/CSV data and emit frames as they are read."""
 
     progress = pyqtSignal(int, int)
-    frame_loaded = pyqtSignal(int, np.ndarray, float)
+    frame_loaded = pyqtSignal(int, np.ndarray, float, int)
     finished = pyqtSignal(int)
     error = pyqtSignal(str)
 
@@ -60,7 +60,7 @@ class PlaybackLoader(QObject):
                 for idx, page in enumerate(tif.pages):
                     frame = page.asarray()
                     pressure = pressures[idx] if idx < len(pressures) else 0
-                    self.frame_loaded.emit(idx, frame, pressure)
+                    self.frame_loaded.emit(idx, frame, pressure, total)
                     self.progress.emit(idx + 1, total)
         except Exception as e:
             self.error.emit(str(e))
@@ -273,10 +273,10 @@ class PlaybackWindow(QMainWindow):
         self.progress.setMaximum(total)
         self.progress.setValue(current)
 
-    def _on_frame_loaded(self, idx, frame, pressure):
+    def _on_frame_loaded(self, idx, frame, pressure, total_frames):
         self.frames.append(frame)
         self.pressures.append(pressure)
-        pix = self.render_pixmap(frame, pressure, idx)
+        pix = self.render_pixmap(frame, pressure, idx, total_frames)
         self.pre_rendered_frames.append(pix)
         if idx == 0:
             self.current_frame = 0
@@ -339,7 +339,7 @@ class PlaybackWindow(QMainWindow):
         arr = np.frombuffer(ptr, np.uint8).reshape((h, w))
         return arr.copy()
 
-    def render_pixmap(self, frame, pressure, frame_idx=None):
+    def render_pixmap(self, frame, pressure, frame_idx=None, total_frames=None):
         """Return a :class:`QPixmap` of ``frame`` scaled and optionally annotated."""
         label_w, label_h = max(1, self.label.width()), max(1, self.label.height())
         frame_h, frame_w = frame.shape
@@ -374,7 +374,8 @@ class PlaybackWindow(QMainWindow):
             painter.fillPath(path, Qt.white)
 
             if frame_idx is not None:
-                frame_text = f"{frame_idx + 1}/{len(self.frames)}"
+                total = total_frames if total_frames is not None else len(self.frames)
+                frame_text = f"{frame_idx + 1}/{total}"
                 fx = 10
                 fy = metrics.ascent() + 10
                 frame_path = QPainterPath()
