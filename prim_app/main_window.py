@@ -568,7 +568,7 @@ class MainWindow(QMainWindow):
         exp_img_act.triggered.connect(self.pressure_plot_widget.export_as_image)
         fm.addAction(exp_img_act)
         playback_act = QAction(
-            "Open &Playback…", self, triggered=lambda: self.open_playback_window(True)
+            "Open &Playback Window…", self, triggered=lambda: self.open_playback_window(True)
         )
         fm.addAction(playback_act)
         choose_dir_act = QAction(
@@ -672,7 +672,7 @@ class MainWindow(QMainWindow):
             tb.addAction(self.stop_recording_action)
         self.playback_action = QAction(
             self.icon_playback,
-            "Playback",
+            "Playback Last Recording",
             self,
             triggered=self.open_playback_window,
             enabled=False,
