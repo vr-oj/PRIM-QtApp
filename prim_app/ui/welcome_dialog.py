@@ -32,7 +32,7 @@ class WelcomeDialog(QDialog):
             self.close()
             return
 
-        self.setWindowTitle("\U0001F44B Welcome to PRIMAcquisition")
+        self.setWindowTitle("Welcome to PRIMAcquisition")
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.setMinimumSize(500, 420)
         self.setStyleSheet(
