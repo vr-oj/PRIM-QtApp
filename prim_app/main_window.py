@@ -7,7 +7,12 @@ import logging
 import csv
 import json
 from datetime import datetime
-import imagingcontrol4 as ic4
+try:
+    import imagingcontrol4 as ic4
+    IC4_IMPORT_ERROR = None
+except Exception as e:
+    ic4 = None
+    IC4_IMPORT_ERROR = e
 import subprocess
 
 from PyQt5.QtWidgets import (
@@ -339,11 +344,14 @@ class MainWindow(QMainWindow):
 
     # ─── Camera Device & Resolution Enumeration ─────────────────────────────
     def _populate_device_list(self):
-        try:
-            device_list = ic4.DeviceEnum.devices()
-        except Exception as e:
-            log.error(f"Failed to enumerate IC4 devices: {e}")
+        if not prim_app.IC4_AVAILABLE:
             device_list = []
+        else:
+            try:
+                device_list = ic4.DeviceEnum.devices()
+            except Exception as e:
+                log.error(f"Failed to enumerate IC4 devices: {e}")
+                device_list = []
 
         if not device_list:
             log.info("DEBUG: DeviceEnum.devices() returned ZERO devices.")
@@ -354,10 +362,19 @@ class MainWindow(QMainWindow):
                 )
 
         self.device_combo.clear()
-        self.device_combo.addItem("Select Device...", None)
-        for dev in device_list:
-            display_str = f"{dev.model_name}  (S/N: {dev.serial})"
-            self.device_combo.addItem(display_str, dev)
+        if not prim_app.IC4_AVAILABLE:
+            self.device_combo.addItem("IC4 Not Available", None)
+            self.device_combo.setEnabled(False)
+            self.resolution_combo.setEnabled(False)
+            self.btn_start_camera.setEnabled(False)
+        else:
+            self.device_combo.addItem("Select Device...", None)
+            self.device_combo.setEnabled(True)
+            self.resolution_combo.setEnabled(True)
+            self.btn_start_camera.setEnabled(True)
+            for dev in device_list:
+                display_str = f"{dev.model_name}  (S/N: {dev.serial})"
+                self.device_combo.addItem(display_str, dev)
 
     def _refresh_serial_port_list(self):
         ports = list_serial_ports()
@@ -385,6 +402,8 @@ class MainWindow(QMainWindow):
         Called whenever the user picks a different camera in the “Device” combo.
         Open it briefly, enumerate PixelFormat × (W,H), then close.
         """
+        if not prim_app.IC4_AVAILABLE:
+            return
         dev_info = self.device_combo.itemData(index)
         self.resolution_combo.clear()
         self.resolution_combo.addItem("Select Resolution…", None)
@@ -435,6 +454,13 @@ class MainWindow(QMainWindow):
         """
         Called when the user clicks “Start Camera” or “Stop Camera”.
         """
+        if not prim_app.IC4_AVAILABLE:
+            QMessageBox.warning(
+                self,
+                "IC4 Unavailable",
+                "Camera support requires the IC4 SDK."
+            )
+            return
         if self.camera_thread is None or not self.camera_thread.isRunning():
             # ─── Start camera ─────────────────────────────────────────────────
             dev_info = self.device_combo.currentData()
@@ -771,6 +797,10 @@ class MainWindow(QMainWindow):
             self.camera_control_panel.setEnabled(False)
         if hasattr(self, "plot_control_panel"):
             self.plot_control_panel.setEnabled(True)
+        if not prim_app.IC4_AVAILABLE:
+            self.device_combo.setEnabled(False)
+            self.resolution_combo.setEnabled(False)
+            self.btn_start_camera.setEnabled(False)
 
     # ─── Menu Actions & Dialog Slots ──────────────────────────────────────────
     def _export_plot_data_as_csv(self):

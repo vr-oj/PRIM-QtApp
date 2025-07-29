@@ -5,8 +5,13 @@ import os
 import re
 import traceback
 import logging
-import imagingcontrol4 as ic4
-
+try:
+    import imagingcontrol4 as ic4
+    IC4_IMPORT_ERROR = None
+except Exception as e:
+    ic4 = None
+    IC4_IMPORT_ERROR = e
+IC4_AVAILABLE = ic4 is not None
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication
 from PyQt5.QtGui import QIcon, QSurfaceFormat, QPalette, QColor
@@ -125,20 +130,38 @@ def main_app_entry():
     if hasattr(Qt, "AA_UseHighDpiPixmaps"):
         QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
+    ic4_available = True
+    ic4_error = None
+
     # ─── Initialize IC4 globally so MainWindow can enumerate devices ─────────
-    try:
-        ic4.Library.init(
-            api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
-        )
-        log.info("Global IC4 Library.init() succeeded.")
-    except Exception as e:
-        log.error(f"Could not initialize IC4 in main thread: {e}")
-        # You might still allow the UI to start (with an empty device list),
-        # or choose to exit right here with sys.exit(1).
+    if ic4 is not None:
+        try:
+            ic4.Library.init(
+                api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
+            )
+            log.info("Global IC4 Library.init() succeeded.")
+        except Exception as e:
+            ic4_available = False
+            ic4_error = e
+            log.error(f"Could not initialize IC4 in main thread: {e}")
+    else:
+        ic4_available = False
+        ic4_error = IC4_IMPORT_ERROR
+        log.warning(f"IC4 SDK not available: {IC4_IMPORT_ERROR}")
+
+    global IC4_AVAILABLE
+    IC4_AVAILABLE = ic4_available
 
     # Create the QApplication
     app = QApplication(sys.argv)
     apply_dark_theme(app)
+
+    if not ic4_available:
+        warning_text = (
+            "IC4 SDK not found or failed to initialize.\n"
+            "Camera functions will be disabled, but playback is still available."
+        )
+        QMessageBox.warning(None, "IC4 Unavailable", warning_text)
 
     if APP_SETTINGS_AVAILABLE and SETTING_RESULTS_DIR is not None:
         saved_dir = load_app_setting(SETTING_RESULTS_DIR, config.PRIM_RESULTS_DIR)
