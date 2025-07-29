@@ -3,6 +3,16 @@
 **PRIMAcquisition** (PRIM) is a Python-based application for synchronized acquisition of pressure data (from an Arduino-controlled pressure transducer) and live camera imaging. Designed for vascular physiology experiments, PRIMAcquisition displays live pressure traces, previews a high-speed camera feed, and saves synchronized recordings (as a CSV and TIFF stack) for offline analysis.
 
 ---
+## 🚀 Quick Start – Run an Experiment
+
+1️⃣ **Connect PRIM Device** – Select the Arduino COM port and click **Connect PRIM Device**  
+2️⃣ **Set Up Camera** – Choose camera & resolution → click **Start Camera**  
+3️⃣ **Adjust Exposure/Gain** – Use controls to fine-tune camera settings  
+4️⃣ **Zero PRIM** – Make sure pressure is at zero  
+5️⃣ **Start Recording** – Click **Start Recording** to begin acquisition  
+6️⃣ **Stop Recording** – Click **Stop Recording** when finished  
+7️⃣ **Playback & Export** – Click **Playback** to review, export a frame (PNG) or full TIFF with overlay
+
 
 ## Features
 
@@ -14,6 +24,7 @@
 - **Perfect sync** is maintained:
   - Each TIFF frame corresponds to exactly one Arduino trigger.
   - Each pressure value corresponds to exactly one recorded frame.
+  - The matching pressure value is stored in each TIFF frame's metadata.
 
 ### 📈 Live Pressure Plotting
 - Receives pressure readings from Arduino (115200 baud).
@@ -35,10 +46,12 @@ PRIM_ROOT/YYYY-MM-DD/FillN/
 ```
 - Files are automatically named and saved in time-stamped subfolders.
 - Environment variable `PRIM_RESULTS_DIR` overrides default save location.
+- After recording you can open **Playback** to view the TIFF with pressure overlay (toggleable), export an annotated copy, or save a single-frame snapshot.
+- The playback viewer supports **zoom**, **pan**, and drawing an ROI rectangle. You can zoom to the ROI or export just that region at full resolution.
 
 ---
 
-## How Synchronization Works
+## 🛠 Under the Hood
 
 PRIMAcquisition uses a **hardware-triggered acquisition model**:
 
@@ -51,9 +64,16 @@ PRIMAcquisition uses a **hardware-triggered acquisition model**:
 Each cycle:
 1. Arduino triggers a camera frame via digital HIGH → LOW on `CamTrig`.
 2. Arduino immediately sends pressure data and timestamp via serial.
-3. App receives both the frame and serial line, logs them together.
+3. App receives both the frame and serial line, saves them together.
 
 Result: **pixel-perfect and time-accurate alignment** of pressure + video frames.
+
+- **SerialThread** – Reads Arduino serial data and emits `(frameIndex, timestamp, pressure)`.
+- **SDKCameraThread** – Opens IC4 camera, configures settings, streams frames to the GUI.
+- **RecordingManager** – Writes synchronized CSV and TIFF files in a background thread.
+- **PlaybackWindow** – Reloads recorded files and overlays pressure data on frames.
+
+Recording starts when the first Arduino tick is received. Each pressure value is embedded in its corresponding TIFF frame metadata, ensuring **perfect synchronization**.
 
 ---
 
@@ -133,26 +153,6 @@ Result: **pixel-perfect and time-accurate alignment** of pressure + video frames
   frame_index, elapsed_time_s, pressure_value
   ```
 * Operates with precise timing via `micros()` and `millis()`.
-
----
-
-## Example Output
-
-**recording_YYYY-MM-DD_HH-MM-SS_pressure.csv**
-
-```
-frame_index, elapsed_time_s, pressure_value
-1, 0.1000, 15.32
-2, 0.2000, 15.47
-3, 0.3000, 15.45
-...
-```
-
-**recording_YYYY-MM-DD_HH-MM-SS_video.tif**
-
-* Grayscale TIFF
-* 1 frame per Arduino trigger
-* Metadata optionally includes pressure + timestamp
 
 ---
 
