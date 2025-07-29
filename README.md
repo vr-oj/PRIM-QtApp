@@ -108,6 +108,9 @@ Recording starts when the first Arduino tick is received. Each pressure value is
 
    * Required for DMK camera support.
    * Ensure GenTL Producer is installed and camera enumerates via IC4.
+   * If the IC4 SDK is not present, the application will still launch but camera
+     features will be disabled. Playback functionality remains fully
+     operational on any platform.
 
 ---
 

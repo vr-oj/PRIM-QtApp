@@ -1,8 +1,14 @@
 # File: prim_app/threads/sdk_camera_thread.py
 
 import logging
-import imagingcontrol4 as ic4
+try:
+    import imagingcontrol4 as ic4
+    IC4_IMPORT_ERROR = None
+except Exception as e:
+    ic4 = None
+    IC4_IMPORT_ERROR = e
 import numpy as np
+import prim_app
 
 from utils.config import DEFAULT_FPS
 
@@ -48,6 +54,10 @@ class SDKCameraThread(QThread):
         self._resolution = resolution_tuple
 
     def run(self):
+        if not prim_app.IC4_AVAILABLE:
+            self.error.emit("IC4 SDK not available", "IC4Missing")
+            return
+
         try:
             # ─── Initialize IC4 (with “already called” catch) ─────────────────
             try:
