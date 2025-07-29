@@ -7,16 +7,28 @@ consistent, polished look across all platforms.
 
 import os
 import sys
+import importlib.util
 
 source_script = os.path.join("prim_app", "prim_app.py")
 icon_file = os.path.join("prim_app", "ui", "icons", "PRIM.ico")
 
 data_files = [
-    (os.path.join("prim_app", "ui", "icons", "*"), os.path.join("prim_app", "ui", "icons")),
+    (
+        os.path.join("prim_app", "ui", "icons", "*"),
+        os.path.join("prim_app", "ui", "icons"),
+    ),
     (os.path.join("prim_app", "ui", "style.qss"), os.path.join("prim_app", "ui")),
-    (".primenv/Lib/site-packages/imagingcontrol4/*", "imagingcontrol4"),
-    (os.path.join("prim_app", "docs", "*"), os.path.join("prim_app", "docs")),
 ]
+
+# Attempt to include imagingcontrol4 resources if the module is installed.
+imaging_spec = importlib.util.find_spec("imagingcontrol4")
+if imaging_spec is not None and imaging_spec.origin is not None:
+    imaging_dir = os.path.dirname(imaging_spec.origin)
+    data_files.append((os.path.join(imaging_dir, "*"), "imagingcontrol4"))
+
+data_files.append(
+    (os.path.join("prim_app", "docs", "*"), os.path.join("prim_app", "docs"))
+)
 
 a = Analysis(
     [source_script],
