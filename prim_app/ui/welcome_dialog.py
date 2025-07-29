@@ -10,11 +10,9 @@ from PyQt5.QtWidgets import (
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
-    QGridLayout,
     QLabel,
     QPushButton,
     QCheckBox,
-    QWidget,
     QDesktopWidget,
 )
 
@@ -67,39 +65,27 @@ class WelcomeDialog(QDialog):
             ("export.svg", "Playback & Export", "Click Playback to review and export frames"),
         ]
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(20)
-        grid.setVerticalSpacing(12)
-
-        for i, (icon, title, desc) in enumerate(steps, start=1):
-            col_widget = QWidget()
-            col_layout = QVBoxLayout(col_widget)
-            col_layout.setSpacing(4)
-            col_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
-
+        for icon, title, desc in steps:
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            row.setAlignment(Qt.AlignVCenter)
             icon_lbl = QLabel()
             icon_path = resource_path("ui", "icons", icon)
             icon_lbl.setPixmap(
                 QPixmap(icon_path).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             )
-            icon_lbl.setAlignment(Qt.AlignHCenter)
-            title_lbl = QLabel(f"{i}. {title}")
+            row.addWidget(icon_lbl)
+
+            text_col = QVBoxLayout()
+            title_lbl = QLabel(title)
             title_lbl.setStyleSheet("font-size: 11pt; font-weight: bold;")
-            title_lbl.setAlignment(Qt.AlignHCenter)
             desc_lbl = QLabel(desc)
             desc_lbl.setWordWrap(True)
             desc_lbl.setStyleSheet("font-size: 9pt; color: #aaaaaa;")
-            desc_lbl.setAlignment(Qt.AlignHCenter)
-
-            col_layout.addWidget(icon_lbl)
-            col_layout.addWidget(title_lbl)
-            col_layout.addWidget(desc_lbl)
-
-            row = (i - 1) // 2
-            col = (i - 1) % 2
-            grid.addWidget(col_widget, row, col)
-
-        main_layout.addLayout(grid)
+            text_col.addWidget(title_lbl)
+            text_col.addWidget(desc_lbl)
+            row.addLayout(text_col)
+            main_layout.addLayout(row)
 
         self.checkbox = QCheckBox("Don't show this again")
         self.checkbox.stateChanged.connect(self._toggle_show)
