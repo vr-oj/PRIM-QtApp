@@ -582,24 +582,15 @@ class MainWindow(QMainWindow):
         fm.addAction(exit_act)
 
         am = mb.addMenu("&Acquisition")
-        self.start_recording_action = QAction(
+        self.record_action = QAction(
             self.icon_record_start,
             "Start &Recording",
             self,
             shortcut=Qt.CTRL | Qt.Key_R,
-            triggered=self._on_start_recording,
+            triggered=self._toggle_recording,
             enabled=False,
         )
-        am.addAction(self.start_recording_action)
-        self.stop_recording_action = QAction(
-            self.icon_record_stop,
-            "Stop R&ecording",
-            self,
-            shortcut=Qt.CTRL | Qt.Key_T,
-            triggered=self._on_stop_recording,
-            enabled=False,
-        )
-        am.addAction(self.stop_recording_action)
+        am.addAction(self.record_action)
 
         vm = mb.addMenu("&View")
         if hasattr(self, "dock_console") and self.dock_console:
@@ -666,10 +657,8 @@ class MainWindow(QMainWindow):
         tb.addWidget(self.serial_port_combobox)
         tb.addSeparator()
 
-        if hasattr(self, "start_recording_action"):
-            tb.addAction(self.start_recording_action)
-        if hasattr(self, "stop_recording_action"):
-            tb.addAction(self.stop_recording_action)
+        if hasattr(self, "record_action"):
+            tb.addAction(self.record_action)
         self.playback_action = QAction(
             self.icon_playback,
             "Playback Last Recording",
@@ -763,10 +752,8 @@ class MainWindow(QMainWindow):
             log.exception("Failed to send stop pump command")
 
     def _set_initial_control_states(self):
-        if hasattr(self, "start_recording_action"):
-            self.start_recording_action.setEnabled(False)
-        if hasattr(self, "stop_recording_action"):
-            self.stop_recording_action.setEnabled(False)
+        if hasattr(self, "record_action"):
+            self.record_action.setEnabled(False)
         if hasattr(self, "camera_control_panel"):
             self.camera_control_panel.setEnabled(False)
         if hasattr(self, "plot_control_panel"):
@@ -914,11 +901,22 @@ class MainWindow(QMainWindow):
             # Re‐enable port-combo so they can pick another port
             self.serial_port_combobox.setEnabled(True)
 
-            # Drop our reference so next click will “connect” again
-            self._serial_thread = None
+        # Drop our reference so next click will “connect” again
+        self._serial_thread = None
 
         # Finally, update the record‐button enable states (Start/Stop Recording)
         self._refresh_recording_button_states()
+
+    # ─── Toggle Recording ─────────────────────────────────────────────────
+    def _toggle_recording(self):
+        """Toggle between starting and stopping a recording."""
+        recorder_running = (
+            self._recorder_thread is not None and self._recorder_thread.isRunning()
+        )
+        if recorder_running:
+            self._on_stop_recording()
+        else:
+            self._on_start_recording()
 
     @pyqtSlot(str)
     def _handle_serial_status_change(self, status: str):
@@ -1147,8 +1145,8 @@ class MainWindow(QMainWindow):
 
     def _refresh_recording_button_states(self):
         """
-        Enable “Start Recording” only if serial is connected and no recorder thread is running.
-        Enable “Stop Recording” only if a RecordingManager thread is active.
+        Update the enabled state/text/icon of the unified record QAction based
+        on serial and recording thread state.
         """
         serial_ready = (
             self._serial_thread is not None and self._serial_thread.isRunning()
@@ -1156,11 +1154,15 @@ class MainWindow(QMainWindow):
         recorder_running = (
             self._recorder_thread is not None and self._recorder_thread.isRunning()
         )
-        can_start = serial_ready and not recorder_running
-        can_stop = recorder_running
 
-        self.start_recording_action.setEnabled(can_start)
-        self.stop_recording_action.setEnabled(can_stop)
+        if recorder_running:
+            self.record_action.setIcon(self.icon_record_stop)
+            self.record_action.setText("Stop Recording")
+            self.record_action.setEnabled(True)
+        else:
+            self.record_action.setIcon(self.icon_record_start)
+            self.record_action.setText("Start Recording")
+            self.record_action.setEnabled(serial_ready and not recorder_running)
 
     # ─── Window Close Cleanup ──────────────────────────────────────────────────
     def closeEvent(self, event):
