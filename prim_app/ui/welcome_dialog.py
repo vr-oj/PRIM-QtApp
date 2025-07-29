@@ -70,34 +70,45 @@ class WelcomeDialog(QDialog):
         grid = QGridLayout()
         grid.setHorizontalSpacing(20)
         grid.setVerticalSpacing(12)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setAlignment(Qt.AlignTop)
 
         for i, (icon, title, desc) in enumerate(steps, start=1):
-            col_widget = QWidget()
-            col_layout = QVBoxLayout(col_widget)
-            col_layout.setSpacing(4)
-            col_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+            step_widget = QWidget()
+            step_layout = QVBoxLayout(step_widget)
+            step_layout.setSpacing(4)
+            step_layout.setAlignment(Qt.AlignTop)
+
+            top_row = QHBoxLayout()
+            top_row.setSpacing(6)
 
             icon_lbl = QLabel()
             icon_path = resource_path("ui", "icons", icon)
             icon_lbl.setPixmap(
                 QPixmap(icon_path).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             )
-            icon_lbl.setAlignment(Qt.AlignHCenter)
+            icon_lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
             title_lbl = QLabel(f"{i}. {title}")
             title_lbl.setStyleSheet("font-size: 11pt; font-weight: bold;")
-            title_lbl.setAlignment(Qt.AlignHCenter)
+            title_lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+            top_row.addWidget(icon_lbl)
+            top_row.addWidget(title_lbl)
+            top_row.addStretch()
+
             desc_lbl = QLabel(desc)
             desc_lbl.setWordWrap(True)
             desc_lbl.setStyleSheet("font-size: 9pt; color: #aaaaaa;")
-            desc_lbl.setAlignment(Qt.AlignHCenter)
+            desc_lbl.setAlignment(Qt.AlignLeft)
 
-            col_layout.addWidget(icon_lbl)
-            col_layout.addWidget(title_lbl)
-            col_layout.addWidget(desc_lbl)
+            step_layout.addLayout(top_row)
+            step_layout.addWidget(desc_lbl)
 
             row = (i - 1) // 2
             col = (i - 1) % 2
-            grid.addWidget(col_widget, row, col)
+            grid.addWidget(step_widget, row, col)
 
         main_layout.addLayout(grid)
 
