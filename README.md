@@ -169,6 +169,20 @@ Recording starts when the first Arduino tick is received. Each pressure value is
 
 ---
 
+## Packaging with PyInstaller
+
+Use the provided spec file to create a standalone build:
+
+```bash
+pyinstaller PRIMAcquisition.spec
+```
+
+If the optional `imagingcontrol4` library is installed, its runtime files are
+included automatically. On platforms without the SDK (for example, macOS) the
+module is skipped and packaging still succeeds.
+
+---
+
 ## License
 
 Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
