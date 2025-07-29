@@ -177,6 +177,10 @@ Use the provided spec file to create a standalone build:
 pyinstaller PRIMAcquisition.spec
 ```
 
+The spec uses `collect_submodules('OpenGL')` so that all PyOpenGL modules
+are bundled. Without this, the packaged app may fail with a
+`ModuleNotFoundError: No module named 'OpenGL'` on macOS.
+
 If the optional `imagingcontrol4` library is installed, its runtime files are
 included automatically. On platforms without the SDK (for example, macOS) the
 module is skipped and packaging still succeeds.

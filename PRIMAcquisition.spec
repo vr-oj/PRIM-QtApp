@@ -8,6 +8,7 @@ consistent, polished look across all platforms.
 import os
 import sys
 import importlib.util
+from PyInstaller.utils.hooks import collect_submodules
 
 source_script = os.path.join("prim_app", "prim_app.py")
 icon_file = os.path.join("prim_app", "ui", "icons", "PRIM.ico")
@@ -35,7 +36,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=data_files,
-    hiddenimports=['OpenGL'],
+    hiddenimports=collect_submodules('OpenGL'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
