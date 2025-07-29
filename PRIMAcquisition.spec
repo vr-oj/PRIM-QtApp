@@ -36,7 +36,15 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=data_files,
-    hiddenimports=collect_submodules('OpenGL'),
+    hiddenimports=[
+        'OpenGL',
+        'OpenGL.GL',
+        'OpenGL.GLU',
+        'OpenGL.GLUT',
+        'OpenGL.arrays',
+        'OpenGL.platform',
+        'OpenGL.platform.baseplatform',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -44,6 +52,7 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
 
 pyz = PYZ(a.pure)
 
