@@ -65,8 +65,9 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=icon_file,
+    icon=icon_file
 )
+
 
 target = exe
 if sys.platform == "darwin":
@@ -79,13 +80,13 @@ if sys.platform == "darwin":
     target = app
 
 coll = COLLECT(
-    target,
+    exe,
     a.binaries,
     a.zipfiles,
     a.datas,
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="PRIMAcquisition",
+    name="PRIMAcquisition"
 )
 
