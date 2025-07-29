@@ -10,11 +10,9 @@ from PyQt5.QtWidgets import (
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
-    QGridLayout,
     QLabel,
     QPushButton,
     QCheckBox,
-    QWidget,
     QDesktopWidget,
 )
 
@@ -83,11 +81,13 @@ class WelcomeDialog(QDialog):
             top_row = QHBoxLayout()
             top_row.setSpacing(6)
 
+
             icon_lbl = QLabel()
             icon_path = resource_path("ui", "icons", icon)
             icon_lbl.setPixmap(
                 QPixmap(icon_path).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             )
+
             icon_lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
             title_lbl = QLabel(f"{i}. {title}")
@@ -111,6 +111,7 @@ class WelcomeDialog(QDialog):
             grid.addWidget(step_widget, row, col)
 
         main_layout.addLayout(grid)
+
 
         self.checkbox = QCheckBox("Don't show this again")
         self.checkbox.stateChanged.connect(self._toggle_show)
