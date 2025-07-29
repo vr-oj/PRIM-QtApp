@@ -35,7 +35,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=data_files,
-    hiddenimports=["imagingcontrol4"],
+    hiddenimports=['OpenGL'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -65,9 +65,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=icon_file
+    icon=icon_file,
 )
-
 
 target = exe
 if sys.platform == "darwin":
@@ -87,6 +86,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="PRIMAcquisition"
+    name="PRIMAcquisition",
 )
-
