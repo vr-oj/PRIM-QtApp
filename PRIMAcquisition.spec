@@ -6,6 +6,7 @@ consistent, polished look across all platforms.
 """
 
 import os
+import sys
 
 source_script = os.path.join("prim_app", "prim_app.py")
 icon_file = os.path.join("prim_app", "ui", "icons", "PRIM.ico")
@@ -55,8 +56,18 @@ exe = EXE(
     icon=icon_file,
 )
 
+target = exe
+if sys.platform == "darwin":
+    app = BUNDLE(
+        exe,
+        name="PRIMAcquisition.app",
+        icon=icon_file,
+        bundle_identifier="com.example.PRIMAcquisition",
+    )
+    target = app
+
 coll = COLLECT(
-    exe,
+    target,
     a.binaries,
     a.zipfiles,
     a.datas,
