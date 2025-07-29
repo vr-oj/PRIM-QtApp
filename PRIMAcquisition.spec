@@ -39,7 +39,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="PRIMAcquisition 1.2",
+    name="PRIMAcquisition 2.0",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

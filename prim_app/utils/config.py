@@ -43,7 +43,7 @@ SERIAL_COMMAND_TERMINATOR = b"\n"  # Arduino uses Serial.println()
 
 # ─── Application info ───────────────────────────────────────────────────────────
 APP_NAME = "PRIMAcquisition"
-APP_VERSION = "1.2"
+APP_VERSION = "2.0"
 ABOUT_TEXT = f"""
 <strong>{APP_NAME} v{APP_VERSION}</strong>
 <p>Passive Data Logger and Viewer for the PRIM system.</p>
