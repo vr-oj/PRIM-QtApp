@@ -79,6 +79,27 @@ Recording starts when the first Arduino tick is received. Each pressure value is
 
 ## Installation
 
+### Using the .exe file
+
+1. **Download latest release**
+
+   https://github.com/vr-oj/PRIMAcquisition/releases/download/v2.0/PRIMAcquisition.2.0.zip
+
+3. **Extract files**
+
+   Choose a destination to securely store the files (e.g. Program Files)
+
+4. **Install IC4 SDK and GenTL**
+
+   * Required for DMK camera support.
+   * Ensure GenTL Producer is installed and camera enumerates via IC4.
+   * https://www.theimagingsource.com/en-us/support/download/
+
+5. **Open app with a single click**
+   
+   
+### Coding Required
+
 1. **Clone the Repository**
  ```bash
  git clone https://github.com/your-repo/PRIMAcquisition.git
