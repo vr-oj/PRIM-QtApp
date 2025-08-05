@@ -162,6 +162,11 @@ Recording starts when the first Arduino tick is received. Each pressure value is
    * Use menu: **Acquisition → Stop Recording** or press **Ctrl+T**.
    * Files are finalized and closed cleanly.
 
+6. **Playback**
+
+   * Press **Ctrl+Shift+P** to playback the last recording immediately.
+   * Press **Ctrl+P** to open the playback window and choose files.
+
 ---
 
 ## Arduino Firmware (PRIM_v3_02)

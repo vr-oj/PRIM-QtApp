@@ -599,8 +599,20 @@ class MainWindow(QMainWindow):
         exp_img_act = QAction("Export Plot &Image…", self)
         exp_img_act.triggered.connect(self.pressure_plot_widget.export_as_image)
         fm.addAction(exp_img_act)
+        self.playback_action = QAction(
+            self.icon_playback,
+            "Playback &Last Recording",
+            self,
+            shortcut=QKeySequence("Ctrl+Shift+P"),
+            triggered=self.open_playback_window,
+            enabled=False,
+        )
+        fm.addAction(self.playback_action)
         playback_act = QAction(
-            "Open &Playback Window…", self, triggered=lambda: self.open_playback_window(True)
+            "Open &Playback Window…",
+            self,
+            shortcut=QKeySequence("Ctrl+P"),
+            triggered=lambda: self.open_playback_window(True),
         )
         fm.addAction(playback_act)
         choose_dir_act = QAction(
@@ -618,7 +630,7 @@ class MainWindow(QMainWindow):
             self.icon_record_start,
             "Start &Recording",
             self,
-            shortcut=Qt.CTRL | Qt.Key_R,
+            shortcut=QKeySequence("Ctrl+R"),
             triggered=self._on_start_recording,
             enabled=False,
         )
@@ -627,7 +639,7 @@ class MainWindow(QMainWindow):
             self.icon_record_stop,
             "Stop R&ecording",
             self,
-            shortcut=Qt.CTRL | Qt.Key_T,
+            shortcut=QKeySequence("Ctrl+T"),
             triggered=self._on_stop_recording,
             enabled=False,
         )
@@ -660,6 +672,10 @@ class MainWindow(QMainWindow):
         hm.addAction(welcome_act)
         readme_act = QAction("&Open User Guide", self, triggered=self._open_readme)
         hm.addAction(readme_act)
+        shortcuts_act = QAction(
+            "&Keyboard Shortcuts", self, triggered=self._show_shortcuts_dialog
+        )
+        hm.addAction(shortcuts_act)
         about_act = QAction(
             f"&About {APP_NAME}", self, triggered=self._show_about_dialog
         )
@@ -702,14 +718,8 @@ class MainWindow(QMainWindow):
             tb.addAction(self.start_recording_action)
         if hasattr(self, "stop_recording_action"):
             tb.addAction(self.stop_recording_action)
-        self.playback_action = QAction(
-            self.icon_playback,
-            "Playback Last Recording",
-            self,
-            triggered=self.open_playback_window,
-            enabled=False,
-        )
-        tb.addAction(self.playback_action)
+        if hasattr(self, "playback_action"):
+            tb.addAction(self.playback_action)
 
     def _build_status_bar(self):
         sb = self.statusBar()
@@ -861,6 +871,18 @@ class MainWindow(QMainWindow):
     def _open_readme(self):
         path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "README.md"))
         QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def _show_shortcuts_dialog(self):
+        shortcuts = [
+            ("Start Recording", QKeySequence("Ctrl+R")),
+            ("Stop Recording", QKeySequence("Ctrl+T")),
+            ("Playback Last Recording", QKeySequence("Ctrl+Shift+P")),
+            ("Open Playback Window", QKeySequence("Ctrl+P")),
+        ]
+        lines = "\n".join(
+            f"{name}\t{seq.toString(QKeySequence.NativeText)}" for name, seq in shortcuts
+        )
+        QMessageBox.information(self, "Keyboard Shortcuts", lines)
 
     # ─── Toggle Serial Connection ────────────────────────────────────────────
     def _toggle_serial_connection(self):
