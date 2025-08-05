@@ -10,11 +10,8 @@ from collections import deque
 import tifffile
 from PyQt5.QtCore import QObject, pyqtSlot, pyqtSignal
 from PyQt5.QtGui import QImage
-import logging
 
 from utils.config import MIN_FREE_SPACE_GB
-
-log = logging.getLogger(__name__)
 
 class RecordingManager(QObject):
     """Manage synchronized writing of pressure data and camera frames."""
@@ -24,7 +21,6 @@ class RecordingManager(QObject):
     # this signal to safely start the hardware acquisition.
     ready_for_acquisition = pyqtSignal()
     finished = pyqtSignal()
-    error_occurred = pyqtSignal(str)
 
     def __init__(self, output_dir, parent=None):
         super().__init__(parent)
@@ -38,9 +34,6 @@ class RecordingManager(QObject):
         self.csv_file = None
         self.csv_writer = None
         self.tif_writer = None
-
-        # Internal info
-        self._first_frame_shape = None
 
         # Recording flags
         self.is_recording = False
@@ -67,16 +60,15 @@ class RecordingManager(QObject):
         total, used, free = shutil.disk_usage(self.output_dir)
         if free < MIN_FREE_SPACE_GB * 1024 ** 3:
             gb_free = free / 1024 ** 3
-            log.error(
-                f"Insufficient disk space: {gb_free:.2f} GB available, {MIN_FREE_SPACE_GB} GB required."
+            print(
+                f"[RecordingManager] Insufficient disk space: "
+                f"{gb_free:.2f} GB available, {MIN_FREE_SPACE_GB} GB required."
             )
-            self.error_occurred.emit("Not enough disk space for recording.")
             self.ready_for_acquisition.emit()
             return
         
         self._csv_path = os.path.join(self.output_dir, f"{base_name}_pressure.csv")
         self._tiff_path = os.path.join(self.output_dir, f"{base_name}_video.tif")
-        self._first_frame_shape = None
 
         self.is_recording = True
         self._got_first_sample = False
@@ -88,10 +80,10 @@ class RecordingManager(QObject):
         self._samples_written = 0
         self._pending_samples.clear()
 
-        log.info(
-            f"Ready to record →\n  CSV will be: {self._csv_path}\n  TIFF will be: {self._tiff_path}"
+        print(
+            f"[RecordingManager] Ready to record →\n  CSV will be: {self._csv_path}\n  TIFF will be: {self._tiff_path}"
         )
-        log.info("Waiting for the first Arduino tick to open files...")
+        print("[RecordingManager] Waiting for the first Arduino tick to open files...")
         # Notify the GUI that the worker thread finished setup and the files
         # paths have been prepared.  The application can now start the Arduino
         # so the first sample will create the CSV/TIFF files.
@@ -110,23 +102,21 @@ class RecordingManager(QObject):
                 self.csv_writer = csv.writer(self.csv_file)
                 self.csv_writer.writerow(["frameIdx", "deviceTime", "pressure"])
             except Exception as e:
-                log.error(f"Failed to open CSV: {e}")
-                self.error_occurred.emit(f"Failed to open CSV file: {e}")
+                print(f"[RecordingManager] Failed to open CSV: {e}")
                 self.is_recording = False
                 return
             try:
                 self.tif_writer = tifffile.TiffWriter(self._tiff_path, bigtiff=True)
             except Exception as e:
-                log.error(f"Failed to open TIFF: {e}")
-                self.error_occurred.emit(f"Failed to open TIFF file: {e}")
+                print(f"[RecordingManager] Failed to open TIFF: {e}")
                 if self.csv_file:
                     self.csv_file.close()
                     self.csv_file = None
                     self.csv_writer = None
                 self.is_recording = False
                 return
-            log.info(
-                f"Recording truly started →\n  CSV: {self._csv_path}\n  TIFF: {self._tiff_path}"
+            print(
+                f"[RecordingManager] Recording truly started →\n  CSV: {self._csv_path}\n  TIFF: {self._tiff_path}"
             )
 
         if self.csv_writer:
@@ -134,14 +124,12 @@ class RecordingManager(QObject):
                 self.csv_writer.writerow([frameIdx, t_device, pressure])
                 self._last_device_time = t_device
                 self._samples_written += 1
-                # Include pressure so the frame metadata contains the full row
-                self._pending_samples.append((frameIdx, t_device, pressure))
+                self._pending_samples.append((frameIdx, t_device))
 
             except Exception as e:
-                log.error(
-                    f"Error writing CSV row ({frameIdx}, {t_device}, {pressure}): {e}"
+                print(
+                    f"[RecordingManager] Error writing CSV row ({frameIdx}, {t_device}, {pressure}): {e}"
                 )
-                self.error_occurred.emit(f"Error writing CSV: {e}")
         self._check_stop_condition()
 
     @pyqtSlot(QImage, object)
@@ -156,14 +144,8 @@ class RecordingManager(QObject):
         if self.tif_writer:
             try:
                 arr = self._qimage_to_numpy(qimage)
-                if self._first_frame_shape is None:
-                    self._first_frame_shape = arr.shape
-                frameIdx, t_device, pressure = self._pending_samples.popleft()
-                metadata = {
-                    "frameIdx": frameIdx,
-                    "deviceTime": t_device,
-                    "pressure": pressure,
-                }
+                frameIdx, t_device = self._pending_samples.popleft()
+                metadata = {"frameIdx": frameIdx, "deviceTime": t_device}
                 self.tif_writer.write(arr, description=json.dumps(metadata))
                 self._frame_counter += 1
                 self._frames_written += 1
@@ -171,10 +153,7 @@ class RecordingManager(QObject):
 
             except Exception as e:
                 failed_idx = max(0, self._frame_counter)
-                log.error(
-                    f"Error writing TIFF page for frame {failed_idx}: {e}"
-                )
-                self.error_occurred.emit(f"Error writing video frame: {e}")
+                print(f"[RecordingManager] Error writing TIFF page for frame {failed_idx}: {e}")
         self._check_stop_condition()
 
     @pyqtSlot()
@@ -190,8 +169,7 @@ class RecordingManager(QObject):
                 self.tif_writer.close()
                 self.tif_writer = None
         except Exception as e:
-            log.error(f"Error closing TIFF: {e}")
-            self.error_occurred.emit(f"Error closing TIFF: {e}")
+            print(f"[RecordingManager] Error closing TIFF: {e}")
 
         try:
             if self.csv_file:
@@ -199,15 +177,12 @@ class RecordingManager(QObject):
                 self.csv_file = None
                 self.csv_writer = None
         except Exception as e:
-            log.error(f"Error closing CSV: {e}")
-            self.error_occurred.emit(f"Error closing CSV: {e}")
-
-        # Optional overlays, logs, and summary are no longer generated
+            print(f"[RecordingManager] Error closing CSV: {e}")
 
         self._got_first_sample = False
         self._frame_counter = 0
 
-        log.info("Recording stopped and files closed.")
+        print("[RecordingManager] Recording stopped and files closed.")
         self.finished.emit()
 
     @pyqtSlot()
