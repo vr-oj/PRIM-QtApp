@@ -1,5 +1,6 @@
 # PRIM-QTAPP/prim_app/utils/utils.py
 import time
+import sys
 import cv2
 import serial.tools.list_ports
 import re
@@ -17,10 +18,14 @@ def timestamped_filename(prefix, ext):
 
 
 def list_cameras(max_idx=5):  # OpenCV camera listing
-    """Lists available OpenCV/DirectShow cameras."""
+    """Lists available OpenCV cameras."""
     cams = []
     for i in range(max_idx):
-        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+        # CAP_DSHOW is Windows-specific; use default backend elsewhere
+        if sys.platform.startswith("win"):
+            cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+        else:
+            cap = cv2.VideoCapture(i)
         if cap.isOpened():
             ret, frame = cap.read()
             if ret and frame is not None:

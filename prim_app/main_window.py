@@ -7,8 +7,17 @@ import logging
 import csv
 import json
 from datetime import datetime
-import imagingcontrol4 as ic4
+import platform
 import subprocess
+
+# imagingcontrol4 is only used on Windows. Import conditionally.
+if platform.system() == "Windows":
+    try:
+        import imagingcontrol4 as ic4
+    except Exception:  # pragma: no cover
+        ic4 = None
+else:
+    ic4 = None
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -78,9 +87,15 @@ from ui.control_panels.pump_control_panel import PumpControlPanel
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
 
 from threads.serial_thread import SerialThread
-from threads.sdk_camera_thread import SDKCameraThread
+
+# Camera thread selection: IC4 SDK on Windows, OpenCV elsewhere.
+if ic4 is not None:
+    from threads.sdk_camera_thread import SDKCameraThread
+else:
+    from threads.opencv_camera_thread import OpenCVCameraThread as SDKCameraThread
+
 from recording_manager import RecordingManager
-from utils.utils import list_serial_ports
+from utils.utils import list_serial_ports, list_cameras
 
 log = logging.getLogger(__name__)
 
@@ -343,25 +358,32 @@ class MainWindow(QMainWindow):
 
     # ─── Camera Device & Resolution Enumeration ─────────────────────────────
     def _populate_device_list(self):
-        try:
-            device_list = ic4.DeviceEnum.devices()
-        except Exception as e:
-            log.error(f"Failed to enumerate IC4 devices: {e}")
-            device_list = []
+        if ic4 is not None:
+            try:
+                device_list = ic4.DeviceEnum.devices()
+            except Exception as e:
+                log.error(f"Failed to enumerate IC4 devices: {e}")
+                device_list = []
 
-        if not device_list:
-            log.info("DEBUG: DeviceEnum.devices() returned ZERO devices.")
+            if not device_list:
+                log.info("DEBUG: DeviceEnum.devices() returned ZERO devices.")
+            else:
+                for idx, dev in enumerate(device_list):
+                    log.info(
+                        f"DEBUG: Device {idx} = {dev.model_name!r} (S/N {dev.serial!r})"
+                    )
+
+            self.device_combo.clear()
+            self.device_combo.addItem("Select Device...", None)
+            for dev in device_list:
+                display_str = f"{dev.model_name}  (S/N: {dev.serial})"
+                self.device_combo.addItem(display_str, dev)
         else:
-            for idx, dev in enumerate(device_list):
-                log.info(
-                    f"DEBUG: Device {idx} = {dev.model_name!r} (S/N {dev.serial!r})"
-                )
-
-        self.device_combo.clear()
-        self.device_combo.addItem("Select Device...", None)
-        for dev in device_list:
-            display_str = f"{dev.model_name}  (S/N: {dev.serial})"
-            self.device_combo.addItem(display_str, dev)
+            cams = list_cameras()
+            self.device_combo.clear()
+            self.device_combo.addItem("Select Device...", None)
+            for cam_idx in cams:
+                self.device_combo.addItem(f"Camera {cam_idx}", cam_idx)
 
     @pyqtSlot(int)
     def _on_device_selected(self, index):
@@ -371,6 +393,12 @@ class MainWindow(QMainWindow):
         """
         dev_info = self.device_combo.itemData(index)
         self.resolution_combo.clear()
+
+        if ic4 is None:
+            # For OpenCV devices, we do not enumerate resolutions
+            self.resolution_combo.addItem("Default", (0, 0, ""))
+            return
+
         self.resolution_combo.addItem("Select Resolution…", None)
 
         if not dev_info:
@@ -426,20 +454,25 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Camera", "Please select a device first.")
                 return
 
-            resdata = self.resolution_combo.currentData()
-            if not resdata:
-                QMessageBox.warning(self, "Camera", "Please select a resolution first.")
-                return
+            if ic4 is not None:
+                resdata = self.resolution_combo.currentData()
+                if not resdata:
+                    QMessageBox.warning(
+                        self, "Camera", "Please select a resolution first."
+                    )
+                    return
+                w, h, pf_name = resdata
+            else:
+                w, h, pf_name = (0, 0, "")
 
-            w, h, pf_name = resdata
-
-            # Instantiate the SDK camera thread
+            # Instantiate the camera thread
             self.camera_thread = SDKCameraThread(parent=self)
             self.camera_thread.set_device_info(dev_info)
             self.camera_thread.set_resolution((w, h, pf_name))
 
-            # 1) When the grabber is open & streaming, enable the sliders, etc.
-            self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
+            if ic4 is not None:
+                # 1) When the grabber is open & streaming, enable the sliders
+                self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
 
             # 2) Each time a new frame is ready, update the QtCameraWidget
             self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
@@ -1182,9 +1215,10 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         try:
-            from imagingcontrol4.library import Library
+            if ic4 is not None:
+                from imagingcontrol4.library import Library
 
-            Library.shutdown()
+                Library.shutdown()
         except Exception:
             pass
 
