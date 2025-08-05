@@ -1,11 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller build specification for PRIMAcquisition.
 
-This spec collects the application icons and stylesheet so the GUI has a
-consistent, polished look across all platforms.
-"""
+Collects application icons and stylesheet. ImagingControl4 files are only
+included when building on Windows where the SDK is available."""
 
 import os
+import platform
 
 source_script = os.path.join("prim_app", "prim_app.py")
 icon_file = os.path.join("prim_app", "ui", "icons", "PRIM.ico")
@@ -13,16 +13,20 @@ icon_file = os.path.join("prim_app", "ui", "icons", "PRIM.ico")
 data_files = [
     (os.path.join("prim_app", "ui", "icons", "*"), os.path.join("prim_app", "ui", "icons")),
     (os.path.join("prim_app", "ui", "style.qss"), os.path.join("prim_app", "ui")),
-    (".primenv/Lib/site-packages/imagingcontrol4/*", "imagingcontrol4"),
     (os.path.join("prim_app", "docs", "*"), os.path.join("prim_app", "docs")),
 ]
+
+hidden_imports = []
+if platform.system() == "Windows":
+    data_files.append((".primenv/Lib/site-packages/imagingcontrol4/*", "imagingcontrol4"))
+    hidden_imports.append("imagingcontrol4")
 
 a = Analysis(
     [source_script],
     pathex=[],
     binaries=[],
     datas=data_files,
-    hiddenimports=["imagingcontrol4"],
+    hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

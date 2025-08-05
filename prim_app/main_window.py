@@ -7,8 +7,14 @@ import logging
 import csv
 import json
 from datetime import datetime
-import imagingcontrol4 as ic4
 import subprocess
+
+try:
+    import imagingcontrol4 as ic4  # type: ignore
+    IC4_AVAILABLE = True
+except Exception:
+    ic4 = None
+    IC4_AVAILABLE = False
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -78,9 +84,12 @@ from ui.control_panels.plot_control_panel import PlotControlPanel
 from ui.canvas.pressure_plot_widget import PressurePlotWidget
 
 from threads.serial_thread import SerialThread
-from threads.sdk_camera_thread import SDKCameraThread
+from threads import OpenCVCameraThread
 from recording_manager import RecordingManager
-from utils.utils import list_serial_ports
+from utils.utils import list_serial_ports, list_cameras
+
+if IC4_AVAILABLE:
+    from threads import SDKCameraThread
 from playback_window import PlaybackWindow
 
 log = logging.getLogger(__name__)
@@ -339,25 +348,32 @@ class MainWindow(QMainWindow):
 
     # ─── Camera Device & Resolution Enumeration ─────────────────────────────
     def _populate_device_list(self):
-        try:
-            device_list = ic4.DeviceEnum.devices()
-        except Exception as e:
-            log.error(f"Failed to enumerate IC4 devices: {e}")
-            device_list = []
-
-        if not device_list:
-            log.info("DEBUG: DeviceEnum.devices() returned ZERO devices.")
-        else:
-            for idx, dev in enumerate(device_list):
-                log.info(
-                    f"DEBUG: Device {idx} = {dev.model_name!r} (S/N {dev.serial!r})"
-                )
-
+        """Populate camera combo depending on platform."""
         self.device_combo.clear()
         self.device_combo.addItem("Select Device...", None)
-        for dev in device_list:
-            display_str = f"{dev.model_name}  (S/N: {dev.serial})"
-            self.device_combo.addItem(display_str, dev)
+
+        if IC4_AVAILABLE:
+            try:
+                device_list = ic4.DeviceEnum.devices()
+            except Exception as e:
+                log.error(f"Failed to enumerate IC4 devices: {e}")
+                device_list = []
+
+            if not device_list:
+                log.info("DEBUG: DeviceEnum.devices() returned ZERO devices.")
+            else:
+                for idx, dev in enumerate(device_list):
+                    log.info(
+                        f"DEBUG: Device {idx} = {dev.model_name!r} (S/N {dev.serial!r})"
+                    )
+
+            for dev in device_list:
+                display_str = f"{dev.model_name}  (S/N: {dev.serial})"
+                self.device_combo.addItem(display_str, dev)
+        else:
+            cam_indices = list_cameras()
+            for idx in cam_indices:
+                self.device_combo.addItem(f"Camera {idx}", idx)
 
     def _refresh_serial_port_list(self):
         ports = list_serial_ports()
@@ -387,48 +403,64 @@ class MainWindow(QMainWindow):
         """
         dev_info = self.device_combo.itemData(index)
         self.resolution_combo.clear()
-        self.resolution_combo.addItem("Select Resolution…", None)
 
         if not dev_info:
+            self.resolution_combo.addItem("Select Resolution…", None)
             return
 
-        grab = ic4.Grabber()
-        try:
-            grab.device_open(dev_info)
-
-            # Force Continuous acquisition if possible
-            acq_node = grab.device_property_map.find_enumeration("AcquisitionMode")
-            if acq_node:
-                names = [e.name for e in acq_node.entries]
-                if "Continuous" in names:
-                    acq_node.value = "Continuous"
-                else:
-                    acq_node.value = names[0]
-
-            pf_node = grab.device_property_map.find_enumeration("PixelFormat")
-            if pf_node:
-                for entry in pf_node.entries:
-                    pf_name = entry.name
-                    try:
-                        pf_node.value = pf_name
-                        w_prop = grab.device_property_map.find_integer("Width")
-                        h_prop = grab.device_property_map.find_integer("Height")
-                        if w_prop and h_prop:
-                            w = w_prop.value
-                            h = h_prop.value
-                            display_str = f"{w}×{h} ({pf_name})"
-                            self.resolution_combo.addItem(display_str, (w, h, pf_name))
-                    except Exception:
-                        # skip any PF that fails
-                        pass
-
-        except Exception as e:
-            log.error(f"Failed to get formats for {dev_info}: {e}")
-        finally:
+        if IC4_AVAILABLE:
+            self.resolution_combo.addItem("Select Resolution…", None)
+            grab = ic4.Grabber()
             try:
-                grab.device_close()
-            except Exception:
-                pass
+                grab.device_open(dev_info)
+
+                # Force Continuous acquisition if possible
+                acq_node = grab.device_property_map.find_enumeration("AcquisitionMode")
+                if acq_node:
+                    names = [e.name for e in acq_node.entries]
+                    if "Continuous" in names:
+                        acq_node.value = "Continuous"
+                    else:
+                        acq_node.value = names[0]
+
+                pf_node = grab.device_property_map.find_enumeration("PixelFormat")
+                if pf_node:
+                    for entry in pf_node.entries:
+                        pf_name = entry.name
+                        try:
+                            pf_node.value = pf_name
+                            w_prop = grab.device_property_map.find_integer("Width")
+                            h_prop = grab.device_property_map.find_integer("Height")
+                            if w_prop and h_prop:
+                                w = w_prop.value
+                                h = h_prop.value
+                                display_str = f"{w}×{h} ({pf_name})"
+                                self.resolution_combo.addItem(display_str, (w, h, pf_name))
+                        except Exception:
+                            # skip any PF that fails
+                            pass
+
+            except Exception as e:
+                log.error(f"Failed to get formats for {dev_info}: {e}")
+            finally:
+                try:
+                    grab.device_close()
+                except Exception:
+                    pass
+        else:
+            # OpenCV: show current resolution as default
+            self.resolution_combo.addItem("Default", None)
+            try:
+                import cv2
+
+                cap = cv2.VideoCapture(dev_info)
+                if cap.isOpened():
+                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    self.resolution_combo.addItem(f"{w}×{h}", (w, h))
+                cap.release()
+            except Exception as e:
+                log.error(f"Failed to query OpenCV camera {dev_info}: {e}")
 
     @pyqtSlot()
     def _on_start_stop_camera(self):
@@ -442,25 +474,25 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Camera", "Please select a device first.")
                 return
 
-            resdata = self.resolution_combo.currentData()
-            if not resdata:
-                QMessageBox.warning(self, "Camera", "Please select a resolution first.")
-                return
+            if IC4_AVAILABLE:
+                resdata = self.resolution_combo.currentData()
+                if not resdata:
+                    QMessageBox.warning(self, "Camera", "Please select a resolution first.")
+                    return
 
-            w, h, pf_name = resdata
+                w, h, pf_name = resdata
+                self.camera_thread = SDKCameraThread(parent=self)
+                self.camera_thread.set_device_info(dev_info)
+                self.camera_thread.set_resolution((w, h, pf_name))
+                self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
+            else:
+                self.camera_thread = OpenCVCameraThread(index=dev_info, parent=self)
 
-            # Instantiate the SDK camera thread
-            self.camera_thread = SDKCameraThread(parent=self)
-            self.camera_thread.set_device_info(dev_info)
-            self.camera_thread.set_resolution((w, h, pf_name))
-
-            # 1) When the grabber is open & streaming, enable the sliders, etc.
-            self.camera_thread.grabber_ready.connect(self._on_grabber_ready)
-
-            # 2) Each time a new frame is ready, update the QtCameraWidget
+            # Each time a new frame is ready, update the QtCameraWidget and info
             self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
+            self.camera_thread.frame_ready.connect(self._update_camera_info)
 
-            # 3) On any camera error, pop up a dialog and tear everything down
+            # On any camera error, pop up a dialog and tear everything down
             self.camera_thread.error.connect(self._on_camera_error)
 
             # Show “Connecting…” in the Camera tab

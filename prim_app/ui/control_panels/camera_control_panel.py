@@ -14,7 +14,12 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
-from imagingcontrol4 import IC4Exception
+try:  # imagingcontrol4 is only on Windows
+    from imagingcontrol4 import IC4Exception  # type: ignore
+    IC4_AVAILABLE = True
+except Exception:  # pragma: no cover
+    IC4Exception = Exception
+    IC4_AVAILABLE = False
 
 log = logging.getLogger(__name__)
 

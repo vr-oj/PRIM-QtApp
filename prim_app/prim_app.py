@@ -5,7 +5,17 @@ import os
 import re
 import traceback
 import logging
-import imagingcontrol4 as ic4
+import platform
+
+IS_WINDOWS = platform.system() == "Windows"
+IS_MAC = platform.system() == "Darwin"
+
+try:  # imagingcontrol4 is Windows-only
+    import imagingcontrol4 as ic4  # type: ignore
+    IC4_AVAILABLE = True
+except Exception:  # pragma: no cover - running on macOS or without IC4
+    ic4 = None
+    IC4_AVAILABLE = False
 
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication
@@ -125,16 +135,18 @@ def main_app_entry():
     if hasattr(Qt, "AA_UseHighDpiPixmaps"):
         QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
-    # ─── Initialize IC4 globally so MainWindow can enumerate devices ─────────
-    try:
-        ic4.Library.init(
-            api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
-        )
-        log.info("Global IC4 Library.init() succeeded.")
-    except Exception as e:
-        log.error(f"Could not initialize IC4 in main thread: {e}")
-        # You might still allow the UI to start (with an empty device list),
-        # or choose to exit right here with sys.exit(1).
+    # ─── Initialize IC4 on Windows; macOS will fall back to OpenCV ────────
+    if IC4_AVAILABLE:
+        try:
+            ic4.Library.init(
+                api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
+            )
+            log.info("Global IC4 Library.init() succeeded.")
+        except Exception as e:
+            log.error(f"Could not initialize IC4 in main thread: {e}")
+            # You might still allow the UI to start or choose to exit.
+    else:
+        log.info("IC4 library not available. Running with OpenCV backend.")
 
     # Create the QApplication
     app = QApplication(sys.argv)
@@ -235,10 +247,11 @@ def main_app_entry():
     exit_code = app.exec_()
     log.info(f"Application event loop ended with exit code {exit_code}.")
 
-    try:
-        ic4.Library.shutdown()
-    except Exception:
-        pass
+    if IC4_AVAILABLE:
+        try:
+            ic4.Library.shutdown()
+        except Exception:
+            pass
 
     sys.exit(exit_code)
 
