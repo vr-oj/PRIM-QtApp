@@ -1,7 +1,15 @@
 # File: prim_app/threads/sdk_camera_thread.py
 
 import logging
-import imagingcontrol4 as ic4
+
+# imagingcontrol4 is only available on Windows. Import it conditionally so the
+# module can be imported on platforms where the SDK is missing (e.g. macOS).
+# A missing SDK will be handled gracefully when the class is instantiated.
+try:
+    import imagingcontrol4 as ic4
+except Exception:  # pragma: no cover - best effort import
+    ic4 = None
+
 import numpy as np
 
 from utils.config import DEFAULT_FPS
@@ -30,6 +38,15 @@ class SDKCameraThread(QThread):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        # If the Imaging Control SDK isn't available we cannot operate. Raising
+        # here keeps imports working while providing a clear runtime error if
+        # the thread is used without the dependency installed.
+        if ic4 is None:  # pragma: no cover - depends on external SDK
+            raise RuntimeError(
+                "imagingcontrol4 SDK is not available; SDKCameraThread cannot be used"
+            )
+
         self.grabber = None
         self._stop_requested = False
 
