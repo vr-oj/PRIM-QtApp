@@ -5,17 +5,7 @@ import os
 import re
 import traceback
 import logging
-import platform
-
-# Imagingcontrol4 is only available on Windows. Import conditionally so the app
-# can fall back to OpenCV on other platforms (e.g. macOS).
-if platform.system() == "Windows":
-    try:
-        import imagingcontrol4 as ic4
-    except Exception:  # pragma: no cover - best effort import
-        ic4 = None
-else:
-    ic4 = None
+import imagingcontrol4 as ic4
 
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication
@@ -135,19 +125,16 @@ def main_app_entry():
     if hasattr(Qt, "AA_UseHighDpiPixmaps"):
         QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
-    # ─── Initialize IC4 globally (Windows only) ──────────────────────────────
-    if ic4 is not None:
-        try:
-            ic4.Library.init(
-                api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
-            )
-            log.info("Global IC4 Library.init() succeeded.")
-        except Exception as e:
-            log.error(f"Could not initialize IC4 in main thread: {e}")
-            # You might still allow the UI to start (with an empty device list),
-            # or choose to exit right here with sys.exit(1).
-    else:
-        log.info("IC4 library not available; using OpenCV backend.")
+    # ─── Initialize IC4 globally so MainWindow can enumerate devices ─────────
+    try:
+        ic4.Library.init(
+            api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
+        )
+        log.info("Global IC4 Library.init() succeeded.")
+    except Exception as e:
+        log.error(f"Could not initialize IC4 in main thread: {e}")
+        # You might still allow the UI to start (with an empty device list),
+        # or choose to exit right here with sys.exit(1).
 
     # Create the QApplication
     app = QApplication(sys.argv)

@@ -6,31 +6,23 @@ consistent, polished look across all platforms.
 """
 
 import os
-import sys
 
 source_script = os.path.join("prim_app", "prim_app.py")
-
-IS_MAC = sys.platform == "darwin"
-
-if IS_MAC:
-    icon_file = None  # Optional: supply an .icns file here if available
-else:
-    icon_file = os.path.join("prim_app", "ui", "icons", "PRIM.ico")
+icon_file = os.path.join("prim_app", "ui", "icons", "PRIM.ico")
 
 data_files = [
     (os.path.join("prim_app", "ui", "icons", "*"), os.path.join("prim_app", "ui", "icons")),
     (os.path.join("prim_app", "ui", "style.qss"), os.path.join("prim_app", "ui")),
+    (".primenv/Lib/site-packages/imagingcontrol4/*", "imagingcontrol4"),
+    (os.path.join("prim_app", "docs", "*"), os.path.join("prim_app", "docs")),
 ]
-
-if not IS_MAC:
-    data_files.append((".primenv/Lib/site-packages/imagingcontrol4/*", "imagingcontrol4"))
 
 a = Analysis(
     [source_script],
     pathex=[],
     binaries=[],
     datas=data_files,
-    hiddenimports=(["OpenGL", "OpenGL.GL", "OpenGL.GLU"] if IS_MAC else ["imagingcontrol4", "OpenGL", "OpenGL.GL", "OpenGL.GLU"]),
+    hiddenimports=["imagingcontrol4"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -56,34 +48,21 @@ exe = EXE(
     runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
-    argv_emulation=IS_MAC,
+    argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon=icon_file,
 )
-if IS_MAC:
-    coll = BUNDLE(
-        exe,
-        a.binaries,
-        a.zipfiles,
-        a.datas,
-        strip=False,
-        upx=True,
-        upx_exclude=[],
-        name="PRIMAcquisition.app",
-        icon=icon_file,
-        bundle_identifier=None,
-    )
-else:
-    coll = COLLECT(
-        exe,
-        a.binaries,
-        a.zipfiles,
-        a.datas,
-        strip=False,
-        upx=True,
-        upx_exclude=[],
-        name="PRIMAcquisition",
-    )
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name="PRIMAcquisition",
+)
 

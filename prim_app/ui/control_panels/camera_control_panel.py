@@ -14,13 +14,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
-# imagingcontrol4 is optional (Windows only). Provide a fallback so this module
-# can be imported on platforms where the SDK is unavailable.
-try:
-    from imagingcontrol4 import IC4Exception
-except Exception:  # pragma: no cover
-    class IC4Exception(Exception):
-        pass
+from imagingcontrol4 import IC4Exception
 
 log = logging.getLogger(__name__)
 
