@@ -62,15 +62,28 @@ exe = EXE(
     entitlements_file=None,
     icon=icon_file,
 )
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name="PRIMAcquisition",
-)
+if IS_MAC:
+    coll = BUNDLE(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name="PRIMAcquisition.app",
+        icon=icon_file,
+        bundle_identifier=None,
+    )
+else:
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name="PRIMAcquisition",
+    )
 
