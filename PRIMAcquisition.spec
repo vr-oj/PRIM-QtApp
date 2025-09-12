@@ -52,9 +52,8 @@ is_windows = sys.platform.startswith("win")
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,  # onedir build; binaries are collected below
     name=exe_name,
     debug=False,
     bootloader_ignore_signals=False,
@@ -83,8 +82,10 @@ if is_macos:
         info_plist=None,
     )
 
+extra_targets = [target] if is_macos else []
+
 coll = COLLECT(
-    target,
+    exe,  # Always include the EXE target (valid for COLLECT)
     a.binaries,
     a.zipfiles,
     a.datas,
