@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (
     QToolBar,
     QStatusBar,
     QSizePolicy,
+    QToolButton,
 )
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QIcon
@@ -76,6 +77,7 @@ class MainWindow(QMainWindow):
         self.icon_refresh = ico("sync.svg")
         self.icon_csv = ico("csv.svg")
         self.icon_controls = ico("settings.svg")
+        self.icon_pin = ico("always-on-top.svg")
 
     def _build_ui(self):
         central = QWidget(self)
@@ -83,30 +85,12 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(6, 6, 6, 6)
         v.setSpacing(8)
 
-        # Top row: Serial connection | PRIM status | Plot controls
+        # Top row: PRIM status | Plot controls (Arduino connection moved to toolbar)
         top = QWidget(self)
         self.top_ribbon = top
         top_lay = QHBoxLayout(top)
         top_lay.setContentsMargins(0, 0, 0, 0)
         top_lay.setSpacing(8)
-
-        # Serial connection group
-        ser_group = QGroupBox("Arduino Connection", self)
-        ser_form = QFormLayout(ser_group)
-        ser_form.setContentsMargins(6, 6, 6, 6)
-        self.port_combo = QComboBox()
-        self.btn_refresh_ports = QPushButton(self.icon_refresh, "Refresh")
-        self.btn_connect = QPushButton(self.icon_connect, "Connect")
-        self.btn_refresh_ports.clicked.connect(self._refresh_ports)
-        self.btn_connect.clicked.connect(self._toggle_serial)
-        ser_row = QWidget()
-        ser_row_lay = QHBoxLayout(ser_row)
-        ser_row_lay.setContentsMargins(0, 0, 0, 0)
-        ser_row_lay.setSpacing(6)
-        ser_row_lay.addWidget(self.port_combo)
-        ser_row_lay.addWidget(self.btn_refresh_ports)
-        ser_row_lay.addWidget(self.btn_connect)
-        ser_form.addRow("Serial Port:", ser_row)
 
         # PRIM device status/controls
         self.top_ctrl = TopControlPanel(self)
@@ -115,9 +99,8 @@ class MainWindow(QMainWindow):
         # Plot controls
         self.plot_ctrl = PlotControlPanel(self)
 
-        top_lay.addWidget(ser_group, 2)
-        top_lay.addWidget(self.top_ctrl, 2)
-        top_lay.addWidget(self.plot_ctrl, 2)
+        top_lay.addWidget(self.top_ctrl, 3)
+        top_lay.addWidget(self.plot_ctrl, 3)
         v.addWidget(top, 0)
 
         # Plot area
@@ -153,13 +136,24 @@ class MainWindow(QMainWindow):
         tb = QToolBar("Main", self)
         self.addToolBar(tb)
 
+        # Arduino connection controls on the toolbar
+        # Keep actions available internally but prefer the widgets below for UX
         self.act_refresh = QAction(self.icon_refresh, "Refresh Ports", self)
         self.act_refresh.triggered.connect(self._refresh_ports)
-        tb.addAction(self.act_refresh)
-
         self.act_connect = QAction(self.icon_connect, "Connect PRIM", self)
         self.act_connect.triggered.connect(self._toggle_serial)
-        tb.addAction(self.act_connect)
+
+        # Widgets: Port combo + Refresh + Connect
+        self.port_combo = QComboBox()
+        self.btn_refresh_ports = QPushButton(self.icon_refresh, "Refresh")
+        self.btn_connect = QPushButton(self.icon_connect, "Connect")
+        self.btn_refresh_ports.clicked.connect(self._refresh_ports)
+        self.btn_connect.clicked.connect(self._toggle_serial)
+
+        tb.addWidget(QLabel("Port:"))
+        tb.addWidget(self.port_combo)
+        tb.addWidget(self.btn_refresh_ports)
+        tb.addWidget(self.btn_connect)
 
         tb.addSeparator()
 
@@ -180,10 +174,22 @@ class MainWindow(QMainWindow):
         self.act_show_controls.toggled.connect(self._toggle_controls)
         tb.addAction(self.act_show_controls)
 
+        # Always-on-top toggle as a toolbar button (pin style)
         self.act_always_on_top = QAction("Always on Top", self)
         self.act_always_on_top.setCheckable(True)
         self.act_always_on_top.toggled.connect(self._toggle_always_on_top)
-        tb.addAction(self.act_always_on_top)
+
+        self.btn_always_on_top = QToolButton(self)
+        self.btn_always_on_top.setCheckable(True)
+        self.btn_always_on_top.setChecked(False)
+        self.btn_always_on_top.setToolTip("Always on Top")
+        # Prefer icon if available, fall back to glyph
+        if hasattr(self, "icon_pin") and not self.icon_pin.isNull():
+            self.btn_always_on_top.setIcon(self.icon_pin)
+        else:
+            self.btn_always_on_top.setText("📍")  # fallback glyph
+        self.btn_always_on_top.toggled.connect(self._pin_button_toggled)
+        tb.addWidget(self.btn_always_on_top)
 
     def _build_menus(self):
         menubar = self.menuBar()
@@ -217,14 +223,16 @@ class MainWindow(QMainWindow):
 
     def _update_connect_ui(self, connected: bool):
         if connected:
-            self.act_connect.setIcon(self.icon_disconnect)
-            self.act_connect.setText("Disconnect PRIM")
+            if hasattr(self, "act_connect") and isinstance(self.act_connect, QAction):
+                self.act_connect.setIcon(self.icon_disconnect)
+                self.act_connect.setText("Disconnect PRIM")
             self.btn_connect.setIcon(self.icon_disconnect)
             self.btn_connect.setText("Disconnect")
             self.port_combo.setEnabled(False)
         else:
-            self.act_connect.setIcon(self.icon_connect)
-            self.act_connect.setText("Connect PRIM")
+            if hasattr(self, "act_connect") and isinstance(self.act_connect, QAction):
+                self.act_connect.setIcon(self.icon_connect)
+                self.act_connect.setText("Connect PRIM")
             self.btn_connect.setIcon(self.icon_connect)
             self.btn_connect.setText("Connect")
             self.port_combo.setEnabled(True)
@@ -247,8 +255,21 @@ class MainWindow(QMainWindow):
             self.setWindowFlag(Qt.WindowStaysOnTopHint, enabled)
             # Re-apply flags
             self.show()
+            # Sync toolbar pin button if user toggled via menu
+            if hasattr(self, "btn_always_on_top") and self.btn_always_on_top.isChecked() != enabled:
+                self.btn_always_on_top.blockSignals(True)
+                self.btn_always_on_top.setChecked(enabled)
+                self.btn_always_on_top.blockSignals(False)
         except Exception:
             log.exception("Failed toggling Always on Top")
+
+    def _pin_button_toggled(self, enabled: bool):
+        # Forward to window flag logic; keep menu action in sync
+        if hasattr(self, "act_always_on_top") and self.act_always_on_top.isChecked() != enabled:
+            self.act_always_on_top.blockSignals(True)
+            self.act_always_on_top.setChecked(enabled)
+            self.act_always_on_top.blockSignals(False)
+        self._toggle_always_on_top(enabled)
 
     @pyqtSlot()
     def _refresh_ports(self):
