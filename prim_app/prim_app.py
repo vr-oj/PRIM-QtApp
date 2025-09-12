@@ -5,11 +5,9 @@ import os
 import re
 import traceback
 import logging
-import imagingcontrol4 as ic4
-
 from PyQt5.QtWidgets import QApplication, QMessageBox, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication
-from PyQt5.QtGui import QIcon, QSurfaceFormat, QPalette, QColor
+from PyQt5.QtGui import QIcon, QPalette, QColor
 import utils.config as config
 from utils.config import APP_NAME, APP_VERSION as CONFIG_APP_VERSION
 from utils.path_helpers import resource_path
@@ -72,7 +70,8 @@ def apply_dark_theme(app):
     dark_palette.setColor(QPalette.WindowText, Qt.white)
     dark_palette.setColor(QPalette.Base, QColor(30, 30, 30))
     dark_palette.setColor(QPalette.AlternateBase, QColor(45, 45, 45))
-    dark_palette.setColor(QPalette.ToolTipBase, Qt.white)
+    # Tooltips: dark background with light text for readability
+    dark_palette.setColor(QPalette.ToolTipBase, QColor(53, 53, 53))
     dark_palette.setColor(QPalette.ToolTipText, Qt.white)
     dark_palette.setColor(QPalette.Text, Qt.white)
     dark_palette.setColor(QPalette.Button, QColor(45, 45, 45))
@@ -108,33 +107,11 @@ def load_processed_qss(path):
 
 
 def main_app_entry():
-    # ─── Set Default OpenGL 3.3 Core Profile ─────────────────────────────
-    fmt = QSurfaceFormat()
-    fmt.setRenderableType(QSurfaceFormat.OpenGL)
-    fmt.setProfile(QSurfaceFormat.CoreProfile)
-    fmt.setVersion(3, 3)
-    QSurfaceFormat.setDefaultFormat(fmt)
-    log.info(
-        "Attempted to set default QSurfaceFormat to OpenGL 3.3 Core Profile globally."
-    )
-    # ──────────────────────────────────────────────────────────────────────
-
     # Enable high-DPI scaling if available
     if hasattr(Qt, "AA_EnableHighDpiScaling"):
         QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     if hasattr(Qt, "AA_UseHighDpiPixmaps"):
         QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-
-    # ─── Initialize IC4 globally so MainWindow can enumerate devices ─────────
-    try:
-        ic4.Library.init(
-            api_log_level=ic4.LogLevel.INFO, log_targets=ic4.LogTarget.STDERR
-        )
-        log.info("Global IC4 Library.init() succeeded.")
-    except Exception as e:
-        log.error(f"Could not initialize IC4 in main thread: {e}")
-        # You might still allow the UI to start (with an empty device list),
-        # or choose to exit right here with sys.exit(1).
 
     # Create the QApplication
     app = QApplication(sys.argv)
@@ -145,21 +122,8 @@ def main_app_entry():
         if saved_dir:
             config.set_results_dir(saved_dir)
 
-    # Log what OpenGL/QSurfaceFormat we actually got
-    actual_fmt = QSurfaceFormat.defaultFormat()
-    profile_str = (
-        "Core"
-        if actual_fmt.profile() == QSurfaceFormat.CoreProfile
-        else (
-            "Compatibility"
-            if actual_fmt.profile() == QSurfaceFormat.CompatibilityProfile
-            else "NoProfile"
-        )
-    )
-    log.info(
-        f"Actual default QSurfaceFormat after QApplication init: "
-        f"Version {actual_fmt.majorVersion()}.{actual_fmt.minorVersion()}, Profile: {profile_str}"
-    )
+    # Minimal logging for environment info
+    log.info("PRIMAcquisition pressure-only app starting…")
 
     # ─── Load & Apply App Icon ─────────────────────────────────────────────
     base_dir = resource_path()
@@ -221,24 +185,14 @@ def main_app_entry():
 
     # ─── Import & Launch MainWindow ───────────────────────────────────────
     from main_window import MainWindow
-    from ui.welcome_dialog import WelcomeDialog
 
     main_win = MainWindow()
     display_version = CONFIG_APP_VERSION or "Unknown"
     main_win.setWindowTitle(f"{APP_NAME} v{display_version}")
     main_win.show()
 
-    welcome = WelcomeDialog(parent=main_win)
-    if not getattr(welcome, "_skip", False):
-        welcome.exec_()
-
     exit_code = app.exec_()
     log.info(f"Application event loop ended with exit code {exit_code}.")
-
-    try:
-        ic4.Library.shutdown()
-    except Exception:
-        pass
 
     sys.exit(exit_code)
 

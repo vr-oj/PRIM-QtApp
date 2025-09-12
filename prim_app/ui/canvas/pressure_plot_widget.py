@@ -499,3 +499,10 @@ class PressurePlotWidget(QWidget):
             QMessageBox.critical(
                 self, "Export Error", f"Could not save plot image: {e}"
             )
+
+    # Convenience: allow MainWindow to export data safely
+    def get_plot_data(self):
+        """
+        Return current plot data as a dict with keys 'time' and 'pressure'.
+        """
+        return {"time": list(self.times), "pressure": list(self.pressures)}

@@ -13,7 +13,6 @@ icon_file = os.path.join("prim_app", "ui", "icons", "PRIM.ico")
 data_files = [
     (os.path.join("prim_app", "ui", "icons", "*"), os.path.join("prim_app", "ui", "icons")),
     (os.path.join("prim_app", "ui", "style.qss"), os.path.join("prim_app", "ui")),
-    (".primenv/Lib/site-packages/imagingcontrol4/*", "imagingcontrol4"),
     (os.path.join("prim_app", "docs", "*"), os.path.join("prim_app", "docs")),
 ]
 
@@ -22,7 +21,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=data_files,
-    hiddenimports=["imagingcontrol4"],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -39,7 +38,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="PRIMAcquisition 2.0",
+    name="Bladder Pressure Tracker v1",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -63,6 +62,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="PRIMAcquisition",
+    name="Bladder Pressure Tracker",
 )
-

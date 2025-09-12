@@ -10,7 +10,7 @@ DOCUMENTS_DIR = os.path.join(os.path.expanduser("~"), "Documents")
 
 # Allow users to override the default results directory by setting the
 # environment variable "PRIM_RESULTS_DIR" before launching the application.
-DEFAULT_RESULTS_DIR = os.path.join(DOCUMENTS_DIR, "PRIMAcquisition Results")
+DEFAULT_RESULTS_DIR = os.path.join(DOCUMENTS_DIR, "Bladder Pressure Tracker Results")
 PRIM_RESULTS_DIR = os.environ.get("PRIM_RESULTS_DIR", DEFAULT_RESULTS_DIR)
 PRIM_ROOT = PRIM_RESULTS_DIR  # alias kept for backwards compatibility
 Path(PRIM_RESULTS_DIR).mkdir(parents=True, exist_ok=True)
@@ -42,15 +42,12 @@ DEFAULT_SERIAL_BAUD_RATE = 115200
 SERIAL_COMMAND_TERMINATOR = b"\n"  # Arduino uses Serial.println()
 
 # ─── Application info ───────────────────────────────────────────────────────────
-APP_NAME = "PRIMAcquisition"
-APP_VERSION = "2.0"
+APP_NAME = "Bladder Pressure Tracker"
+APP_VERSION = "1"
 ABOUT_TEXT = f"""
 <strong>{APP_NAME} v{APP_VERSION}</strong>
-<p>Passive Data Logger and Viewer for the PRIM system.</p>
-<p>This application displays a live camera feed and pressure data from the PRIM device,
-and allows recording of this data into a high‐resolution TIFF stack (with embedded metadata)
-and a synchronized CSV log.</p>
-<p>Experiment control (start/stop) can be triggered directly from this application.</p>
+<p>Live plotting and CSV logging of bladder pressure from the PRIM device.</p>
+<p>Select the Arduino port, connect, and view pressure in real time. You can export the plot data or start/stop CSV logging at any time.</p>
 """
 
 # ─── Logging ────────────────────────────────────────────────────────────────────
@@ -61,8 +58,6 @@ PLOT_MAX_POINTS = 1000  # Max points to keep in live plot
 PLOT_DEFAULT_Y_MIN = -5
 PLOT_DEFAULT_Y_MAX = 30  # Typical pressure range in mmHg
 
-# ─── Camera profiles / Application config directory ─────────────────────────────
-# User‐writable directory for storing camera profiles
+# ─── Application config directory ─────────────────────────────────────────────
 APP_CONFIG_DIR = QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)
-CAMERA_PROFILES_DIR = os.path.join(APP_CONFIG_DIR, "camera_profiles")
-QDir().mkpath(CAMERA_PROFILES_DIR)
+QDir().mkpath(APP_CONFIG_DIR)
