@@ -12,6 +12,10 @@ import utils.config as config
 from utils.config import APP_NAME, APP_VERSION as CONFIG_APP_VERSION
 from utils.path_helpers import resource_path
 
+# Force Matplotlib to use Qt backend when frozen on macOS to avoid MacOSX backend
+# being auto-selected during PyInstaller analysis.
+os.environ.setdefault("MPLBACKEND", "QtAgg")
+
 import matplotlib
 
 logging.getLogger("matplotlib").setLevel(logging.INFO)

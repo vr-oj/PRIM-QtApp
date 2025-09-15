@@ -27,6 +27,9 @@ hidden = [
     "matplotlib.backends.backend_qtagg",
     "matplotlib.backends.backend_agg",
     "PyQt5.QtPrintSupport",
+    # PySerial
+    "serial",
+    "serial.tools.list_ports",
 ]
 
 a = Analysis(
@@ -45,7 +48,7 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
-exe_name = "Bladder Pressure Tracker v1"
+exe_name = "BladderPressureTracker"
 is_macos = sys.platform == "darwin"
 is_windows = sys.platform.startswith("win")
 
@@ -72,25 +75,25 @@ exe = EXE(
 target = exe
 
 if is_macos:
-    # Create a proper .app bundle on macOS
-    app_name = f"{exe_name}.app"
-    target = BUNDLE(
+    # Produce only a self-contained .app bundle (no sibling support folder)
+    app = BUNDLE(
         exe,
-        name=app_name,
-        icon=icon_icns,  # Requires an .icns file; else None
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        name="Bladder Pressure Tracker v1.app",
+        icon=icon_icns,
         bundle_identifier="com.example.bladder-pressure-tracker",
         info_plist=None,
     )
-
-extra_targets = [target] if is_macos else []
-
-coll = COLLECT(
-    exe,  # Always include the EXE target (valid for COLLECT)
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name="Bladder Pressure Tracker",
-)
+else:
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name="BladderPressureTracker",
+    )
