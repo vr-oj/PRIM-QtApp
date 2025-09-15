@@ -167,18 +167,25 @@ class SerialThread(QThread):
                     self.msleep(100)
 
                 # ---- Idle timeout watchdog ---------------------------------
+                # If Arduino is paused or temporarily not streaming, keep the
+                # connection open and simply report an idle status. Do NOT
+                # stop the thread; this allows seamless resume without
+                # requiring a manual reconnect.
                 if (
                     self._idle_timeout_enabled
                     and self._got_first_packet
                     and self._last_data_time is not None
                     and (time.time() - self._last_data_time) > IDLE_TIMEOUT_S
                 ):
-                    msg = (
-                        f"No data from Arduino for {time.time() - self._last_data_time:.1f}s"
-                    )
-                    log.error(f"[SerialThread] {msg}")
-                    self.error_occurred.emit(msg)
-                    self._stop_requested = True
+                    dt = time.time() - self._last_data_time
+                    msg = f"No data from Arduino for {dt:.1f}s (idle)"
+                    log.warning(f"[SerialThread] {msg}")
+                    # Report as status (non-fatal) so UI stays connected
+                    self.status_changed.emit(msg)
+                    # Reset idle tracking so we don't spam this message every loop
+                    self._got_first_packet = False
+                    self._last_data_time = None
+                    # Continue running and waiting for data or reconnection
 
 
         # 3) Clean up on exit
