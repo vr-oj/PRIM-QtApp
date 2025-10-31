@@ -1092,26 +1092,27 @@ class MainWindow(QMainWindow):
         # When the worker actually finishes, clean up our Python references and
         # disconnect the data signals.
         def _cleanup_recorder():
-            if self._serial_thread is not None:
+            worker = self._recorder_worker
+            if self._serial_thread is not None and worker is not None:
                 try:
                     self._serial_thread.data_ready.disconnect(
-                        self._recorder_worker.append_pressure
+                        worker.append_pressure
                     )
                 except TypeError:
                     pass
-            if self.camera_thread is not None:
+            if self.camera_thread is not None and worker is not None:
                 try:
                     self.camera_thread.frame_ready.disconnect(
-                        self._recorder_worker.append_frame
+                        worker.append_frame
                     )
                 except TypeError:
                     pass
             # At this point, worker has finished and thread has quit.
             self._last_recording_paths["tiff"] = getattr(
-                self._recorder_worker, "_tiff_path", None
+                worker, "_tiff_path", None
             )
             self._last_recording_paths["csv"] = getattr(
-                self._recorder_worker, "_csv_path", None
+                worker, "_csv_path", None
             )
             if hasattr(self, "playback_action"):
                 self.playback_action.setEnabled(True)
