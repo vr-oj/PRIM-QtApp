@@ -1,7 +1,6 @@
 # File: prim_app/threads/sdk_camera_thread.py
 
 import logging
-import time
 import imagingcontrol4 as ic4
 import numpy as np
 
@@ -40,8 +39,6 @@ class SDKCameraThread(QThread):
 
         # Keep a reference to the sink so we can stop it later
         self._sink = None
-        self._frames_emitted = 0
-        self._last_frame_log_time = 0.0
 
     def set_device_info(self, dev_info):
         self._device_info = dev_info
@@ -51,8 +48,6 @@ class SDKCameraThread(QThread):
         self._resolution = resolution_tuple
 
     def run(self):
-        self._frames_emitted = 0
-        self._last_frame_log_time = 0.0
         try:
             # ─── Initialize IC4 (with “already called” catch) ─────────────────
             try:
@@ -106,13 +101,9 @@ class SDKCameraThread(QThread):
             try:
                 fr_node = props.find_float("AcquisitionFrameRate")
                 if fr_node:
-                    target_fps = min(
-                        max(float(DEFAULT_FPS), float(fr_node.minimum)),
-                        float(fr_node.maximum),
-                    )
-                    fr_node.value = target_fps
+                    fr_node.value = float(DEFAULT_FPS)
                     log.info(
-                        f"SDKCameraThread: Set AcquisitionFrameRate = {target_fps}"
+                        f"SDKCameraThread: Set AcquisitionFrameRate = {DEFAULT_FPS}"
                     )
             except Exception as e:
                 log.warning(
@@ -195,53 +186,40 @@ class SDKCameraThread(QThread):
             # ─── Signal “grabber_ready” so UI can enable controls ────────────────
             self.grabber_ready.emit()
 
-            # ─── Build QueueSink using the listener constructor supported by IC4 1.3 ─
-            self._sink = self._create_queue_sink()
+            # ─── Build QueueSink requesting Mono8 (fallback to native PF if needed)─
+            try:
+                self._sink = ic4.QueueSink(
+                    self, [ic4.PixelFormat.Mono8], max_output_buffers=1
+                )
+            except:
+                native_pf = self._resolution[2] if self._resolution else None
+                if native_pf and hasattr(ic4.PixelFormat, native_pf):
+                    self._sink = ic4.QueueSink(
+                        self,
+                        [getattr(ic4.PixelFormat, native_pf)],
+                        max_output_buffers=1,
+                    )
+                else:
+                    raise RuntimeError(
+                        "SDKCameraThread: Unable to create QueueSink for Mono8 or native PF."
+                    )
 
-            # ─── Start streaming and explicitly start acquisition ─────────────
+            # ─── Start streaming immediately ───────────────────────────────────────
             from imagingcontrol4 import StreamSetupOption
 
-            setup_option = getattr(
-                StreamSetupOption,
-                "DEFER_ACQUISITION_START",
-                StreamSetupOption.ACQUISITION_START,
-            )
             self.grabber.stream_setup(
                 self._sink,
-                setup_option=setup_option,
+                setup_option=StreamSetupOption.ACQUISITION_START,
             )
-            log.info(f"SDKCameraThread: stream_setup({setup_option}) succeeded.")
-
-            try:
-                self.grabber.acquisition_start()
-                log.info("SDKCameraThread: acquisition_start() succeeded.")
-            except Exception as e:
-                # Some IC4 setups start acquisition from stream_setup already.
-                log.warning(f"SDKCameraThread: acquisition_start() failed: {e}")
-
             log.info(
-                "SDKCameraThread: entering frame loop…"
+                "SDKCameraThread: stream_setup(ACQUISITION_START) succeeded. Entering frame loop…"
             )
 
-            # ─── Frame loop: poll QueueSink for completed frames ─────────────
-            last_empty_log_time = time.monotonic()
+            # ─── Frame loop: IC4 calls frames_queued() whenever a new buffer is ready ─
             while not self._stop_requested:
-                buf = self._pop_output_buffer(timeout_ms=250)
-                if buf is None:
-                    now = time.monotonic()
-                    if now - last_empty_log_time >= 5.0:
-                        log.warning(
-                            "SDKCameraThread: stream is running but no frame buffers have arrived yet."
-                        )
-                        last_empty_log_time = now
-                    continue
-                self._emit_buffer_frame(buf)
+                self.msleep(10)
 
-            # ─── Stop acquisition/streaming & close device ───────────────────
-            try:
-                self.grabber.acquisition_stop()
-            except Exception as e:
-                log.debug(f"SDKCameraThread: acquisition_stop() skipped/failed: {e}")
+            # ─── Stop streaming & close device ───────────────────────────────────
             self.grabber.stream_stop()
             self.grabber.device_close()
             log.info("SDKCameraThread: Streaming stopped, device closed.")
@@ -257,78 +235,13 @@ class SDKCameraThread(QThread):
             # All cleanup is handled by MainWindow once threads have stopped.
             pass
 
-    def _create_queue_sink(self):
-        """Create a QueueSink using the listener constructor supported by IC4 1.3."""
-        native_pf = self._resolution[2] if self._resolution else "Mono8"
-        pixel_format = ic4.PixelFormat.Mono8
-        if native_pf and hasattr(ic4.PixelFormat, native_pf):
-            pixel_format = getattr(ic4.PixelFormat, native_pf)
-
-        try:
-            sink = ic4.QueueSink(self, [pixel_format], max_output_buffers=5)
-            log.info(
-                "SDKCameraThread: QueueSink created for %s with 5 output buffers",
-                native_pf,
-            )
-            return sink
-        except Exception as e:
-            log.warning(
-                "SDKCameraThread: QueueSink setup for %s failed: %s; falling back to Mono8",
-                native_pf,
-                e,
-            )
-            try:
-                sink = ic4.QueueSink(self, [ic4.PixelFormat.Mono8], max_output_buffers=5)
-                log.info("SDKCameraThread: QueueSink created for Mono8 fallback")
-                return sink
-            except Exception as fallback_error:
-                raise RuntimeError(
-                    "SDKCameraThread: Unable to create QueueSink for preview."
-                ) from fallback_error
-
-    def _pop_output_buffer(self, timeout_ms=250):
-        """Pop a completed frame buffer from the IC4 queue without busy-waiting."""
-        try:
-            if hasattr(self._sink, "try_pop_output_buffer"):
-                buf = self._sink.try_pop_output_buffer()
-                if buf is None:
-                    self.msleep(10)
-                return buf
-            if hasattr(self._sink, "pop_output_buffer"):
-                try:
-                    return self._sink.pop_output_buffer(timeout_ms)
-                except TypeError:
-                    return self._sink.pop_output_buffer()
-        except Exception as e:
-            msg = str(e).lower()
-            if "timeout" not in msg and "timed out" not in msg:
-                log.error(f"SDKCameraThread: Error popping camera buffer: {e}")
-                code_enum = getattr(e, "code", None)
-                code_str = str(code_enum) if code_enum else ""
-                self.error.emit(str(e), code_str)
-                self._stop_requested = True
-        return None
-
     def frames_queued(self, sink):
         """
         This callback is invoked by IC4 each time a new buffer is available.
         Pop the buffer, convert to QImage, emit it, and allow IC4 to recycle it.
         """
-        buf = None
         try:
             buf = sink.pop_output_buffer()
-            self._emit_buffer_frame(buf)
-        except Exception as e:
-            log.error(
-                f"SDKCameraThread.frames_queued: Error popping/converting buffer: {e}"
-            )
-            code_enum = getattr(e, "code", None)
-            code_str = str(code_enum) if code_enum else ""
-            self.error.emit(str(e), code_str)
-
-    def _emit_buffer_frame(self, buf):
-        """Convert an IC4 image buffer to a QImage and emit it to the UI."""
-        try:
             arr = buf.numpy_wrap()  # arr: shape=(H, W) dtype=uint8 or uint16
 
             # Downconvert 16‐bit to 8‐bit if necessary
@@ -341,38 +254,19 @@ class SDKCameraThread(QThread):
 
             h, w = gray8.shape[:2]
 
-            # Build a self-contained image before crossing thread boundaries.
-            qimg = QImage(
-                gray8.data, w, h, gray8.strides[0], QImage.Format_Grayscale8
-            ).copy()
+            # Build a QImage from single‐channel grayscale
+            qimg = QImage(gray8.data, w, h, gray8.strides[0], QImage.Format_Grayscale8)
 
             # Emit to the UI
             self.frame_ready.emit(qimg, buf)
-            self._frames_emitted += 1
-            now = time.monotonic()
-            if now - self._last_frame_log_time >= 5.0:
-                log.info(
-                    "SDKCameraThread: emitted %d frame(s); latest frame %dx%d dtype=%s",
-                    self._frames_emitted,
-                    w,
-                    h,
-                    gray8.dtype,
-                )
-                self._last_frame_log_time = now
 
         except Exception as e:
             log.error(
-                f"SDKCameraThread: Error converting camera buffer: {e}"
+                f"SDKCameraThread.frames_queued: Error popping/converting buffer: {e}"
             )
             code_enum = getattr(e, "code", None)
             code_str = str(code_enum) if code_enum else ""
             self.error.emit(str(e), code_str)
-        finally:
-            try:
-                if buf is not None and hasattr(buf, "release"):
-                    buf.release()
-            except Exception:
-                pass
 
     # ─── Required listener methods for QueueSink ─────────────────────────────
     def sink_connected(self, sink, pixel_format, min_buffers_required) -> bool:

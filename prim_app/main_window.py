@@ -465,7 +465,6 @@ class MainWindow(QMainWindow):
 
             # 2) Each time a new frame is ready, update the QtCameraWidget
             self.camera_thread.frame_ready.connect(self.camera_widget._on_frame_ready)
-            self.camera_thread.frame_ready.connect(self._update_camera_info)
 
             # 3) On any camera error, pop up a dialog and tear everything down
             self.camera_thread.error.connect(self._on_camera_error)
