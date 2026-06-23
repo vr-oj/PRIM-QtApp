@@ -16,6 +16,12 @@ from PyQt5.QtWidgets import (
 
 from imagingcontrol4 import IC4Exception
 
+from utils.recording_settings import (
+    CAPTURE_SETTING_OPTIONS,
+    DEFAULT_CAPTURE_SETTING_CODE,
+    capture_setting_label,
+)
+
 log = logging.getLogger(__name__)
 
 
@@ -105,6 +111,16 @@ class CameraControlPanel(QWidget):
         self.framerate_spin.valueChanged.connect(self._on_framerate_changed)
         self.layout.addRow(self.framerate_label, self.framerate_spin)
 
+        self.capture_setting_label = QLabel("Capture:")
+        self.capture_setting_combo = QComboBox()
+        for code, label in CAPTURE_SETTING_OPTIONS:
+            self.capture_setting_combo.addItem(label, code)
+        default_label = capture_setting_label(DEFAULT_CAPTURE_SETTING_CODE)
+        default_index = self.capture_setting_combo.findText(default_label)
+        if default_index >= 0:
+            self.capture_setting_combo.setCurrentIndex(default_index)
+        self.layout.addRow(self.capture_setting_label, self.capture_setting_combo)
+
         self.pf_label = QLabel("Pixel Format:")
         self.pf_combo = QComboBox()
         self.pf_combo.setEnabled(False)
@@ -122,7 +138,33 @@ class CameraControlPanel(QWidget):
 
     def set_recording_state(self, recording):
         self.is_recording = recording
+        self.capture_setting_combo.setEnabled(not recording)
         log.debug(f"CameraControlPanel: is_recording set to {self.is_recording}")
+
+    def disable_camera_controls(self):
+        """Disable camera-property controls while leaving capture selection available."""
+        for widget in (
+            self.exposure_spin,
+            self.exposure_slider,
+            self.ae_checkbox,
+            self.gain_spin,
+            self.gain_slider,
+            self.ag_checkbox,
+            self.framerate_spin,
+            self.pf_combo,
+        ):
+            widget.setEnabled(False)
+
+    def get_capture_setting(self):
+        """Return the selected Arduino capture setting as ``(code, label)``."""
+        code = self.capture_setting_combo.currentData()
+        try:
+            code = int(code)
+            label = capture_setting_label(code)
+        except (TypeError, ValueError):
+            code = DEFAULT_CAPTURE_SETTING_CODE
+            label = capture_setting_label(code)
+        return code, label
 
     def _setup_float_control(self, prop_id, spinbox, decimals=2, slider=None, to_ui=lambda x: x):
         log.info(f"CameraControlPanel: Looking for property {prop_id}")
@@ -349,4 +391,3 @@ class CameraControlPanel(QWidget):
                 self.gain_slider.blockSignals(False)
             except Exception as e:
                 log.debug(f"CameraControlPanel: refresh auto gain failed: {e}")
-

@@ -70,6 +70,11 @@ from utils.config import (
     PLOT_DEFAULT_Y_MIN,
     PLOT_DEFAULT_Y_MAX,
 )
+from utils.recording_settings import (
+    DEFAULT_CAPTURE_SETTING_CODE,
+    build_recording_settings,
+    format_prim_command,
+)
 from utils.path_helpers import get_next_fill_folder, resource_path
 from ui.canvas.qtcamera_widget import QtCameraWidget
 from ui.control_panels.camera_control_panel import CameraControlPanel
@@ -98,6 +103,7 @@ class MainWindow(QMainWindow):
         self._current_fill_folder = None
         self._open_folder_prompt = load_app_setting(SETTING_OPEN_FOLDER_PROMPT, True)
         self._last_recording_paths = {"tiff": None, "csv": None}
+        self._active_recording_settings = None
 
         # Camera‐related
         self.device_combo = None
@@ -259,7 +265,7 @@ class MainWindow(QMainWindow):
 
         # Instantiate CameraControlPanel here (disabled by default)
         self.camera_control_panel = CameraControlPanel(parent=self)
-        self.camera_control_panel.setEnabled(False)
+        self.camera_control_panel.disable_camera_controls()
         controls_layout.addWidget(self.camera_control_panel)
 
         self.camera_tabs.addTab(controls_tab, "Controls")
@@ -471,7 +477,7 @@ class MainWindow(QMainWindow):
             # Actually start the thread
             self.camera_thread.start()
             self.btn_start_camera.setText("Stop Camera")
-            self.camera_control_panel.setEnabled(False)
+            self.camera_control_panel.disable_camera_controls()
 
         else:
             # ─── Stop camera ──────────────────────────────────────────────────
@@ -480,7 +486,7 @@ class MainWindow(QMainWindow):
 
             # Reset UI
             self.btn_start_camera.setText("Start Camera")
-            self.camera_control_panel.setEnabled(False)
+            self.camera_control_panel.disable_camera_controls()
             try:
                 self.camera_control_panel.stop_auto_update()
                 self.camera_control_panel.grabber = None
@@ -550,7 +556,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-        self.camera_control_panel.setEnabled(False)
+        self.camera_control_panel.disable_camera_controls()
         self.lbl_cam_connection.setText("Error")
         self.lbl_cam_frame.setText("0")
         self.lbl_cam_resolution.setText("N/A")
@@ -725,7 +731,7 @@ class MainWindow(QMainWindow):
 
             if self._serial_thread and self._serial_thread.isRunning():
                 # Send the zero command when the PRIM device is connected
-                self._serial_thread.send_command("Z")
+                self._serial_thread.send_command(self._build_prim_command("Z"))
                 msg = "Zero command sent to PRIM and plot cleared."
             else:
                 msg = "PRIM device not connected; plot cleared."
@@ -768,7 +774,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "stop_recording_action"):
             self.stop_recording_action.setEnabled(False)
         if hasattr(self, "camera_control_panel"):
-            self.camera_control_panel.setEnabled(False)
+            self.camera_control_panel.disable_camera_controls()
         if hasattr(self, "plot_control_panel"):
             self.plot_control_panel.setEnabled(True)
 
@@ -1007,6 +1013,32 @@ class MainWindow(QMainWindow):
     # Recording Management
     # ──────────────────────────────────────────────────────────────
 
+    def _current_recording_settings(self):
+        """Return the recording settings currently selected in the UI."""
+        fps = DEFAULT_FPS
+        if self.camera_control_panel is not None:
+            selected_fps = self.camera_control_panel.framerate_spin.value()
+            if selected_fps > 0:
+                fps = selected_fps
+
+        capture_code = DEFAULT_CAPTURE_SETTING_CODE
+        if (
+            self.camera_control_panel is not None
+            and hasattr(self.camera_control_panel, "get_capture_setting")
+        ):
+            capture_code, _ = self.camera_control_panel.get_capture_setting()
+
+        return build_recording_settings(fps, capture_code)
+
+    def _build_prim_command(self, command_char, settings=None):
+        """Build the Arduino command packet required by the PRIM firmware."""
+        settings = settings or self._current_recording_settings()
+        return format_prim_command(
+            command_char,
+            settings.frame_interval_ms,
+            settings.capture_setting_code,
+        )
+
     @pyqtSlot()
     def _on_start_recording(self):
         """
@@ -1014,9 +1046,21 @@ class MainWindow(QMainWindow):
         PRIM_ROOT/YYYY-MM-DD/FillN folder and starts a RecordingManager
         writing there.
         """
+        settings = self._current_recording_settings()
+        if settings.record_video and (
+            self.camera_thread is None or not self.camera_thread.isRunning()
+        ):
+            QMessageBox.warning(
+                self,
+                "Recording",
+                "Start the camera before recording video, or select Capture: None for CSV-only recording.",
+            )
+            return
+
         outdir = get_next_fill_folder()
         self._current_fill_folder = outdir
         self._last_recording_paths = {"tiff": None, "csv": None}
+        self._active_recording_settings = settings
         if hasattr(self, "playback_action"):
             self.playback_action.setEnabled(False)
 
@@ -1024,7 +1068,14 @@ class MainWindow(QMainWindow):
 
         # Create the recording thread + worker exactly as before:
         self._recorder_thread = QThread(self)
-        self._recorder_worker = RecordingManager(output_dir=outdir)
+        self._recorder_worker = RecordingManager(
+            output_dir=outdir,
+            recording_fps=settings.recording_fps,
+            frame_interval_ms=settings.frame_interval_ms,
+            capture_setting_code=settings.capture_setting_code,
+            capture_setting_label=settings.capture_setting_label,
+            record_video=settings.record_video,
+        )
         self._recorder_worker.moveToThread(self._recorder_thread)
 
         # 7) Wire up thread start → worker.start_recording()
@@ -1041,7 +1092,8 @@ class MainWindow(QMainWindow):
 
         # 8) Hook camera + serial into the worker:
         self._serial_thread.data_ready.connect(self._recorder_worker.append_pressure)
-        self.camera_thread.frame_ready.connect(self._recorder_worker.append_frame)
+        if settings.record_video:
+            self.camera_thread.frame_ready.connect(self._recorder_worker.append_frame)
 
         # 9) Kick off the recording thread:
         self._recorder_thread.start()
@@ -1063,7 +1115,11 @@ class MainWindow(QMainWindow):
         """Send the start command to the Arduino when recording setup is done."""
         try:
             if self._serial_thread:
-                self._serial_thread.send_command("G")
+                if self._recorder_worker and not self._recorder_worker.is_recording:
+                    return
+                self._serial_thread.send_command(
+                    self._build_prim_command("G", self._active_recording_settings)
+                )
                 if hasattr(self._serial_thread, "set_idle_timeout_enabled"):
                     self._serial_thread.set_idle_timeout_enabled(True)
         except Exception:
@@ -1083,7 +1139,9 @@ class MainWindow(QMainWindow):
         # Send stop command to the Arduino before disconnecting
         try:
             if self._serial_thread:
-                self._serial_thread.send_command("S")
+                self._serial_thread.send_command(
+                    self._build_prim_command("S", self._active_recording_settings)
+                )
                 if hasattr(self._serial_thread, "set_idle_timeout_enabled"):
                     self._serial_thread.set_idle_timeout_enabled(False)
         except Exception:
@@ -1119,6 +1177,7 @@ class MainWindow(QMainWindow):
             # We can delete both and clear our Python handles:
             self._recorder_thread = None
             self._recorder_worker = None
+            self._active_recording_settings = None
             # If you need to update button states right away:
             self._refresh_recording_button_states()
             self._maybe_prompt_open_folder()

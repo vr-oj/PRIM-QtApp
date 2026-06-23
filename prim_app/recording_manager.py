@@ -13,6 +13,11 @@ from PyQt5.QtGui import QImage
 import logging
 
 from utils.config import MIN_FREE_SPACE_GB
+from utils.recording_csv import write_recording_csv_metadata_and_header
+from utils.recording_settings import (
+    DEFAULT_CAPTURE_SETTING_CODE,
+    capture_setting_label as get_capture_setting_label,
+)
 
 log = logging.getLogger(__name__)
 
@@ -26,9 +31,27 @@ class RecordingManager(QObject):
     finished = pyqtSignal()
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, output_dir, parent=None):
+    def __init__(
+        self,
+        output_dir,
+        recording_fps=None,
+        frame_interval_ms=None,
+        capture_setting_code=DEFAULT_CAPTURE_SETTING_CODE,
+        capture_setting_label=None,
+        record_video=True,
+        parent=None,
+    ):
         super().__init__(parent)
         self.output_dir = output_dir
+        self.recording_fps = recording_fps
+        self.frame_interval_ms = frame_interval_ms
+        self.capture_setting_code = int(capture_setting_code)
+        self.capture_setting_label = (
+            capture_setting_label
+            if capture_setting_label is not None
+            else get_capture_setting_label(self.capture_setting_code)
+        )
+        self.record_video = bool(record_video)
 
         # Paths (populated in ``start_recording``)
         self._csv_path = None
@@ -75,7 +98,11 @@ class RecordingManager(QObject):
             return
         
         self._csv_path = os.path.join(self.output_dir, f"{base_name}_pressure.csv")
-        self._tiff_path = os.path.join(self.output_dir, f"{base_name}_video.tif")
+        self._tiff_path = (
+            os.path.join(self.output_dir, f"{base_name}_video.tif")
+            if self.record_video
+            else None
+        )
         self._first_frame_shape = None
 
         self.is_recording = True
@@ -88,8 +115,9 @@ class RecordingManager(QObject):
         self._samples_written = 0
         self._pending_samples.clear()
 
+        tiff_msg = self._tiff_path if self.record_video else "disabled"
         log.info(
-            f"Ready to record →\n  CSV will be: {self._csv_path}\n  TIFF will be: {self._tiff_path}"
+            f"Ready to record →\n  CSV will be: {self._csv_path}\n  TIFF will be: {tiff_msg}"
         )
         log.info("Waiting for the first Arduino tick to open files...")
         # Notify the GUI that the worker thread finished setup and the files
@@ -108,23 +136,24 @@ class RecordingManager(QObject):
             try:
                 self.csv_file = open(self._csv_path, "w", newline="")
                 self.csv_writer = csv.writer(self.csv_file)
-                self.csv_writer.writerow(["frameIdx", "deviceTime", "pressure"])
+                self._write_csv_metadata_and_header()
             except Exception as e:
                 log.error(f"Failed to open CSV: {e}")
                 self.error_occurred.emit(f"Failed to open CSV file: {e}")
                 self.is_recording = False
                 return
-            try:
-                self.tif_writer = tifffile.TiffWriter(self._tiff_path, bigtiff=True)
-            except Exception as e:
-                log.error(f"Failed to open TIFF: {e}")
-                self.error_occurred.emit(f"Failed to open TIFF file: {e}")
-                if self.csv_file:
-                    self.csv_file.close()
-                    self.csv_file = None
-                    self.csv_writer = None
-                self.is_recording = False
-                return
+            if self.record_video:
+                try:
+                    self.tif_writer = tifffile.TiffWriter(self._tiff_path, bigtiff=True)
+                except Exception as e:
+                    log.error(f"Failed to open TIFF: {e}")
+                    self.error_occurred.emit(f"Failed to open TIFF file: {e}")
+                    if self.csv_file:
+                        self.csv_file.close()
+                        self.csv_file = None
+                        self.csv_writer = None
+                    self.is_recording = False
+                    return
             log.info(
                 f"Recording truly started →\n  CSV: {self._csv_path}\n  TIFF: {self._tiff_path}"
             )
@@ -134,8 +163,9 @@ class RecordingManager(QObject):
                 self.csv_writer.writerow([frameIdx, t_device, pressure])
                 self._last_device_time = t_device
                 self._samples_written += 1
-                # Include pressure so the frame metadata contains the full row
-                self._pending_samples.append((frameIdx, t_device, pressure))
+                if self.record_video:
+                    # Include pressure so the frame metadata contains the full row
+                    self._pending_samples.append((frameIdx, t_device, pressure))
 
             except Exception as e:
                 log.error(
@@ -147,6 +177,8 @@ class RecordingManager(QObject):
     @pyqtSlot(QImage, object)
     def append_frame(self, qimage, raw):
         """Handle a camera frame from the camera thread."""
+        if not self.record_video:
+            return
         if not self.is_recording or not self._got_first_sample:
             return
 
@@ -220,6 +252,10 @@ class RecordingManager(QObject):
 
     def _check_stop_condition(self):
         """Close files when a stop was requested and counts match."""
+        if self._stop_requested and not self.record_video:
+            self.stop_recording()
+            return
+
         if (
             self._stop_requested
             and self._frames_written == self._samples_written
@@ -227,6 +263,16 @@ class RecordingManager(QObject):
         ):
 
             self.stop_recording()
+
+    def _write_csv_metadata_and_header(self):
+        """Write recording metadata before the normal pressure table header."""
+        write_recording_csv_metadata_and_header(
+            self.csv_writer,
+            self.recording_fps,
+            self.frame_interval_ms,
+            self.capture_setting_label,
+            self.capture_setting_code,
+        )
 
     def _qimage_to_numpy(self, qimage):
         """Convert a ``QImage`` to a ``numpy.ndarray``.
