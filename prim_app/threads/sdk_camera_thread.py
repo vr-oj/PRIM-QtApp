@@ -195,23 +195,8 @@ class SDKCameraThread(QThread):
             # ─── Signal “grabber_ready” so UI can enable controls ────────────────
             self.grabber_ready.emit()
 
-            # ─── Build QueueSink requesting Mono8 (fallback to native PF if needed)─
-            try:
-                self._sink = ic4.QueueSink(
-                    self, [ic4.PixelFormat.Mono8], max_output_buffers=1
-                )
-            except:
-                native_pf = self._resolution[2] if self._resolution else None
-                if native_pf and hasattr(ic4.PixelFormat, native_pf):
-                    self._sink = ic4.QueueSink(
-                        self,
-                        [getattr(ic4.PixelFormat, native_pf)],
-                        max_output_buffers=1,
-                    )
-                else:
-                    raise RuntimeError(
-                        "SDKCameraThread: Unable to create QueueSink for Mono8 or native PF."
-                    )
+            # ─── Build QueueSink and pre-queue output buffers ────────────────
+            self._sink = self._create_queue_sink()
 
             # ─── Start streaming immediately ───────────────────────────────────────
             from imagingcontrol4 import StreamSetupOption
@@ -225,9 +210,16 @@ class SDKCameraThread(QThread):
             )
 
             # ─── Frame loop: poll QueueSink for completed frames ─────────────
+            last_empty_log_time = time.monotonic()
             while not self._stop_requested:
                 buf = self._pop_output_buffer(timeout_ms=250)
                 if buf is None:
+                    now = time.monotonic()
+                    if now - last_empty_log_time >= 5.0:
+                        log.warning(
+                            "SDKCameraThread: stream is running but no frame buffers have arrived yet."
+                        )
+                        last_empty_log_time = now
                     continue
                 self._emit_buffer_frame(buf)
 
@@ -246,6 +238,32 @@ class SDKCameraThread(QThread):
         finally:
             # All cleanup is handled by MainWindow once threads have stopped.
             pass
+
+    def _create_queue_sink(self):
+        """Create a QueueSink using the explicit buffer allocation API."""
+        native_pf = self._resolution[2] if self._resolution else "Mono8"
+        pixel_format = ic4.PixelFormat.Mono8
+        if native_pf and hasattr(ic4.PixelFormat, native_pf):
+            pixel_format = getattr(ic4.PixelFormat, native_pf)
+
+        if self._resolution is not None:
+            width, height, _ = self._resolution
+        else:
+            width_node = self.grabber.device_property_map.find_integer("Width")
+            height_node = self.grabber.device_property_map.find_integer("Height")
+            width = int(width_node.value)
+            height = int(height_node.value)
+
+        sink = ic4.QueueSink()
+        image_type = ic4.ImageType(int(width), int(height), pixel_format)
+        sink.alloc_and_queue_buffers(5, image_type)
+        log.info(
+            "SDKCameraThread: QueueSink allocated 5 buffers for %dx%d %s",
+            int(width),
+            int(height),
+            native_pf,
+        )
+        return sink
 
     def _pop_output_buffer(self, timeout_ms=250):
         """Pop a completed frame buffer from the IC4 queue without busy-waiting."""
