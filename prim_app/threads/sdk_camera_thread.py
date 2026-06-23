@@ -198,15 +198,29 @@ class SDKCameraThread(QThread):
             # ─── Build QueueSink using the listener constructor supported by IC4 1.3 ─
             self._sink = self._create_queue_sink()
 
-            # ─── Start streaming immediately ───────────────────────────────────────
+            # ─── Start streaming and explicitly start acquisition ─────────────
             from imagingcontrol4 import StreamSetupOption
 
+            setup_option = getattr(
+                StreamSetupOption,
+                "DEFER_ACQUISITION_START",
+                StreamSetupOption.ACQUISITION_START,
+            )
             self.grabber.stream_setup(
                 self._sink,
-                setup_option=StreamSetupOption.ACQUISITION_START,
+                setup_option=setup_option,
             )
+            log.info(f"SDKCameraThread: stream_setup({setup_option}) succeeded.")
+
+            try:
+                self.grabber.acquisition_start()
+                log.info("SDKCameraThread: acquisition_start() succeeded.")
+            except Exception as e:
+                # Some IC4 setups start acquisition from stream_setup already.
+                log.warning(f"SDKCameraThread: acquisition_start() failed: {e}")
+
             log.info(
-                "SDKCameraThread: stream_setup(ACQUISITION_START) succeeded. Entering frame loop…"
+                "SDKCameraThread: entering frame loop…"
             )
 
             # ─── Frame loop: poll QueueSink for completed frames ─────────────
@@ -223,7 +237,11 @@ class SDKCameraThread(QThread):
                     continue
                 self._emit_buffer_frame(buf)
 
-            # ─── Stop streaming & close device ───────────────────────────────────
+            # ─── Stop acquisition/streaming & close device ───────────────────
+            try:
+                self.grabber.acquisition_stop()
+            except Exception as e:
+                log.debug(f"SDKCameraThread: acquisition_stop() skipped/failed: {e}")
             self.grabber.stream_stop()
             self.grabber.device_close()
             log.info("SDKCameraThread: Streaming stopped, device closed.")
