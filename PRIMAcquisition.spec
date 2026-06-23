@@ -39,7 +39,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="PRIMAcquisition 2.0.1",
+    name="PRIMAcquisition 3.0.0",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -65,4 +65,3 @@ coll = COLLECT(
     upx_exclude=[],
     name="PRIMAcquisition",
 )
-
