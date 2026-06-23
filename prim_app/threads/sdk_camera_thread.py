@@ -195,7 +195,7 @@ class SDKCameraThread(QThread):
             # ─── Signal “grabber_ready” so UI can enable controls ────────────────
             self.grabber_ready.emit()
 
-            # ─── Build QueueSink and pre-queue output buffers ────────────────
+            # ─── Build QueueSink using the listener constructor supported by IC4 1.3 ─
             self._sink = self._create_queue_sink()
 
             # ─── Start streaming immediately ───────────────────────────────────────
@@ -240,30 +240,33 @@ class SDKCameraThread(QThread):
             pass
 
     def _create_queue_sink(self):
-        """Create a QueueSink using the explicit buffer allocation API."""
+        """Create a QueueSink using the listener constructor supported by IC4 1.3."""
         native_pf = self._resolution[2] if self._resolution else "Mono8"
         pixel_format = ic4.PixelFormat.Mono8
         if native_pf and hasattr(ic4.PixelFormat, native_pf):
             pixel_format = getattr(ic4.PixelFormat, native_pf)
 
-        if self._resolution is not None:
-            width, height, _ = self._resolution
-        else:
-            width_node = self.grabber.device_property_map.find_integer("Width")
-            height_node = self.grabber.device_property_map.find_integer("Height")
-            width = int(width_node.value)
-            height = int(height_node.value)
-
-        sink = ic4.QueueSink()
-        image_type = ic4.ImageType(int(width), int(height), pixel_format)
-        sink.alloc_and_queue_buffers(5, image_type)
-        log.info(
-            "SDKCameraThread: QueueSink allocated 5 buffers for %dx%d %s",
-            int(width),
-            int(height),
-            native_pf,
-        )
-        return sink
+        try:
+            sink = ic4.QueueSink(self, [pixel_format], max_output_buffers=5)
+            log.info(
+                "SDKCameraThread: QueueSink created for %s with 5 output buffers",
+                native_pf,
+            )
+            return sink
+        except Exception as e:
+            log.warning(
+                "SDKCameraThread: QueueSink setup for %s failed: %s; falling back to Mono8",
+                native_pf,
+                e,
+            )
+            try:
+                sink = ic4.QueueSink(self, [ic4.PixelFormat.Mono8], max_output_buffers=5)
+                log.info("SDKCameraThread: QueueSink created for Mono8 fallback")
+                return sink
+            except Exception as fallback_error:
+                raise RuntimeError(
+                    "SDKCameraThread: Unable to create QueueSink for preview."
+                ) from fallback_error
 
     def _pop_output_buffer(self, timeout_ms=250):
         """Pop a completed frame buffer from the IC4 queue without busy-waiting."""
