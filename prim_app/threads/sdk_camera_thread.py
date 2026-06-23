@@ -1,6 +1,7 @@
 # File: prim_app/threads/sdk_camera_thread.py
 
 import logging
+import time
 import imagingcontrol4 as ic4
 import numpy as np
 
@@ -39,6 +40,8 @@ class SDKCameraThread(QThread):
 
         # Keep a reference to the sink so we can stop it later
         self._sink = None
+        self._frames_emitted = 0
+        self._last_frame_log_time = 0.0
 
     def set_device_info(self, dev_info):
         self._device_info = dev_info
@@ -48,6 +51,8 @@ class SDKCameraThread(QThread):
         self._resolution = resolution_tuple
 
     def run(self):
+        self._frames_emitted = 0
+        self._last_frame_log_time = 0.0
         try:
             # ─── Initialize IC4 (with “already called” catch) ─────────────────
             try:
@@ -101,9 +106,13 @@ class SDKCameraThread(QThread):
             try:
                 fr_node = props.find_float("AcquisitionFrameRate")
                 if fr_node:
-                    fr_node.value = float(DEFAULT_FPS)
+                    target_fps = min(
+                        max(float(DEFAULT_FPS), float(fr_node.minimum)),
+                        float(fr_node.maximum),
+                    )
+                    fr_node.value = target_fps
                     log.info(
-                        f"SDKCameraThread: Set AcquisitionFrameRate = {DEFAULT_FPS}"
+                        f"SDKCameraThread: Set AcquisitionFrameRate = {target_fps}"
                     )
             except Exception as e:
                 log.warning(
@@ -254,11 +263,24 @@ class SDKCameraThread(QThread):
 
             h, w = gray8.shape[:2]
 
-            # Build a QImage from single‐channel grayscale
-            qimg = QImage(gray8.data, w, h, gray8.strides[0], QImage.Format_Grayscale8)
+            # Build a self-contained image before crossing thread boundaries.
+            qimg = QImage(
+                gray8.data, w, h, gray8.strides[0], QImage.Format_Grayscale8
+            ).copy()
 
             # Emit to the UI
             self.frame_ready.emit(qimg, buf)
+            self._frames_emitted += 1
+            now = time.monotonic()
+            if now - self._last_frame_log_time >= 5.0:
+                log.info(
+                    "SDKCameraThread: emitted %d frame(s); latest frame %dx%d dtype=%s",
+                    self._frames_emitted,
+                    w,
+                    h,
+                    gray8.dtype,
+                )
+                self._last_frame_log_time = now
 
         except Exception as e:
             log.error(
