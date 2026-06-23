@@ -224,9 +224,12 @@ class SDKCameraThread(QThread):
                 "SDKCameraThread: stream_setup(ACQUISITION_START) succeeded. Entering frame loop…"
             )
 
-            # ─── Frame loop: IC4 calls frames_queued() whenever a new buffer is ready ─
+            # ─── Frame loop: poll QueueSink for completed frames ─────────────
             while not self._stop_requested:
-                self.msleep(10)
+                buf = self._pop_output_buffer(timeout_ms=250)
+                if buf is None:
+                    continue
+                self._emit_buffer_frame(buf)
 
             # ─── Stop streaming & close device ───────────────────────────────────
             self.grabber.stream_stop()
@@ -244,13 +247,49 @@ class SDKCameraThread(QThread):
             # All cleanup is handled by MainWindow once threads have stopped.
             pass
 
+    def _pop_output_buffer(self, timeout_ms=250):
+        """Pop a completed frame buffer from the IC4 queue without busy-waiting."""
+        try:
+            if hasattr(self._sink, "try_pop_output_buffer"):
+                buf = self._sink.try_pop_output_buffer()
+                if buf is None:
+                    self.msleep(10)
+                return buf
+            if hasattr(self._sink, "pop_output_buffer"):
+                try:
+                    return self._sink.pop_output_buffer(timeout_ms)
+                except TypeError:
+                    return self._sink.pop_output_buffer()
+        except Exception as e:
+            msg = str(e).lower()
+            if "timeout" not in msg and "timed out" not in msg:
+                log.error(f"SDKCameraThread: Error popping camera buffer: {e}")
+                code_enum = getattr(e, "code", None)
+                code_str = str(code_enum) if code_enum else ""
+                self.error.emit(str(e), code_str)
+                self._stop_requested = True
+        return None
+
     def frames_queued(self, sink):
         """
         This callback is invoked by IC4 each time a new buffer is available.
         Pop the buffer, convert to QImage, emit it, and allow IC4 to recycle it.
         """
+        buf = None
         try:
             buf = sink.pop_output_buffer()
+            self._emit_buffer_frame(buf)
+        except Exception as e:
+            log.error(
+                f"SDKCameraThread.frames_queued: Error popping/converting buffer: {e}"
+            )
+            code_enum = getattr(e, "code", None)
+            code_str = str(code_enum) if code_enum else ""
+            self.error.emit(str(e), code_str)
+
+    def _emit_buffer_frame(self, buf):
+        """Convert an IC4 image buffer to a QImage and emit it to the UI."""
+        try:
             arr = buf.numpy_wrap()  # arr: shape=(H, W) dtype=uint8 or uint16
 
             # Downconvert 16‐bit to 8‐bit if necessary
@@ -284,11 +323,17 @@ class SDKCameraThread(QThread):
 
         except Exception as e:
             log.error(
-                f"SDKCameraThread.frames_queued: Error popping/converting buffer: {e}"
+                f"SDKCameraThread: Error converting camera buffer: {e}"
             )
             code_enum = getattr(e, "code", None)
             code_str = str(code_enum) if code_enum else ""
             self.error.emit(str(e), code_str)
+        finally:
+            try:
+                if buf is not None and hasattr(buf, "release"):
+                    buf.release()
+            except Exception:
+                pass
 
     # ─── Required listener methods for QueueSink ─────────────────────────────
     def sink_connected(self, sink, pixel_format, min_buffers_required) -> bool:
