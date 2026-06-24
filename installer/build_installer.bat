@@ -23,13 +23,22 @@ if errorlevel 1 exit /b %errorlevel%
 python -m PyInstaller PRIMAcquisition.spec --clean --noconfirm
 if errorlevel 1 exit /b %errorlevel%
 
-set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+set "ISCC="
+
+for %%I in (ISCC.exe) do if not "%%~$PATH:I"=="" set "ISCC=%%~$PATH:I"
+
+if not exist "%ISCC%" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+if not exist "%ISCC%" set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+if not exist "%ISCC%" set "ISCC=%USERPROFILE%\AppData\Local\Programs\Inno Setup 6\ISCC.exe"
 
 if not exist "%ISCC%" (
     echo Inno Setup Compiler not found.
     echo Install it with:
     echo winget install -e --id JRSoftware.InnoSetup
+    echo.
+    echo If winget says it is already installed, locate ISCC.exe with:
+    echo dir /s /b "%LOCALAPPDATA%\Programs\ISCC.exe"
     exit /b 1
 )
 
