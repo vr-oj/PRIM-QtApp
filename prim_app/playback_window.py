@@ -1,6 +1,5 @@
 import sys
 import os
-import csv
 import numpy as np
 from PyQt5.QtCore import (
     Qt,
@@ -41,6 +40,8 @@ from PyQt5.QtWidgets import (
 )
 from tifffile import TiffFile, imwrite
 from PIL import Image
+
+from utils.recording_csv import load_pressure_values
 
 
 class OverlayItem(QGraphicsItem):
@@ -109,9 +110,7 @@ class PlaybackLoader(QObject):
     @pyqtSlot()
     def run(self):
         try:
-            with open(self.csv_path, "r", newline="") as f:
-                reader = csv.DictReader(f)
-                pressures = [float(row.get("pressure", 0)) for row in reader]
+            pressures = load_pressure_values(self.csv_path)
         except Exception as e:
             self.error.emit(str(e))
             pressures = []

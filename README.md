@@ -83,7 +83,7 @@ Recording starts when the first Arduino tick is received. Each pressure value is
 
 1. **Download latest release**
 
-   https://github.com/vr-oj/PRIMAcquisition/releases/download/v2.0/PRIMAcquisition.2.0.zip
+   https://github.com/vr-oj/PRIMAcquisition/releases/download/v3.0/PRIMAcquisition.3.0.zip
 
 3. **Extract files**
 
@@ -192,4 +192,3 @@ Recording starts when the first Arduino tick is received. Each pressure value is
 
 Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
 [https://creativecommons.org/licenses/by-nc-sa/4.0/](https://creativecommons.org/licenses/by-nc-sa/4.0/)
-

@@ -7,22 +7,25 @@ consistent, polished look across all platforms.
 
 import os
 
+from PyInstaller.utils.hooks import collect_all
+
 source_script = os.path.join("prim_app", "prim_app.py")
 icon_file = os.path.join("prim_app", "ui", "icons", "PRIM.ico")
+ic4_datas, ic4_binaries, ic4_hiddenimports = collect_all("imagingcontrol4")
 
 data_files = [
     (os.path.join("prim_app", "ui", "icons", "*"), os.path.join("prim_app", "ui", "icons")),
     (os.path.join("prim_app", "ui", "style.qss"), os.path.join("prim_app", "ui")),
-    (".primenv/Lib/site-packages/imagingcontrol4/*", "imagingcontrol4"),
     (os.path.join("prim_app", "docs", "*"), os.path.join("prim_app", "docs")),
 ]
+data_files += ic4_datas
 
 a = Analysis(
     [source_script],
     pathex=[],
-    binaries=[],
+    binaries=ic4_binaries,
     datas=data_files,
-    hiddenimports=["imagingcontrol4"],
+    hiddenimports=["imagingcontrol4"] + ic4_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -39,7 +42,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="PRIMAcquisition 2.0.1",
+    name="PRIMA",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -63,6 +66,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="PRIMAcquisition",
+    name="PRIMA",
 )
-

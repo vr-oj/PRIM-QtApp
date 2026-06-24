@@ -16,6 +16,12 @@ from PyQt5.QtWidgets import (
 
 from imagingcontrol4 import IC4Exception
 
+from utils.recording_settings import (
+    CAPTURE_SETTING_OPTIONS,
+    DEFAULT_CAPTURE_SETTING_CODE,
+    capture_setting_label,
+)
+
 log = logging.getLogger(__name__)
 
 
@@ -105,6 +111,16 @@ class CameraControlPanel(QWidget):
         self.framerate_spin.valueChanged.connect(self._on_framerate_changed)
         self.layout.addRow(self.framerate_label, self.framerate_spin)
 
+        self.capture_setting_label = QLabel("Capture:")
+        self.capture_setting_combo = QComboBox()
+        for code, label in CAPTURE_SETTING_OPTIONS:
+            self.capture_setting_combo.addItem(label, code)
+        default_label = capture_setting_label(DEFAULT_CAPTURE_SETTING_CODE)
+        default_index = self.capture_setting_combo.findText(default_label)
+        if default_index >= 0:
+            self.capture_setting_combo.setCurrentIndex(default_index)
+        self.layout.addRow(self.capture_setting_label, self.capture_setting_combo)
+
         self.pf_label = QLabel("Pixel Format:")
         self.pf_combo = QComboBox()
         self.pf_combo.setEnabled(False)
@@ -122,9 +138,43 @@ class CameraControlPanel(QWidget):
 
     def set_recording_state(self, recording):
         self.is_recording = recording
+        self.capture_setting_combo.setEnabled(not recording)
         log.debug(f"CameraControlPanel: is_recording set to {self.is_recording}")
 
-    def _setup_float_control(self, prop_id, spinbox, decimals=2, slider=None, to_ui=lambda x: x):
+    def disable_camera_controls(self):
+        """Disable camera-property controls while leaving capture selection available."""
+        for widget in (
+            self.exposure_spin,
+            self.exposure_slider,
+            self.ae_checkbox,
+            self.gain_spin,
+            self.gain_slider,
+            self.ag_checkbox,
+            self.framerate_spin,
+            self.pf_combo,
+        ):
+            widget.setEnabled(False)
+
+    def get_capture_setting(self):
+        """Return the selected Arduino capture setting as ``(code, label)``."""
+        code = self.capture_setting_combo.currentData()
+        try:
+            code = int(code)
+            label = capture_setting_label(code)
+        except (TypeError, ValueError):
+            code = DEFAULT_CAPTURE_SETTING_CODE
+            label = capture_setting_label(code)
+        return code, label
+
+    def _setup_float_control(
+        self,
+        prop_id,
+        spinbox,
+        decimals=2,
+        slider=None,
+        to_ui=lambda x: x,
+        fallback_step=None,
+    ):
         log.info(f"CameraControlPanel: Looking for property {prop_id}")
 
         try:
@@ -137,23 +187,29 @@ class CameraControlPanel(QWidget):
             max_val = to_ui(prop.maximum)
             cur_val = to_ui(prop.value)
 
-            # Try to use the property's increment if available; fall back to
-            # dividing the range into 100 steps which was the previous
-            # behaviour. Using the increment gives a much finer control for
-            # properties like ExposureTime that support very small steps.
-            step = 0.0
-            if hasattr(prop, "has_inc") and callable(getattr(prop, "has_inc")) and prop.has_inc():
-                try:
-                    step = to_ui(prop.get_inc())
-                except Exception:
-                    step = None
-            else:
-                try:
-                    step = to_ui(getattr(prop, "increment"))
-                except Exception:
-                    step = None
+            # Some IC4 properties are writable but do not implement increment
+            # queries. Use explicit UI steps for those controls to avoid noisy
+            # native "get_inc not implemented" messages.
+            step = fallback_step
+            if step is None:
+                if (
+                    hasattr(prop, "has_inc")
+                    and callable(getattr(prop, "has_inc"))
+                    and prop.has_inc()
+                ):
+                    try:
+                        step = to_ui(prop.get_inc())
+                    except Exception:
+                        step = None
+                else:
+                    try:
+                        step = to_ui(getattr(prop, "increment"))
+                    except Exception:
+                        step = None
             if not step or step <= 0.0:
                 step = (max_val - min_val) / 100.0
+            elif max_val > min_val:
+                step = min(step, max_val - min_val)
 
             spinbox.setRange(min_val, max_val)
             spinbox.setSingleStep(step)
@@ -204,9 +260,14 @@ class CameraControlPanel(QWidget):
             decimals=2,
             slider=self.exposure_slider,
             to_ui=lambda v: v / self._exp_unit_factor,
+            fallback_step=0.1,
         )
         self._gain_scale = self._setup_float_control(
-            "Gain", self.gain_spin, decimals=2, slider=self.gain_slider
+            "Gain",
+            self.gain_spin,
+            decimals=2,
+            slider=self.gain_slider,
+            fallback_step=0.1,
         )
 
         try:
@@ -226,7 +287,10 @@ class CameraControlPanel(QWidget):
         try:
             # Use the generic helper so missing 'increment' does not disable the control
             self._setup_float_control(
-                "AcquisitionFrameRate", self.framerate_spin, decimals=1
+                "AcquisitionFrameRate",
+                self.framerate_spin,
+                decimals=1,
+                fallback_step=0.1,
             )
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to init AcquisitionFrameRate: {e}")
@@ -349,4 +413,3 @@ class CameraControlPanel(QWidget):
                 self.gain_slider.blockSignals(False)
             except Exception as e:
                 log.debug(f"CameraControlPanel: refresh auto gain failed: {e}")
-

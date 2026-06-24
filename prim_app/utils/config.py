@@ -42,8 +42,8 @@ DEFAULT_SERIAL_BAUD_RATE = 115200
 SERIAL_COMMAND_TERMINATOR = b"\n"  # Arduino uses Serial.println()
 
 # ─── Application info ───────────────────────────────────────────────────────────
-APP_NAME = "PRIMAcquisition"
-APP_VERSION = "2.0.1"
+APP_NAME = "PRIMA"
+APP_VERSION = "3.0.0"
 ABOUT_TEXT = f"""
 <strong>{APP_NAME} v{APP_VERSION}</strong>
 <p>Passive Data Logger and Viewer for the PRIM system.</p>
