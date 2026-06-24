@@ -24,12 +24,12 @@ class RecordingSettingsTests(unittest.TestCase):
         expected = {
             "None": 0,
             "Every": 1,
-            "1 in 5": 2,
-            "1 in 10": 3,
-            "1 in 15": 4,
-            "1 in 20": 5,
-            "1 in 25": 6,
-            "1 in 30": 7,
+            "1 in 5": 5,
+            "1 in 10": 10,
+            "1 in 15": 15,
+            "1 in 20": 20,
+            "1 in 25": 25,
+            "1 in 30": 30,
         }
         self.assertEqual(
             dict((label, code) for code, label in CAPTURE_SETTING_OPTIONS),
@@ -39,10 +39,10 @@ class RecordingSettingsTests(unittest.TestCase):
             self.assertEqual(capture_setting_code(label), code)
 
     def test_build_recording_settings(self):
-        settings = build_recording_settings(9, 3)
+        settings = build_recording_settings(9, 10)
         self.assertEqual(settings.recording_fps, 9.0)
         self.assertEqual(settings.frame_interval_ms, 112)
-        self.assertEqual(settings.capture_setting_code, 3)
+        self.assertEqual(settings.capture_setting_code, 10)
         self.assertEqual(settings.capture_setting_label, "1 in 10")
         self.assertTrue(settings.record_video)
 
@@ -51,8 +51,14 @@ class RecordingSettingsTests(unittest.TestCase):
 
     def test_format_prim_command(self):
         self.assertEqual(format_prim_command("G", 100, 1), "<G, 100, 1>")
-        self.assertEqual(format_prim_command("s", 112, 3), "<S, 112, 3>")
+        self.assertEqual(format_prim_command("s", 112, 10), "<S, 112, 10>")
         self.assertEqual(format_prim_command("Z", 1000, 0), "<Z, 1000, 0>")
+
+    def test_old_menu_index_values_are_rejected(self):
+        with self.assertRaises(ValueError):
+            build_recording_settings(9, 3)
+        with self.assertRaises(ValueError):
+            format_prim_command("G", 100, 3)
 
 
 if __name__ == "__main__":

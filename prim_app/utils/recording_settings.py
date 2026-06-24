@@ -5,12 +5,12 @@ from dataclasses import dataclass
 CAPTURE_SETTING_OPTIONS = (
     (0, "None"),
     (1, "Every"),
-    (2, "1 in 5"),
-    (3, "1 in 10"),
-    (4, "1 in 15"),
-    (5, "1 in 20"),
-    (6, "1 in 25"),
-    (7, "1 in 30"),
+    (5, "1 in 5"),
+    (10, "1 in 10"),
+    (15, "1 in 15"),
+    (20, "1 in 20"),
+    (25, "1 in 25"),
+    (30, "1 in 30"),
 )
 
 DEFAULT_CAPTURE_SETTING_CODE = 1
@@ -41,7 +41,7 @@ def frame_interval_ms_from_fps(fps):
 def capture_setting_label(code):
     code = int(code)
     if code not in _CAPTURE_LABEL_BY_CODE:
-        raise ValueError(f"Capture setting code must be 0-7, got {code}.")
+        raise ValueError(f"Unknown capture setting value: {code}.")
     return _CAPTURE_LABEL_BY_CODE[code]
 
 
@@ -74,7 +74,7 @@ def format_prim_command(command_char, frame_interval_ms, capture_setting):
         raise ValueError("Frame interval must be greater than zero.")
     if capture_setting not in _CAPTURE_LABEL_BY_CODE:
         raise ValueError(
-            f"Capture setting code must be 0-7, got {capture_setting}."
+            f"Unknown capture setting value: {capture_setting}."
         )
 
     return f"<{command_char}, {frame_interval_ms}, {capture_setting}>"
