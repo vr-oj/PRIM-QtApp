@@ -63,6 +63,19 @@ def build_recording_settings(fps, capture_code=DEFAULT_CAPTURE_SETTING_CODE):
     )
 
 
+def should_capture_tiff_frame(sample_number, capture_setting):
+    """Return whether this 1-based serial sample should get a TIFF frame."""
+    sample_number = int(sample_number)
+    capture_setting = int(capture_setting)
+    if sample_number <= 0:
+        raise ValueError("Sample number must be greater than zero.")
+    if capture_setting == 0:
+        return False
+    if capture_setting not in _CAPTURE_LABEL_BY_CODE:
+        raise ValueError(f"Unknown capture setting value: {capture_setting}.")
+    return sample_number % capture_setting == 0
+
+
 def format_prim_command(command_char, frame_interval_ms, capture_setting):
     command_char = str(command_char).strip().upper()
     if command_char not in {"G", "S", "Z"}:

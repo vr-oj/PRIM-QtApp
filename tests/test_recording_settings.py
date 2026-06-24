@@ -11,6 +11,7 @@ from utils.recording_settings import (
     capture_setting_code,
     format_prim_command,
     frame_interval_ms_from_fps,
+    should_capture_tiff_frame,
 )
 
 
@@ -59,6 +60,14 @@ class RecordingSettingsTests(unittest.TestCase):
             build_recording_settings(9, 3)
         with self.assertRaises(ValueError):
             format_prim_command("G", 100, 3)
+
+    def test_should_capture_tiff_frame(self):
+        self.assertFalse(should_capture_tiff_frame(1, 0))
+        self.assertTrue(should_capture_tiff_frame(1, 1))
+        self.assertTrue(should_capture_tiff_frame(2, 1))
+        self.assertFalse(should_capture_tiff_frame(9, 10))
+        self.assertTrue(should_capture_tiff_frame(10, 10))
+        self.assertTrue(should_capture_tiff_frame(20, 10))
 
 
 if __name__ == "__main__":

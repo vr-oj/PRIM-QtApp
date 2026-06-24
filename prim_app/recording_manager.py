@@ -17,6 +17,7 @@ from utils.recording_csv import write_recording_csv_metadata_and_header
 from utils.recording_settings import (
     DEFAULT_CAPTURE_SETTING_CODE,
     capture_setting_label as get_capture_setting_label,
+    should_capture_tiff_frame,
 )
 
 log = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ class RecordingManager(QObject):
         self._last_device_time = 0
         self._frames_written = 0
         self._samples_written = 0
+        self._capture_samples_written = 0
         self._pending_samples = deque()
 
 
@@ -113,6 +115,7 @@ class RecordingManager(QObject):
         self._stop_requested = False
         self._frames_written = 0
         self._samples_written = 0
+        self._capture_samples_written = 0
         self._pending_samples.clear()
 
         tiff_msg = self._tiff_path if self.record_video else "disabled"
@@ -160,12 +163,20 @@ class RecordingManager(QObject):
 
         if self.csv_writer:
             try:
-                self.csv_writer.writerow([frameIdx, t_device, pressure])
-                self._last_device_time = t_device
                 self._samples_written += 1
-                if self.record_video:
+                tiff_frame = ""
+                if self.record_video and should_capture_tiff_frame(
+                    self._samples_written,
+                    self.capture_setting_code,
+                ):
+                    self._capture_samples_written += 1
+                    tiff_frame = self._capture_samples_written
                     # Include pressure so the frame metadata contains the full row
-                    self._pending_samples.append((frameIdx, t_device, pressure))
+                    self._pending_samples.append(
+                        (frameIdx, t_device, pressure, tiff_frame)
+                    )
+                self.csv_writer.writerow([frameIdx, t_device, pressure, tiff_frame])
+                self._last_device_time = t_device
 
             except Exception as e:
                 log.error(
@@ -190,11 +201,17 @@ class RecordingManager(QObject):
                 arr = self._qimage_to_numpy(qimage)
                 if self._first_frame_shape is None:
                     self._first_frame_shape = arr.shape
-                frameIdx, t_device, pressure = self._pending_samples.popleft()
+                (
+                    frameIdx,
+                    t_device,
+                    pressure,
+                    tiff_frame,
+                ) = self._pending_samples.popleft()
                 metadata = {
                     "frameIdx": frameIdx,
                     "deviceTime": t_device,
                     "pressure": pressure,
+                    "tiffFrame": tiff_frame,
                 }
                 self.tif_writer.write(arr, description=json.dumps(metadata))
                 self._frame_counter += 1
@@ -258,7 +275,7 @@ class RecordingManager(QObject):
 
         if (
             self._stop_requested
-            and self._frames_written == self._samples_written
+            and self._frames_written == self._capture_samples_written
             and not self._pending_samples
         ):
 
