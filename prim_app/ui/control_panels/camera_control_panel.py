@@ -166,7 +166,15 @@ class CameraControlPanel(QWidget):
             label = capture_setting_label(code)
         return code, label
 
-    def _setup_float_control(self, prop_id, spinbox, decimals=2, slider=None, to_ui=lambda x: x):
+    def _setup_float_control(
+        self,
+        prop_id,
+        spinbox,
+        decimals=2,
+        slider=None,
+        to_ui=lambda x: x,
+        fallback_step=None,
+    ):
         log.info(f"CameraControlPanel: Looking for property {prop_id}")
 
         try:
@@ -179,23 +187,29 @@ class CameraControlPanel(QWidget):
             max_val = to_ui(prop.maximum)
             cur_val = to_ui(prop.value)
 
-            # Try to use the property's increment if available; fall back to
-            # dividing the range into 100 steps which was the previous
-            # behaviour. Using the increment gives a much finer control for
-            # properties like ExposureTime that support very small steps.
-            step = 0.0
-            if hasattr(prop, "has_inc") and callable(getattr(prop, "has_inc")) and prop.has_inc():
-                try:
-                    step = to_ui(prop.get_inc())
-                except Exception:
-                    step = None
-            else:
-                try:
-                    step = to_ui(getattr(prop, "increment"))
-                except Exception:
-                    step = None
+            # Some IC4 properties are writable but do not implement increment
+            # queries. Use explicit UI steps for those controls to avoid noisy
+            # native "get_inc not implemented" messages.
+            step = fallback_step
+            if step is None:
+                if (
+                    hasattr(prop, "has_inc")
+                    and callable(getattr(prop, "has_inc"))
+                    and prop.has_inc()
+                ):
+                    try:
+                        step = to_ui(prop.get_inc())
+                    except Exception:
+                        step = None
+                else:
+                    try:
+                        step = to_ui(getattr(prop, "increment"))
+                    except Exception:
+                        step = None
             if not step or step <= 0.0:
                 step = (max_val - min_val) / 100.0
+            elif max_val > min_val:
+                step = min(step, max_val - min_val)
 
             spinbox.setRange(min_val, max_val)
             spinbox.setSingleStep(step)
@@ -246,9 +260,14 @@ class CameraControlPanel(QWidget):
             decimals=2,
             slider=self.exposure_slider,
             to_ui=lambda v: v / self._exp_unit_factor,
+            fallback_step=0.1,
         )
         self._gain_scale = self._setup_float_control(
-            "Gain", self.gain_spin, decimals=2, slider=self.gain_slider
+            "Gain",
+            self.gain_spin,
+            decimals=2,
+            slider=self.gain_slider,
+            fallback_step=0.1,
         )
 
         try:
@@ -268,7 +287,10 @@ class CameraControlPanel(QWidget):
         try:
             # Use the generic helper so missing 'increment' does not disable the control
             self._setup_float_control(
-                "AcquisitionFrameRate", self.framerate_spin, decimals=1
+                "AcquisitionFrameRate",
+                self.framerate_spin,
+                decimals=1,
+                fallback_step=0.1,
             )
         except Exception as e:
             log.warning(f"CameraControlPanel: Failed to init AcquisitionFrameRate: {e}")
