@@ -1,9 +1,5 @@
 # PRIMA
 
-PRIMA is the desktop acquisition app for the PRIM system. The repository is
-still named PRIMAcquisition, but the installed application is shown to users as
-PRIMA.
-
 PRIMA records synchronized pressure data from the Arduino-controlled PRIM
 device and live camera imagery from The Imaging Source DMK cameras. Recordings
 are saved as CSV pressure logs and, when enabled, TIFF video stacks for playback
